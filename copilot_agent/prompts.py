@@ -22,7 +22,7 @@ class PromptBuilder:
         state.data['guidance_manifest'] = self.manifest
         state.data['guidance_bundle'] = self.bundle
         state.data['constraints'] = ['Never delete files; no credentials or authentication bypass.',
-                                     'Code Runner requires immutable user approval and supports Python subset only.',
+                                     'Code Runner defaults to python_subset. Every local_python script requires exact immutable explicit approval and declared scope.',
                                      'Permitted file roots: ' + ', '.join(config.allowed_roots),
                                      'Permitted browser domains: ' + ', '.join(config.allowed_domains),
                                      'Useful Findings accepted anytime; current file sent every tenth submitted message.']

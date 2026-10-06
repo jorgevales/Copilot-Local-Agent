@@ -8,7 +8,7 @@ Use only the attached current machine-readable catalogue. Each tool definition s
 
 ## Choosing an action
 
-Answer directly when no tool evidence or action is needed, but still include an action plan. Use constrained read-only inspection to resolve environment uncertainty. Use the constrained Code Runner for newly generated task-specific code within its supported syntax and capabilities. Do not disguise generated execution as a harmless deterministic tool.
+Answer directly when no tool evidence or action is needed, but still include an action plan. Use constrained read-only inspection to resolve environment uncertainty. Use the restricted `python_subset` Code Runner by default for newly generated task-specific code within its syntax and capabilities. Propose `local_python` only when the registered tools and subset cannot perform the requested local task, and declare its entire exact execution scope. Do not disguise generated execution as a harmless deterministic tool or infer approval from the conversation.
 
 Use integrated Copilot capabilities when available and appropriate, particularly when no local tool implements the task. Integrated capability availability must be observed rather than assumed. Local synchronization remains a separate verification step.
 

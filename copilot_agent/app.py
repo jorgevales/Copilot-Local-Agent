@@ -21,13 +21,18 @@ from .storage import default_storage, discover_onedrive_accounts, machine_key, r
 from . import reused_browser as edge
 from .setup_resources import choose_account, choose_edge
 
+_TERMINAL = Feedback()
 
 def system(message):
-    Feedback().emit('System', message)
+    _TERMINAL.emit('System', message)
+
+
+def error(message):
+    _TERMINAL.emit('Error', message)
 
 
 async def ask(prompt: str) -> str:
-    return await asyncio.to_thread(input, '[User] ' + prompt)
+    return await asyncio.to_thread(input, _TERMINAL.prompt('User', prompt))
 
 
 async def choose_browser_endpoint(config, args, settings):
@@ -193,7 +198,7 @@ async def run(args):
         enabled = [m for m in ranked if m.get('enabled', True)]
         if not enabled:
             raise RuntimeError('No enabled Copilot models were discovered')
-        system('\nModels actually discovered in this account:')
+        system('Models actually discovered in this account:')
         for i, model in enumerate(models, 1):
             system(f"{i}. {model['label']}" + (' (unavailable)' if not model.get('enabled', True) else ''))
         preferred = next((m for m in enabled if m['label'] == config.model), enabled[0])
@@ -224,7 +229,7 @@ async def run(args):
         state.event('model_selected', label=chosen['label'], visible=True)
         orchestrator = Orchestrator(config, browser, ToolRegistry(), state)
         await orchestrator.initialize()
-        system('\nType your request and press Enter. For files, type :attach to open Choose files, then type your request.')
+        system('Type your request and press Enter. For files, type :attach to open Choose files, then type your request.')
         system('Commands: :new [first message], :attach, :files, :remove <number>, :clear, :status, :exit. Advanced: :attach <path>, :resolve <call_id> completed|not_executed')
         pending_files = orchestrator.attachment_queue()
         def show_files():
@@ -237,7 +242,7 @@ async def run(args):
                 system('Now type your request. You will review this exact file batch once before upload. :remove <number> or :clear changes the queue.')
         while True:
             try:
-                text = (await ask('\nYou: ')).strip()
+                text = (await ask('You: ')).strip()
                 if not text:
                     continue
                 if text.lower() in {':exit', 'exit', 'quit'}:
@@ -291,7 +296,7 @@ async def run(args):
                     pending_files.clear()
             except (ValueError, RuntimeError, OSError) as exc:
                 state.event('turn_error', error=str(exc))
-                system('Action stopped: ' + str(exc))
+                error('Action stopped: ' + str(exc))
                 system('Session evidence was retained in your selected OneDrive storage.')
                 if state.data['status'] == 'closed':
                     system('The previous session was archived. Restart the application to try a fresh session.')

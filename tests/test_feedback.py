@@ -44,6 +44,32 @@ class PreviewTests(unittest.TestCase):
         self.assertNotIn('\x1b',lines[0])
         self.assertNotIn('\r',lines[0])
 
+    def test_plain_text_fallback_has_distinct_labels_without_ansi_or_markup(self):
+        lines=[]
+        feedback=Feedback(lines.append,color=False)
+        for actor in ('System','Orchestrator','Copilot','User','Approval','Error'):
+            feedback.emit(actor,'**Readable** `text`\n\n\nnext')
+        self.assertEqual(6,len(lines))
+        for actor,line in zip(('System','Orchestrator','Copilot','User','Approval','Error'),lines):
+            self.assertIn('['+actor+'] Readable text',line)
+            self.assertNotIn('\x1b',line)
+            self.assertNotIn('**',line)
+            self.assertNotIn('`',line)
+            self.assertNotIn('\n\n\n',line)
+
+    def test_colour_mode_uses_distinct_label_backgrounds(self):
+        lines=[]
+        feedback=Feedback(lines.append,color=True)
+        for actor in ('System','Orchestrator','Copilot','User','Approval','Error','Tool/code_runner'):
+            feedback.emit(actor,'message')
+        styles=[__import__('re').findall(r'\x1b\[([0-9;]+)m',line)[2] for line in lines]
+        self.assertTrue(all('\x1b[' in line and '\x1b[0m' in line for line in lines))
+        self.assertEqual(7,len(set(styles)))
+
+    def test_malformed_or_incomplete_protocol_never_renders_raw_markup_as_a_result(self):
+        self.assertEqual({},public_preview(BEGIN+'\n```json\n{"session_id":"s","request_id":"r","user_response":"unfinished','s','r'))
+        self.assertEqual({},public_preview('```json\n{"user_response":"not enveloped"}\n```','s','r'))
+
 
 class FeedbackIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_live_preview_is_attributed_deduplicated_and_cannot_execute(self):
@@ -56,7 +82,7 @@ class FeedbackIntegrationTests(unittest.IsolatedAsyncioTestCase):
         app._live_feedback(event)
         app._live_feedback(event)
         self.assertEqual(2,len(lines))
-        self.assertTrue(all('[Copilot (Agent)] Live preview' in line for line in lines))
+        self.assertTrue(all('[Copilot] UNVALIDATED PREVIEW' in line for line in lines))
         self.assertEqual([],registry.calls)
         self.assertEqual(0,state.message_count)
         self.assertEqual([],state.data['response_ids'])

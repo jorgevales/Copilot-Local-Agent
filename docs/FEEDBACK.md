@@ -1,37 +1,42 @@
-# Verbose feedback and participant roles
+# Terminal feedback and participant roles
 
-Feedback is enabled throughout the terminal conversation. Every emitted line has a UTC time and an actor label, including multiline text; terminal control characters in untrusted content are escaped so a reply cannot erase output or impersonate another actor.
+Feedback is enabled throughout the terminal conversation. Every emitted line has a UTC time and actor label. Interactive terminals receive distinct readable ANSI foreground/background colours; redirected output, unsupported terminals, `NO_COLOR`, and `TERM=dumb` receive the same labels in plain text. Terminal control characters in untrusted content are escaped, repeated blank lines are collapsed, and common Markdown chrome is removed from the normal view.
 
 | Actor | Meaning |
 |---|---|
 | `User` | Human input and explicit choices, including model selection, approvals and session commands. |
-| `Copilot (Agent)` | Copilot's public reply, task interpretation, concise decision summary, assumptions, action plan and risk summary. Proposed actions are distinguished from performed actions. |
-| `Orchestrator` | Local coordination: submission ordinal, response validation, correction, findings acceptance, tool dispatch, denial and stopping conditions. |
-| `System` | Browser/startup status, visible generation status, file upload metadata, configuration and infrastructure errors. |
-| `Tool/<name>` | An actual local tool's start, arguments, authorization basis, factual result and error; for example `Tool/system.versions`. |
+| `Copilot` | Copilot's public reply, task interpretation, concise decision summary, assumptions, action plan and risk summary. Proposed actions are distinct from performed actions. |
+| `Orchestrator` | Local coordination: submission ordinal, response validation, findings acceptance, dispatch, denial and stopping conditions. |
+| `System` | Browser/startup status, visible generation status, upload metadata and ordinary infrastructure information. |
+| `Approval` | Exact immutable approval scope and every full proposed script with SHA-256. |
+| `Error` | Rejected protocol, stopped action or other failure needing attention. |
+| `Tool/<name>` | Concise actual start, authorization basis, status, output paths, verification summary, error and audit reference. |
+
+## Structured normal view
+
+When a validated response parses reliably, the terminal renders short sections such as `PROPOSED ACTION`, `EXPLICIT APPROVAL REQUIRED`, `STARTING`, `RESULT`, and `FINAL RESULT`. Fields are limited to the task, action, purpose, authority, status, output paths, verification and errors. Long protocol arguments and complete results remain in the session state/events and immutable approval/audit files instead of flooding the normal view.
+
+Code is the deliberate exception: the approval view prints every exact script in full between clear begin/end lines and shows its SHA-256. It also shows the interpreter, argv, permissions, file/network/process/desktop scope, expected effects, plan hash and retained full-preview path. Choosing a plan approves only the complete scripts already displayed.
 
 ## Live Copilot output
 
-The browser reports changing request-correlated assistant text during its capture loop, rather than waiting for final validation. The orchestrator incrementally reads completed top-level public JSON values after matching the current session and request identities. It displays new or changed public fields immediately and suppresses repeated identical samples. Incomplete strings remain buffered, preserving escapes and allowing secret redaction before display. Tool requests, scripts and hidden reasoning are not streamed as decision summaries.
+The browser reports changing request-correlated assistant text during capture. The orchestrator reads only completed top-level public JSON values after matching the current session and request identities. New values are visibly prefixed `UNVALIDATED PREVIEW`; incomplete strings remain buffered, malformed/incomplete envelopes execute nothing, and tool requests/scripts/hidden reasoning are never streamed as authority. Identical preview text is not printed again when the final envelope validates; the terminal says that the preview is validated.
 
-Example output:
+Example plain-text output:
 
 ```text
 [14:52:01] [Orchestrator] Sending message 3 (user_turn), with 0 attachment(s).
 [14:52:02] [System] Copilot is generating a response.
-[14:52:03] [Copilot (Agent)] Live preview (unvalidated) | Decision summary: Inspect the local version first.
-[14:52:04] [Copilot (Agent)] Live preview (unvalidated) | Action plan: 1. Request system.versions (verify: use its actual result)
-[14:52:06] [Orchestrator] Validated response: tool_request; findings accepted=0.
-[14:52:06] [Tool/system.versions] Starting versions-one under read-only policy. Arguments: {}
-[14:52:06] [Tool/system.versions] Outcome: {"ok": true, "tool": "system.versions", "result": {"python": "3.14.2"}}
+[14:52:03] [Copilot] UNVALIDATED PREVIEW — Task
+[14:52:03] [Copilot]   Capture three physical displays and keep three viewers on display 2.
+[14:52:06] [Copilot] PROPOSED ACTION
+[14:52:06] [Copilot]   Action: 1. Inspect versions | verify: use the actual result
+[14:52:07] [Tool/system.versions] RESULT
+[14:52:07] [Tool/system.versions]   Status: completed
 ```
 
-This example explains the format; actual live evidence is in `TEST_REPORT.md`. Code approval displays its full immutable plan and script preview with the same participant labels. Final output is explicitly labelled a validated reply.
+## Authority and retention
 
-## Authority and limits
+A live preview is display data only. It cannot execute a tool, change the message counter, grant approval or replace authoritative state. Only one complete current validated envelope can dispatch actions. Malformed responses receive bounded correction and an `Error` entry.
 
-A live preview is unvalidated display data. It cannot execute a tool, change the message counter, grant approval or replace authoritative state. The existing strict complete-response validator and policy/approval gates still govern actions. Malformed responses receive bounded correction and clearly attributed diagnostics.
-
-The app shows publicly visible response fields and generation status. It does not request private chain-of-thought or click hidden reasoning panes. Copilot may buffer code-preview rendering; feedback advances when the UI exposes readable content, rather than inventing unavailable text. This is field-level live streaming with status updates, not a promise of token-by-token access.
-
-Feedback events are recorded in the session's redacted `events.jsonl` with request identity and preview validation status. Tool outputs are bounded and redacted; full authoritative results and retained artifact references remain in session state. Session starts, `:new`, and exits preserve records without deletion.
+The app shows public fields and generation status, not private chain-of-thought. UI buffering can delay fields. Feedback events are recorded in redacted `events.jsonl`; full authoritative tool results, approval JSON and local-Python audit receipts remain in session storage. Session changes and exit preserve records without deleting files.

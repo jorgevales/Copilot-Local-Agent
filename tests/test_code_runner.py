@@ -1,8 +1,15 @@
+import asyncio
 import hashlib
+import json
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from copilot_agent.code_runner import CodeRunner, FIELDS, OPTIONAL, REQUIRED
+from copilot_agent.local_python_runner import ManagedProcessRegistry
 from copilot_agent.policy import PathPolicy, PolicyError
 
 
@@ -111,7 +118,8 @@ class CodeRunnerTests(unittest.TestCase):
         self.assertEqual(original,source.read_bytes())
 
     def test_source_fields_are_optional_paired_and_script_stays_required(self):
-        self.assertEqual({"subprocesses","source_path","source_sha256"},OPTIONAL)
+        self.assertEqual({"subprocesses","source_path","source_sha256","interpreter","arguments","imports",
+                          "modify_paths","timeout_seconds","max_output_chars","expected_effects","viewer_windows"},OPTIONAL)
         self.assertEqual(FIELDS-OPTIONAL,REQUIRED)
         self.assertIn("script",REQUIRED)
         _,args=self.source_plan()
@@ -187,3 +195,145 @@ class CodeRunnerTests(unittest.TestCase):
         self.assertEqual("failed",result["status"])
         self.assertEqual(prepared["source_verification"],result["source_verification"])
         self.assertEqual([],result["created_paths"])
+
+
+class LocalPythonRunnerTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="copilot_local_python_test_"))
+        self.registry = ManagedProcessRegistry(self.root)
+        self.runner = CodeRunner(PathPolicy([self.root]), self.root,
+                                 {"tool_timeout": 5, "max_output_chars": 4000})
+
+    def plan(self, script, **updates):
+        value = {"script":script, "purpose":"Synthetic approved local Python test", "language":"local_python",
+                 "working_directory":str(self.root), "read_paths":[], "create_paths":[], "modify_paths":[],
+                 "expected_outputs":[], "commands":[], "subprocesses":[], "network_destinations":[],
+                 "permissions":[], "risk_summary":"Exact synthetic local process only.",
+                 "recovery_notes":"Stop owned processes and retain audit evidence.",
+                 "interpreter":sys.executable, "arguments":[], "imports":[], "timeout_seconds":3,
+                 "max_output_chars":2000, "expected_effects":["bounded stdout"], "viewer_windows":[]}
+        value.update(updates)
+        return value
+
+    def run_plan(self, plan):
+        prepared = self.runner.prepare(plan)
+        return asyncio.run(self.runner.run_async(plan, prepared["proposal_hash"], process_registry=self.registry))
+
+    def test_declared_import_arguments_and_created_output_are_executed_and_verified(self):
+        plan = self.plan("import sys\nfrom pathlib import Path\nPath('result.txt').write_text(sys.argv[1], encoding='utf-8')\nprint(sys.argv[1])\n",
+                         imports=["sys", "pathlib"], arguments=["approved-value"],
+                         create_paths=["result.txt"], expected_outputs=["result.txt"],
+                         permissions=["create_files"], expected_effects=["Create result.txt", "Print approved-value"])
+        result = self.run_plan(plan)
+        self.assertEqual("completed", result["status"], result)
+        self.assertEqual(["approved-value"], result["stdout"].splitlines())
+        self.assertEqual("approved-value", (self.root / "result.txt").read_text(encoding="utf-8"))
+        self.assertEqual(hashlib.sha256(b"approved-value").hexdigest(), result["outputs"][0]["sha256"])
+        self.assertTrue(Path(result["audit_path"]).is_file())
+        audit = json.loads(Path(result["audit_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(result["proposal_hash"], audit["prepared"]["proposal_hash"])
+        self.assertEqual(sys.executable, result["interpreter"])
+
+    def test_undeclared_import_file_scope_network_and_shell_fail_closed(self):
+        with self.assertRaisesRegex(PolicyError, "undeclared import"):
+            self.runner.prepare(self.plan("import os\n", imports=[]))
+        with self.assertRaises(PolicyError):
+            self.runner.prepare(self.plan("print('x')", network_destinations=["https://example.com"], permissions=[]))
+        with self.assertRaises(PolicyError):
+            self.runner.prepare(self.plan("print('x')", commands=["whoami"]))
+        result = self.run_plan(self.plan("open('undeclared.txt', 'w').write('x')\n"))
+        self.assertEqual("failed", result["status"])
+        self.assertIn("outside the approved", result["stderr"])
+        self.assertFalse((self.root / "undeclared.txt").exists())
+
+    def test_interpreter_arguments_permissions_and_runtime_binding_change_hash(self):
+        plan = self.plan("print('one')\n")
+        prepared = self.runner.prepare(plan)
+        self.assertIn("interpreter_sha256", prepared["runtime_binding"])
+        for changed in ({**plan, "script":"print('two')\n"},
+                        {**plan, "arguments":["changed"]},
+                        {**plan, "expected_effects":["changed effect"]}):
+            with self.subTest(changed=changed):
+                self.assertNotEqual(prepared["proposal_hash"], self.runner.prepare(changed)["proposal_hash"])
+                with self.assertRaises(PolicyError):
+                    asyncio.run(self.runner.run_async(changed, prepared["proposal_hash"], process_registry=self.registry))
+
+    def test_timeout_returns_cancelled_and_retains_audit(self):
+        plan = self.plan("import time\ntime.sleep(30)\n", imports=["time"], timeout_seconds=1)
+        result = self.run_plan(plan)
+        self.assertEqual("cancelled", result["status"])
+        self.assertIsNone(result["exit_code"] if result["exit_code"] is None else None)
+        self.assertTrue(Path(result["audit_path"]).is_file())
+
+    def test_task_cancellation_stops_worker_and_records_cancelled_audit(self):
+        async def exercise():
+            plan = self.plan("import time\ntime.sleep(30)\n", imports=["time"], timeout_seconds=5)
+            prepared = self.runner.prepare(plan)
+            task = asyncio.create_task(self.runner.run_async(plan, prepared["proposal_hash"], process_registry=self.registry))
+            await asyncio.sleep(.2)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        asyncio.run(exercise())
+        audits = list((self.root / "code_runs").glob("*/audit.json"))
+        self.assertEqual(1, len(audits))
+        self.assertEqual("cancelled", json.loads(audits[0].read_text(encoding="utf-8"))["status"])
+
+    def test_managed_persistent_process_cleanup(self):
+        process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.registry.register({"pid":process.pid, "persistent":True, "purpose":"synthetic cleanup child"})
+        outcomes = self.registry.cleanup_all()
+        process.wait(timeout=5)
+        self.assertTrue(outcomes[0]["stopped"])
+        self.assertEqual({}, self.registry.records)
+
+    def test_three_viewers_on_display_two_require_independent_verification(self):
+        class FakeRegistry:
+            def __init__(self): self.registered, self.cleaned = [], []
+            def register(self, item): self.registered.append(item)
+            def cleanup(self, items): self.cleaned.extend(items); return [{"pid":item["pid"],"stopped":True} for item in items]
+        fake = FakeRegistry()
+        names = ["display-1.png", "display-2.png", "display-3.png"]
+        script = "from pathlib import Path\n" + "\n".join("Path(%r).write_bytes(b'PNG evidence %d')" % (name, index) for index, name in enumerate(names, 1)) + "\n"
+        viewers = [{"title":"Approved capture " + str(index), "image_path":name, "display_index":2}
+                   for index, name in enumerate(names, 1)]
+        plan = self.plan(script, imports=["pathlib"], create_paths=names, expected_outputs=names,
+                         permissions=["create_files","window_management","persistent_processes"],
+                         viewer_windows=viewers, expected_effects=["Create three captures", "Keep three viewers visible on display 2"])
+        prepared = self.runner.prepare(plan)
+        launched = [{"pid":9000 + index, "title":item["title"], "display_index":2,
+                     "image_path":str((self.root / names[index]).resolve()), "persistent":True}
+                    for index, item in enumerate(viewers)]
+        observed = {"ok":True, "display_count":3, "displays":[{"display_index":2}],
+                    "windows":[{"title":item["title"], "visible":True, "contained_on_display":True,
+                                "display_index":2, "image_path":str((self.root / names[index]).resolve())}
+                               for index, item in enumerate(viewers)]}
+        with patch("copilot_agent.local_python_runner.launch_viewers", return_value=launched), \
+             patch("copilot_agent.local_python_runner.inspect_windows", return_value=observed):
+            result = asyncio.run(self.runner.run_async(plan, prepared["proposal_hash"], process_registry=fake))
+        self.assertEqual("completed", result["status"], result)
+        self.assertEqual(3, len(result["outputs"]))
+        self.assertTrue(result["verification"]["ok"])
+        self.assertEqual({2}, {item["display_index"] for item in result["verification"]["windows"]})
+        self.assertEqual(3, len(fake.registered))
+
+    def test_failed_window_verification_cleans_persistent_viewers(self):
+        class FakeRegistry:
+            def __init__(self): self.cleaned = []
+            def register(self, item): raise AssertionError("failed viewers must not persist")
+            def cleanup(self, items): self.cleaned.extend(items); return [{"pid":item["pid"],"stopped":True} for item in items]
+        fake = FakeRegistry()
+        plan = self.plan("from pathlib import Path\nPath('capture.png').write_bytes(b'evidence')\n", imports=["pathlib"],
+                         create_paths=["capture.png"], expected_outputs=["capture.png"],
+                         permissions=["create_files","window_management","persistent_processes"],
+                         viewer_windows=[{"title":"Missing viewer","image_path":"capture.png","display_index":2}],
+                         expected_effects=["Verify viewer"])
+        prepared = self.runner.prepare(plan)
+        launched = [{"pid":9100,"title":"Missing viewer","display_index":2,
+                     "image_path":str((self.root / 'capture.png').resolve()),"persistent":True}]
+        with patch("copilot_agent.local_python_runner.launch_viewers", return_value=launched), \
+             patch("copilot_agent.local_python_runner.inspect_windows", return_value={"ok":False,"display_count":3,"displays":[],"windows":[]}):
+            result = asyncio.run(self.runner.run_async(plan, prepared["proposal_hash"], process_registry=fake))
+        self.assertEqual("failed", result["status"])
+        self.assertEqual(1, len(fake.cleaned))

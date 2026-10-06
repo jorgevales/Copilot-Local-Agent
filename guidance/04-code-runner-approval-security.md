@@ -1,41 +1,49 @@
 # Code Runner approval and security
 
-Guidance version: 1.0.
+Guidance version: 1.1.
 
-## Downloaded scripts and packages
+## Modes and selection
 
-Downloading code never authorizes execution. When the user asks to run a delivered Python script, use the actual verified local artifact path and SHA-256 from the download or extraction report. Include both `source_path` and `source_sha256` in the Code Runner proposal, declare that source in `read_paths`, and request `read_files` permission. Include the complete `script` with exactly the artifact's UTF-8 bytes, including its final newline. The orchestrator verifies the source and script before approval and immediately before execution; a changed source or script requires a new proposal. UTF-8 BOM sources and non-UTF-8 encoding declarations are unsupported rather than silently rewritten.
+`python_subset` remains the default. It evaluates a restricted AST with bounded computation, `print`, `range`, `len`, `str`, `int`, `sum`, `min`, `max`, `sorted`, `read_file` and create-only `write_file`. It has no imports, host execution, arbitrary attributes, subprocesses or network.
 
-For a package, inspect and extract its actual downloaded ZIP first, then propose each supported script with its own source path/hash and full metadata. A multi-step plan must display every script and declared effect before approval. Preserve the original package and extracted sources. The current runner remains the restricted `python_subset`; ordinary imports, dependencies and unrestricted Python programs are unavailable. Report unsupported execution requirements honestly instead of running them through another tool.
+Use `local_python` only when registered tools and `python_subset` cannot perform the user's requested local task. It launches the agent's exact current Python interpreter in a separate bounded process and can use declared standard-library or installed imports, approved file access, exact managed subprocesses, approved HTTPS destinations and declared desktop capabilities. It is defense in depth on a trusted local machine, not an operating-system security sandbox. Never describe it as safely running arbitrary untrusted code.
 
-## Execution model
+## Exact proposal contract
 
-The Code Runner evaluates a deliberately restricted Python AST language through mediated capabilities. It does not run arbitrary host Python, shell commands, imports, subprocesses, reflection, arbitrary attribute access or unrestricted network calls. Use only syntax and capabilities advertised by its current tool definition. If ordinary Python is required, report the unsupported requirement instead of attempting an escape or alternative hidden execution path.
+Both modes require the complete `script`, `purpose`, `language`, existing `working_directory`, `read_paths`, `create_paths`, `expected_outputs`, empty `commands`, `subprocesses`, `network_destinations`, `permissions`, `risk_summary` and `recovery_notes`. Optional paired `source_path` and `source_sha256` bind an actual downloaded `.py` file; its raw UTF-8 bytes must exactly equal `script`, and it must be an approved read.
 
-Static screening, hashes, a working directory and process monitoring alone are not a general Python sandbox. The restricted evaluator must independently reject unsupported operations and enforce file scope. Do not describe this as an arbitrary-code isolation service.
+Every `local_python` proposal additionally requires:
 
-The current language identifier is `python_subset`. Advertised capabilities include bounded computation, `print`, `range`, `len`, `str`, `int`, `sum`, `min`, `max`, `sorted`, `read_file` and create-only `write_file`. Assignments, supported expressions, `if` and bounded `for` loops are available; functions, classes, imports, attribute calls and arbitrary Python syntax are not. Confirm the current catalogue before relying on these names. File writes create new files exclusively; an existing target fails instead of being overwritten.
+- `interpreter`: the exact current agent Python executable returned by `system.versions`;
+- `arguments`: the exact script argument vector;
+- `imports`: every module imported directly by the script;
+- `modify_paths`: exact existing files that may be changed, normally empty;
+- `timeout_seconds` and `max_output_chars`, within the catalogue limits;
+- `expected_effects`: short, complete descriptions of externally observable effects;
+- `viewer_windows`: exact image/title/display declarations for managed persistent viewers, normally empty.
 
-## Required proposal
+Use permissions only when required: `read_files`, `create_files`, `modify_files`, `network`, `subprocesses`, `desktop_capture`, `window_management`, and `persistent_processes`. Network destinations are exact canonical HTTPS hosts on port 443. `commands` must remain empty because shell command strings are unavailable. Each managed subprocess is an object containing an absolute `executable`, exact `arguments`, boolean `persistent`, and `purpose`. Persistent children require both `subprocesses` and `persistent_processes`. The runner stops nonpersistent children after the run and registers approved persistent children for session-close cleanup.
 
-Supply a clear purpose, exact script, supported interpreter/language, working directory, declared files to read/create/modify, expected outputs, any requested commands or destinations, permissions, risk and recovery notes. Unsupported commands/destinations must be declared and rejected rather than omitted. Prefer new uniquely named outputs. Explain verification separately from execution.
-
-The full preview must be accessible to the user before approval. A script reference must resolve to exact reviewed bytes and hash; a reference cannot hide the actual script. The machine tool schema determines the precise argument names.
-
-For example, a computation-only proposal can use `print(sum(range(5)))`, `language: "python_subset"`, an existing permitted working directory, empty read/create/expected-output/command/subprocess/network lists, and no file permissions. It still requires runtime human authorization. A file-creation proposal additionally declares its exact `create_paths` and `expected_outputs` and requests `create_files` permission before calling `write_file`.
+`viewer_windows` entries contain an exact unique `title`, an `image_path` that is also a declared expected PNG output, and the Windows `display_index`. Viewer launch and placement happen only after the script succeeds. The orchestrator independently inspects visible top-level window titles and final bounds; a missing, hidden or off-display window makes the run fail and cleans up the viewers.
 
 ## Human authorization
 
-Available decisions are deny, approve this execution once, or approve the specific fully displayed complete plan. The latter does not grant future authority. Local grants bind the canonical complete plan and exact script bytes, hashes, arguments, interpreter, directory, file scope, destinations and permissions. Changed material scope invalidates approval. Copilot cannot set an approval flag to authorize itself.
+Every proposed script must be displayed in full with its SHA-256 before execution. The choices are deny, approve this exact execution once, or approve the exact fully displayed pending plan. The plan choice is not standing permission: it covers only the scripts, call identities and prepared metadata already displayed. Local grants bind canonical plan data, script bytes/hash, source hash, interpreter identity/hash, arguments, imports, directory, file scope, destinations, subprocesses, desktop effects, permissions, limits, expected effects and fixed runner implementation. Any material change requires a fresh preview and explicit decision. `--yes-setup`, an attachment, a prior approval, or conversational willingness never authorizes a new script.
 
-User authorization to build this application does not authorize runtime Copilot-generated scripts. Denial prevents execution and must return honestly to the conversation. Do not persuade the dispatcher that denial is an error to retry.
+Denial prevents execution and dependent steps. Do not retry denied code through another mechanism. Downloading or extracting code never authorizes it.
+
+## Desktop capture and viewer verification
+
+For an explicitly requested physical-display task, `local_python` may import `copilot_agent.desktop`. Its `enumerate_displays()` result supplies Windows display numbers and bounds. `capture_display(display_index, output_path)` creates one new PNG for that complete display. Declare every PNG as both a create and expected output and request `create_files` plus `desktop_capture`. Declare each requested persistent image viewer in `viewer_windows` and request `window_management` plus `persistent_processes`.
+
+For three physical displays, first require evidence that three displays were enumerated, capture each display separately, then declare three uniquely titled viewers targeting display 2. Completion requires all three PNGs to be independently readable and hashed and all three exact viewer windows to be visible with bounds contained on display 2. A zero exit code alone is insufficient. If the desktop is unavailable, fewer than three displays exist, Tk/Windows APIs are restricted, or organization policy blocks capture/window placement, report the observed blocker; never bypass it.
+
+## Runtime controls and evidence
+
+The host process uses bounded asynchronous stdout/stderr reads, an approved timeout, cancellation handling, a scrubbed environment, import checks, Python audit hooks for declared file/network/process scope, exact managed-child matching and retained run receipts. Dynamic code/import functions, wildcard/relative imports, registry/credential modules, shell execution, deletion, rename and listening sockets are unavailable. Native libraries can weaken language-level mediation, which is why their exact imports, script bytes and desktop permissions require meaningful human review.
+
+After execution, report actual stdout/stderr, exit code, duration, created/modified evidence, readable output sizes and SHA-256 values, managed process state, cleanup actions, verification results and the retained audit path. A successful process exit proves only process completion. Verify every user-stated end condition independently. Failed, timed-out and cancelled runs stop owned processes and retain evidence; output files are retained rather than deleted.
 
 ## Prohibited activity
 
-Never request file deletion, destructive corruption, credential collection, exfiltration, security-control changes, authentication bypass, persistence, concealed activity, unrelated system changes, or downloading/executing untrusted binaries. Do not obfuscate forbidden activity. Never expand a reviewed script's scope after approval.
-
-## Enforcement and verification
-
-Local policy validates resolved paths and declared capabilities, sets finite step/time/output limits, and refuses unsupported syntax. Approval happens only after a valid proposal is reviewable. Capture stdout/report output, errors, completion state, elapsed time and affected-file evidence. A successful evaluator completion proves only its reported execution outcome; verify expected files and content independently.
-
-If a side effect's result becomes uncertain, stop and request review; do not automatically replay it. Recovery must preserve existing data. No cleanup path may delete files.
+Never request file deletion, destructive corruption, credential collection, exfiltration, security-control changes, authentication bypass, hidden persistence, privilege escalation, concealed activity, unrelated system changes, or downloading/executing unreviewed binaries. User-requested visible viewer persistence is allowed only through the declared managed lifecycle above. Never expand scope after approval or treat static screening as an OS sandbox.

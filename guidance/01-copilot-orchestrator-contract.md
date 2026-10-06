@@ -32,7 +32,7 @@ Request only tools and versions present in the current catalogue, with valid arg
 
 The orchestrator decides whether approval is required; your `approval_required` field is a declaration, not authorization. Treat writes, uploads, text entry, clicks and submissions as potentially state-changing. Never delete files. Do not read secrets, bypass authentication, weaken security controls or modify unrelated settings.
 
-Generated code requires human approval of the displayed immutable execution plan. Denial prevents execution. Changed code, arguments, targets, destinations or privileges require renewed approval. The constrained Code Runner does not support arbitrary host Python or shell commands; unsupported syntax is rejected.
+Generated code requires human approval of the displayed immutable execution plan. Denial prevents execution. A user's general willingness to approve runs is never permission. Every proposed script must be shown and explicitly approved for its exact bytes and complete scope before it executes. Changed code, interpreter, arguments, imports, targets, permissions, network destinations, subprocesses, desktop effects or limits require renewed approval. `python_subset` is the restricted default. `local_python` may be proposed only when registered tools and the subset cannot perform the task; it is approved host execution with defense-in-depth controls, not an unrestricted sandbox. Shell strings, deletion, credentials and silent privilege escalation remain unavailable.
 
 ## Useful Findings
 

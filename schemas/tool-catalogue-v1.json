@@ -845,8 +845,8 @@
     {
       "name": "system.versions",
       "version": "1.0",
-      "description": "Read Python and operating system versions; no environment variables.",
-      "intended_use": "Read Python and operating system versions; no environment variables.",
+      "description": "Read the exact current Python executable/version, operating system version and selected package versions; no environment variables.",
+      "intended_use": "Read the exact current Python executable/version, operating system version and selected package versions; no environment variables.",
       "preconditions": [
         "Current validated tool call",
         "Configured filesystem/domain boundaries",
@@ -2810,8 +2810,8 @@
     {
       "name": "code_runner",
       "version": "1.0",
-      "description": "Evaluate reviewed python_subset script with mediated declared files and strict local limits. For downloaded source, include both source_path and source_sha256, declare its read permission, and preserve the source's exact UTF-8 script bytes.",
-      "intended_use": "Evaluate reviewed python_subset script with mediated declared files and strict local limits. For downloaded source, include both source_path and source_sha256, declare its read permission, and preserve the source's exact UTF-8 script bytes.",
+      "description": "Run reviewed code. python_subset remains the default restricted evaluator. local_python is available only for an exact explicitly approved host-Python plan binding script bytes/hash, interpreter, arguments, imports, file/network/process/desktop scope, limits, effects and verification.",
+      "intended_use": "Run reviewed code. python_subset remains the default restricted evaluator. local_python is available only for an exact explicitly approved host-Python plan binding script bytes/hash, interpreter, arguments, imports, file/network/process/desktop scope, limits, effects and verification.",
       "preconditions": [
         "Current validated tool call",
         "Configured filesystem/domain boundaries",
@@ -2830,7 +2830,23 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "commands": {
+          "script": {
+            "type": "string",
+            "maxLength": 50000
+          },
+          "purpose": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "working_directory": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "read_paths": {
             "type": "array",
             "items": {
               "type": "string",
@@ -2846,6 +2862,14 @@
             },
             "maxItems": 100
           },
+          "modify_paths": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "maxItems": 100
+          },
           "expected_outputs": {
             "type": "array",
             "items": {
@@ -2854,9 +2878,13 @@
             },
             "maxItems": 100
           },
-          "language": {
-            "type": "string",
-            "maxLength": 4000
+          "commands": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "maxItems": 100
           },
           "network_destinations": {
             "type": "array",
@@ -2874,39 +2902,27 @@
             },
             "maxItems": 100
           },
-          "purpose": {
+          "risk_summary": {
             "type": "string",
             "maxLength": 4000
-          },
-          "read_paths": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "maxLength": 4096
-            },
-            "maxItems": 100
           },
           "recovery_notes": {
             "type": "string",
             "maxLength": 4000
           },
-          "risk_summary": {
-            "type": "string",
-            "maxLength": 4000
-          },
-          "script": {
-            "type": "string",
-            "maxLength": 50000
-          },
           "source_path": {
             "type": "string",
-            "maxLength": 4000
+            "maxLength": 4096
           },
           "source_sha256": {
             "type": "string",
-            "maxLength": 4000
+            "maxLength": 64
           },
-          "subprocesses": {
+          "interpreter": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "arguments": {
             "type": "array",
             "items": {
               "type": "string",
@@ -2914,9 +2930,94 @@
             },
             "maxItems": 100
           },
-          "working_directory": {
-            "type": "string",
-            "maxLength": 4000
+          "imports": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "maxItems": 100
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          },
+          "max_output_chars": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12000
+          },
+          "expected_effects": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "maxItems": 100
+          },
+          "subprocesses": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "properties": {
+                "executable": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "arguments": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "maxItems": 100
+                },
+                "persistent": {
+                  "type": "boolean"
+                },
+                "purpose": {
+                  "type": "string",
+                  "maxLength": 1000
+                }
+              },
+              "required": [
+                "executable",
+                "arguments",
+                "persistent",
+                "purpose"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "viewer_windows": {
+            "type": "array",
+            "maxItems": 12,
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "image_path": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "display_index": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 32
+                }
+              },
+              "required": [
+                "title",
+                "image_path",
+                "display_index"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [

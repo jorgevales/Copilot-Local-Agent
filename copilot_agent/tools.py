@@ -64,6 +64,35 @@ STRUCTURE_SCRIPT = r"""() => {
         visible:true,enabled:!element.matches(':disabled') && element.getAttribute('aria-disabled')!=='true',selector:selectorFor(element),href};
     });
 }"""
+CODE_RUNNER_PROPERTIES = {
+    "script": {"type":"string", "maxLength":50000},
+    "purpose": {"type":"string", "maxLength":4000},
+    "language": {"type":"string", "maxLength":64},
+    "working_directory": S,
+    "read_paths": {"type":"array", "items":S, "maxItems":100},
+    "create_paths": {"type":"array", "items":S, "maxItems":100},
+    "modify_paths": {"type":"array", "items":S, "maxItems":100},
+    "expected_outputs": {"type":"array", "items":S, "maxItems":100},
+    "commands": {"type":"array", "items":S, "maxItems":100},
+    "network_destinations": {"type":"array", "items":S, "maxItems":100},
+    "permissions": {"type":"array", "items":S, "maxItems":100},
+    "risk_summary": {"type":"string", "maxLength":4000},
+    "recovery_notes": {"type":"string", "maxLength":4000},
+    "source_path": S,
+    "source_sha256": {"type":"string", "maxLength":64},
+    "interpreter": S,
+    "arguments": {"type":"array", "items":S, "maxItems":100},
+    "imports": {"type":"array", "items":S, "maxItems":100},
+    "timeout_seconds": {"type":"integer", "minimum":1, "maximum":30},
+    "max_output_chars": {"type":"integer", "minimum":1, "maximum":12000},
+    "expected_effects": {"type":"array", "items":S, "maxItems":100},
+    "subprocesses": {"type":"array", "maxItems":20, "items":obj({
+        "executable":S, "arguments":{"type":"array", "items":S, "maxItems":100},
+        "persistent":{"type":"boolean"}, "purpose":{"type":"string", "maxLength":1000}})},
+    "viewer_windows": {"type":"array", "maxItems":12, "items":obj({
+        "title":{"type":"string", "maxLength":200}, "image_path":S,
+        "display_index":{"type":"integer", "minimum":1, "maximum":32}})},
+}
 SPECS = {
     "files.list": (obj(PATH), "read_only", "List up to 200 immediate children inside allowed roots."),
     "files.exists": (obj(PATH), "read_only", "Check a path inside allowed roots."),
@@ -74,7 +103,7 @@ SPECS = {
     "files.metadata": (obj(PATH), "read_only", "Read size, modification time and type."),
     "files.hash": (obj(PATH), "read_only", "Calculate SHA-256 for a file up to 20 MB."),
     "files.mkdir": (obj(PATH), "user_approval", "Create a new directory with an existing allowed parent."),
-    "system.versions": (obj({}), "read_only", "Read Python and operating system versions; no environment variables."),
+    "system.versions": (obj({}), "read_only", "Read the exact current Python executable/version, operating system version and selected package versions; no environment variables."),
     "system.disk": (obj(PATH), "read_only", "Read filesystem capacity for an allowed path."),
     "system.processes": (obj({}), "read_only", "Report this agent PID and the explicitly launched owned Edge PID when available; no wider process or command-line inventory."),
     "browser.open": (obj({"url":S}), "user_approval", "Navigate the owned tool tab to an exact allowlisted HTTPS domain."),
@@ -95,13 +124,13 @@ SPECS = {
     "copilot.download": (obj({"expected_name":S,"link_text":S,"expected_sha256":S},["expected_name"]), "user_approval", "Download one real file link in this exact Copilot response. Inspect Edge download settings first; save and verify an exclusive local artifact. Plaintext and sandbox links are not delivery."),
     "archives.inspect": (obj(PATH), "read_only", "Inspect a bounded ZIP manifest, archive SHA-256 and native Office container type without extracting."),
     "archives.extract": (obj({"path":S,"destination":S,"expected_files":{"type":"array","items":S,"maxItems":1000},"expected_sha256":S},["path","destination","expected_sha256"]), "user_approval", "Extract a reviewed SHA-256-bound ZIP exclusively inside allowed roots; preflight paths and verify all files without executing code. Preserve original and partial outputs."),
-    "code_runner": (obj({key:({"type":"array","items":S,"maxItems":100} if key in {"read_paths","create_paths","expected_outputs","commands","subprocesses","network_destinations","permissions"} else {"type":"string","maxLength":50000 if key=="script" else 4000}) for key in sorted(FIELDS)}, sorted(REQUIRED)), "immutable_plan_approval", "Evaluate reviewed python_subset script with mediated declared files and strict local limits. For downloaded source, include both source_path and source_sha256, declare its read permission, and preserve the source's exact UTF-8 script bytes."),
+    "code_runner": (obj(CODE_RUNNER_PROPERTIES, sorted(REQUIRED)), "immutable_plan_approval", "Run reviewed code. python_subset remains the default restricted evaluator. local_python is available only for an exact explicitly approved host-Python plan binding script bytes/hash, interpreter, arguments, imports, file/network/process/desktop scope, limits, effects and verification."),
 }
 
 
 def validate(value, schema):
     kind = schema.get("type")
-    expected = {"object":dict,"string":str,"integer":int,"array":list}.get(kind)
+    expected = {"object":dict,"string":str,"integer":int,"array":list,"boolean":bool}.get(kind)
     if expected and (not isinstance(value,expected) or kind == "integer" and isinstance(value,bool)):
         raise ValueError(f"Expected {kind}")
     if kind == "object":
@@ -241,8 +270,9 @@ class ToolRegistry:
             if name=="created.wait": timeout=min(300,config_value(config,"sync_timeout",120))+1
             if name=="copilot.download": timeout=min(295,config_value(config,"download_timeout",90))+1
             result=await asyncio.wait_for(self._execute(name,args,context,policy),timeout=timeout)
-            if name=="code_runner" and result.get("status")=="failed":
-                return self._limit({"ok":False,"tool":name,"result":result,"error":{"code":"operation_failed","message":result.get("error","Expected output was not produced")}},context)
+            if name=="code_runner" and result.get("status")!="completed":
+                code = "cancelled" if result.get("status") == "cancelled" else "operation_failed"
+                return self._limit({"ok":False,"tool":name,"result":result,"error":{"code":code,"message":result.get("error","Expected output was not produced")}},context)
             if name=="ocr.image" and result.get("status")=="unavailable":
                 return self._limit({"ok":False,"tool":name,"result":result,"error":{"code":"unavailable","message":result["reason"]}},context)
             if name in {"archives.extract", "copilot.download"} and result.get("status") not in {"verified", "verified_with_limitations", "downloaded"}:
@@ -309,7 +339,9 @@ class ToolRegistry:
                 except PackageNotFoundError: packages[package]="not_installed"
             adapter=context.get("browser")
             browser=getattr(adapter,"browser",None)
-            return {"python":platform.python_version(),"system":platform.system(),"release":platform.release(),"packages":packages,"browser":getattr(browser,"version","unavailable")}
+            return {"python":platform.python_version(),"python_executable":str(Path(sys.executable).resolve()),
+                    "system":platform.system(),"release":platform.release(),"packages":packages,
+                    "browser":getattr(browser,"version","unavailable")}
         if name=="system.disk":
             usage=shutil.disk_usage(policy.resolve(args["path"],True)); return dict(zip(("total","used","free"),usage))
         if name=="system.processes":
@@ -321,7 +353,7 @@ class ToolRegistry:
             return {"processes":processes,"scope":"current agent and explicitly launched owned Edge only"}
         if name=="code_runner":
             runner=CodeRunner(policy,context["session_dir"],{"tool_timeout":config_value(config,"tool_timeout",10),"max_output_chars":config_value(config,"max_output_chars",12000)})
-            return runner.run(args,context.get("approved_hash"))
+            return await runner.run_async(args,context.get("approved_hash"),process_registry=context.get("process_registry"))
         if name=="ocr.image":
             path=policy.resolve(args["path"],True)
             if path.suffix.lower() not in {".png",".jpg",".jpeg",".webp",".bmp"}: raise ValueError("Expected supported image")

@@ -9,15 +9,20 @@ import operator
 import os
 import re
 import stat
+import sys
 import time
 import tokenize
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .policy import PathPolicy, PolicyError
 
-FIELDS = {"script", "purpose", "language", "working_directory", "read_paths", "create_paths", "expected_outputs", "commands", "subprocesses", "network_destinations", "permissions", "risk_summary", "recovery_notes", "source_path", "source_sha256"}
-REQUIRED = FIELDS - {"subprocesses", "source_path", "source_sha256"}
+BASE_FIELDS = {"script", "purpose", "language", "working_directory", "read_paths", "create_paths", "expected_outputs", "commands", "subprocesses", "network_destinations", "permissions", "risk_summary", "recovery_notes", "source_path", "source_sha256"}
+LOCAL_FIELDS = {"interpreter", "arguments", "imports", "modify_paths", "timeout_seconds", "max_output_chars", "expected_effects", "viewer_windows"}
+FIELDS = BASE_FIELDS | LOCAL_FIELDS
+REQUIRED = BASE_FIELDS - {"subprocesses", "source_path", "source_sha256"}
 OPTIONAL = FIELDS - REQUIRED
+LOCAL_REQUIRED = {"interpreter", "arguments", "imports", "modify_paths", "timeout_seconds", "max_output_chars", "expected_effects", "viewer_windows"}
 MAX_SOURCE_BYTES = 200000
 CALLS = {"print", "range", "len", "str", "int", "sum", "min", "max", "sorted", "read_file", "write_file"}
 NODES = (ast.Module, ast.Expr, ast.Assign, ast.If, ast.For, ast.Pass, ast.Constant, ast.Name, ast.Load, ast.Store,
@@ -38,8 +43,8 @@ class CodeRunner:
     def _plan(self, args):
         if not isinstance(args, dict) or set(args) - FIELDS or REQUIRED - set(args):
             raise ValueError("Code plan has missing or unsupported fields")
-        if args["language"] != "python_subset":
-            raise ValueError("Only python_subset is supported")
+        if args["language"] not in {"python_subset", "local_python"}:
+            raise ValueError("language must be python_subset or local_python")
         if not isinstance(args["script"], str) or len(args["script"]) > 50000:
             raise ValueError("Script must be text of at most 50000 characters")
         if ("source_path" in args) != ("source_sha256" in args):
@@ -52,37 +57,141 @@ class CodeRunner:
         for key in ("purpose", "risk_summary", "recovery_notes", "working_directory"):
             if not isinstance(args[key], str) or not args[key].strip() or len(args[key]) > 4000:
                 raise ValueError(f"Invalid {key}")
-        for key in ("read_paths", "create_paths", "expected_outputs", "commands", "network_destinations", "permissions", "subprocesses"):
+        for key in ("read_paths", "create_paths", "expected_outputs", "commands", "network_destinations", "permissions"):
             values = args.get(key, [])
             if not isinstance(values, list) or len(values) > 100 or any(not isinstance(v, str) for v in values):
                 raise ValueError(f"Invalid {key}")
-        if args["commands"] or args.get("subprocesses") or args["network_destinations"]:
-            raise PolicyError("The interpreter has no subprocess or network capability")
-        if set(args["permissions"]) - {"read_files", "create_files"}:
-            raise PolicyError("Unsupported permission")
         plan = dict(args)
         plan["subprocesses"] = args.get("subprocesses", [])
         plan["working_directory"] = str(self.policy.resolve(args["working_directory"], True))
         if not Path(plan["working_directory"]).is_dir():
             raise PolicyError("Working directory must be an existing directory")
-        for key in ("read_paths", "create_paths", "expected_outputs"):
+        path_keys = ["read_paths", "create_paths", "expected_outputs"]
+        if args["language"] == "local_python":
+            missing = LOCAL_REQUIRED - set(args)
+            if missing:
+                raise ValueError("local_python requires fields: " + ", ".join(sorted(missing)))
+            path_keys.append("modify_paths")
+        elif set(args) & LOCAL_FIELDS:
+            raise PolicyError("local_python-only fields cannot be added to a python_subset plan")
+        for key in path_keys:
             plan[key] = [str(self.policy.resolve(Path(plan["working_directory"]) / p)) for p in args[key]]
             if len(plan[key]) != len(set(plan[key])):
                 raise PolicyError(f"Duplicate {key}")
-        if not set(plan["expected_outputs"]).issubset(plan["create_paths"]):
-            raise PolicyError("Expected outputs must be declared creates")
+        permitted_outputs = set(plan["create_paths"]) | set(plan.get("modify_paths", []))
+        if not set(plan["expected_outputs"]).issubset(permitted_outputs):
+            raise PolicyError("Expected outputs must be declared creates or modifications")
         if plan["read_paths"] and "read_files" not in plan["permissions"]:
             raise PolicyError("Read permission missing")
         if plan["create_paths"] and "create_files" not in plan["permissions"]:
             raise PolicyError("Create permission missing")
-        if set(plan["read_paths"]) & set(plan["create_paths"]):
-            raise PolicyError("Read/create paths may not overlap")
+        if set(plan["read_paths"]) & permitted_outputs or set(plan["create_paths"]) & set(plan.get("modify_paths", [])):
+            raise PolicyError("Read, create and modify paths may not overlap")
         if "source_path" in args:
             raw_source = Path(plan["working_directory"]) / args["source_path"]
             plan["source_path"] = str(self.policy.resolve(raw_source, True))
             if plan["source_path"] not in plan["read_paths"] or "read_files" not in plan["permissions"]:
                 raise PolicyError("Source file must be declared in read_paths with read_files permission")
             self._verify_source(plan, raw_source)
+        if args["language"] == "python_subset":
+            if args["commands"] or args.get("subprocesses") or args["network_destinations"]:
+                raise PolicyError("The restricted interpreter has no subprocess or network capability")
+            if set(args["permissions"]) - {"read_files", "create_files"}:
+                raise PolicyError("Unsupported python_subset permission")
+            return plan
+        return self._local_plan(plan)
+
+    def _local_plan(self, plan):
+        if plan["commands"]:
+            raise PolicyError("Shell command strings are unavailable; declare exact managed subprocess argument vectors")
+        interpreter = Path(plan["interpreter"]).expanduser()
+        if not interpreter.is_absolute() or interpreter.resolve() != Path(sys.executable).resolve() or not interpreter.is_file():
+            raise PolicyError("local_python must use the agent's exact current Python interpreter")
+        plan["interpreter"] = str(interpreter.resolve())
+        for key, maximum in (("arguments", 100), ("imports", 100), ("expected_effects", 100)):
+            values = plan[key]
+            if not isinstance(values, list) or len(values) > maximum or any(not isinstance(value, str) or not value or len(value) > 1000 or "\0" in value for value in values):
+                raise ValueError("Invalid " + key)
+            if len(values) != len(set(values)):
+                raise PolicyError("Duplicate " + key)
+        if not plan["expected_effects"]:
+            raise PolicyError("local_python requires at least one explicit expected effect")
+        if any(not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", value) for value in plan["imports"]):
+            raise ValueError("Declared imports must be exact Python module names")
+        for key in ("timeout_seconds", "max_output_chars"):
+            if type(plan[key]) is not int:
+                raise ValueError(key + " must be an integer")
+        if not 1 <= plan["timeout_seconds"] <= int(self.max_seconds):
+            raise PolicyError("timeout_seconds exceeds the configured Code Runner limit")
+        if not 1 <= plan["max_output_chars"] <= self.max_output:
+            raise PolicyError("max_output_chars exceeds the configured Code Runner limit")
+        for path in plan["read_paths"] + plan["modify_paths"]:
+            if not Path(path).exists():
+                raise PolicyError("Approved read/modify path must already exist: " + path)
+        for path in plan["create_paths"]:
+            target = Path(path)
+            if target.exists() or not target.parent.is_dir():
+                raise PolicyError("Approved create path must be new with an existing parent: " + path)
+        supported_permissions = {"read_files", "create_files", "modify_files", "network", "subprocesses",
+                                 "desktop_capture", "window_management", "persistent_processes"}
+        if set(plan["permissions"]) - supported_permissions:
+            raise PolicyError("Unsupported local_python permission")
+        if plan["modify_paths"] and "modify_files" not in plan["permissions"]:
+            raise PolicyError("Modify permission missing")
+        destinations = []
+        for value in plan["network_destinations"]:
+            parsed = urlsplit(value)
+            if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or
+                    parsed.port not in (None, 443) or parsed.path not in ("", "/") or parsed.query or parsed.fragment):
+                raise PolicyError("Network destinations must be exact HTTPS hosts on port 443")
+            destinations.append("https://" + parsed.hostname.casefold())
+        if len(destinations) != len(set(destinations)):
+            raise PolicyError("Duplicate network destination")
+        plan["network_destinations"] = destinations
+        if destinations and "network" not in plan["permissions"]:
+            raise PolicyError("Network permission missing")
+        processes = plan["subprocesses"]
+        if not isinstance(processes, list) or len(processes) > 20:
+            raise ValueError("Invalid subprocesses")
+        normalized = []
+        for item in processes:
+            if not isinstance(item, dict) or set(item) != {"executable", "arguments", "persistent", "purpose"}:
+                raise ValueError("Each subprocess requires executable, arguments, persistent and purpose")
+            executable = Path(item["executable"]).expanduser()
+            arguments = item["arguments"]
+            if (not executable.is_absolute() or not executable.is_file() or not isinstance(arguments, list)
+                    or len(arguments) > 100 or any(not isinstance(value, str) or len(value) > 4000 or "\0" in value for value in arguments)
+                    or type(item["persistent"]) is not bool or not isinstance(item["purpose"], str)
+                    or not item["purpose"].strip() or len(item["purpose"]) > 1000):
+                raise PolicyError("Invalid managed subprocess specification")
+            normalized.append({"executable": str(executable.resolve()), "arguments": arguments,
+                               "persistent": item["persistent"], "purpose": item["purpose"]})
+        plan["subprocesses"] = normalized
+        if normalized and "subprocesses" not in plan["permissions"]:
+            raise PolicyError("Managed subprocess permission missing")
+        if any(item["persistent"] for item in normalized) and "persistent_processes" not in plan["permissions"]:
+            raise PolicyError("Persistent process permission missing")
+        viewers = plan["viewer_windows"]
+        if not isinstance(viewers, list) or len(viewers) > 12:
+            raise ValueError("Invalid viewer_windows")
+        normalized_viewers = []
+        for item in viewers:
+            if not isinstance(item, dict) or set(item) != {"title", "image_path", "display_index"}:
+                raise ValueError("Each viewer requires title, image_path and display_index")
+            if (not isinstance(item["title"], str) or not item["title"].strip() or len(item["title"]) > 200
+                    or any(ord(char) < 32 for char in item["title"]) or type(item["display_index"]) is not int
+                    or not 1 <= item["display_index"] <= 32):
+                raise ValueError("Invalid viewer window declaration")
+            image = str(self.policy.resolve(Path(plan["working_directory"]) / item["image_path"]))
+            if image not in plan["expected_outputs"] or Path(image).suffix.casefold() != ".png":
+                raise PolicyError("Viewer images must be declared expected PNG outputs")
+            normalized_viewers.append({"title": item["title"], "image_path": image,
+                                       "display_index": item["display_index"]})
+        if len({item["title"] for item in normalized_viewers}) != len(normalized_viewers):
+            raise PolicyError("Viewer titles must be unique for independent verification")
+        if normalized_viewers and not {"window_management", "persistent_processes"}.issubset(plan["permissions"]):
+            raise PolicyError("Persistent viewer windows require window_management and persistent_processes permissions")
+        plan["viewer_windows"] = normalized_viewers
         return plan
 
     def _verify_source(self, plan, raw_source=None):
@@ -129,6 +238,37 @@ class CodeRunner:
     def validate(self, args):
         plan = self._plan(args)
         tree = ast.parse(plan["script"], mode="exec")
+        if plan["language"] == "local_python":
+            imported = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imported.update(alias.name for alias in node.names)
+                elif isinstance(node, ast.ImportFrom):
+                    if node.level or not node.module or any(alias.name == "*" for alias in node.names):
+                        raise PolicyError("Relative and wildcard imports are unavailable")
+                    imported.add(node.module)
+                elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"eval", "exec", "compile", "__import__"}:
+                    raise PolicyError("Dynamic code and dynamic imports are unavailable")
+                elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"getattr", "setattr", "delattr", "globals", "locals", "vars"}:
+                    raise PolicyError("Dynamic reflection is unavailable")
+                elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in {"eval", "exec", "compile", "__import__", "import_module", "run_path", "run_module"}:
+                    raise PolicyError("Dynamic code and dynamic imports are unavailable")
+                elif isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+                    raise PolicyError("Dunder reflection is unavailable")
+                elif isinstance(node, ast.Name) and node.id.startswith("__"):
+                    raise PolicyError("Dunder reflection is unavailable")
+            if not imported.issubset(set(plan["imports"])):
+                raise PolicyError("Script contains an undeclared import: " + ", ".join(sorted(imported - set(plan["imports"]))))
+            if imported.intersection({"keyring", "winreg", "builtins", "importlib", "runpy", "marshal"}):
+                raise PolicyError("Credential, registry and dynamic-loader imports are unavailable")
+            if "subprocess" in imported and "subprocesses" not in plan["permissions"]:
+                raise PolicyError("subprocess import requires managed subprocess permission")
+            native = {name for name in imported if name.split(".", 1)[0] in {"ctypes", "win32api", "win32con", "win32gui", "win32ui", "win32process", "mss", "PIL"}}
+            if native and not set(plan["permissions"]).intersection({"desktop_capture", "window_management"}):
+                raise PolicyError("Native desktop imports require a declared desktop permission")
+            if "copilot_agent.desktop" in imported and "desktop_capture" not in plan["permissions"]:
+                raise PolicyError("Desktop capture helper requires desktop_capture permission")
+            return plan
         for node in ast.walk(tree):
             if not isinstance(node, NODES):
                 raise PolicyError(f"Unsupported Python syntax: {type(node).__name__}")
@@ -144,7 +284,11 @@ class CodeRunner:
 
     def prepare(self, args):
         plan = self.validate(args)
-        canonical = json.dumps(plan, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        binding = None
+        if plan["language"] == "local_python":
+            from .local_python_runner import runtime_binding
+            binding = runtime_binding(plan)
+        canonical = json.dumps({"plan": plan, "runtime_binding": binding}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
         scripts = self.session_dir / "code_proposals"
         scripts.mkdir(parents=True, exist_ok=True)
@@ -155,7 +299,12 @@ class CodeRunner:
         else:
             with script_path.open("x", encoding="utf-8", newline="") as stream:
                 stream.write(plan["script"])
-        prepared = {"proposal_hash": digest,"script_sha256":hashlib.sha256(plan["script"].encode("utf-8")).hexdigest(), "plan": plan, "script_path": str(script_path), "static_verdict": "accepted_python_subset", "limitations": "No imports, attributes, host exec, shell or network; create-only files"}
+        prepared = {"proposal_hash": digest,"script_sha256":hashlib.sha256(plan["script"].encode("utf-8")).hexdigest(), "plan": plan, "script_path": str(script_path),
+                    "static_verdict": "accepted_python_subset" if plan["language"] == "python_subset" else "accepted_local_python_for_explicit_approval",
+                    "limitations": ("No imports, attributes, host exec, shell or network; create-only files" if plan["language"] == "python_subset" else
+                                    "Approved host Python with defense-in-depth policy hooks; not an OS security sandbox. No deletion, shell, credentials or silent privilege escalation.")}
+        if binding is not None:
+            prepared["runtime_binding"] = binding
         if "source_path" in plan:
             prepared["source_verification"] = {"path": plan["source_path"], "sha256": plan["source_sha256"],
                                                "size": len(plan["script"].encode("utf-8")), "exact_script_bytes": True}
@@ -165,6 +314,13 @@ class CodeRunner:
         prepared = self.prepare(args)
         if not approved_hash or approved_hash != prepared["proposal_hash"]:
             raise PolicyError("Approval does not match the complete immutable proposal")
+        if prepared["plan"]["language"] == "local_python":
+            import asyncio
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return asyncio.run(self.run_async(args, approved_hash, **kwargs))
+            raise RuntimeError("Use run_async for local_python inside an active event loop")
         self.plan = prepared["plan"]
         self.source_verification = self._verify_source(self.plan)
         self.env = {}
@@ -179,6 +335,17 @@ class CodeRunner:
             return self._result("failed" if missing else "completed", approved_hash, missing_outputs=missing)
         except Exception as error:
             return self._result("failed", approved_hash, error=str(error))
+
+    async def run_async(self, args, approved_hash, **kwargs):
+        prepared = self.prepare(args)
+        if not approved_hash or approved_hash != prepared["proposal_hash"]:
+            raise PolicyError("Approval does not match the complete immutable proposal")
+        if prepared["plan"]["language"] == "python_subset":
+            return self.run(args, approved_hash)
+        self._verify_source(prepared["plan"])
+        from .local_python_runner import execute_local_python
+        return await execute_local_python(prepared["plan"], prepared, self.session_dir,
+                                          kwargs.get("process_registry"))
 
     def _result(self, status, digest, **details):
         outputs=[]

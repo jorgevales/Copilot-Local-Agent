@@ -12,7 +12,9 @@ Demonstrate a no-tool answer, a read-only tool request, return of its result, an
 
 ## Approval validation
 
-Propose a small script within the advertised constrained Python subset. Denial must prevent execution and output creation. A separately reviewed approved execution must use the exact hashed plan/script and produce verifiable harmless output. A changed script or scope needs renewed approval. Unsupported imports, shell, deletion and escape attempts must be rejected locally, not executed as tests on the host.
+Propose a small script within the advertised constrained Python subset. Denial must prevent execution and output creation. A separately reviewed approved execution must use the exact hashed plan/script and produce verifiable harmless output. A changed script or scope needs renewed approval.
+
+Separately test `local_python` with harmless declared imports and scoped output. Verify rejection, changed-script reapproval, failed execution, timeout, task cancellation, output limits, managed persistent-process cleanup and retained audit evidence. Shell strings, deletion, credentials, undeclared imports/files/network and escape attempts must be rejected locally. For the three-display scenario, automated tests may mock Windows discovery only when labelled as such; real acceptance requires three actual captures and independent observation of three visible contained viewer bounds on display 2. A script exit or mocked window result is not live desktop proof.
 
 ## Findings validation
 

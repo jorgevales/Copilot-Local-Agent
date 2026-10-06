@@ -7,6 +7,7 @@ import uuid
 from .approvals import ApprovalManager
 from .browser import BrowserUIError, CaptureTimeoutError, SubmissionAmbiguousError, SubmissionNotSentError
 from .code_runner import CodeRunner
+from .local_python_runner import ManagedProcessRegistry
 from .findings import Findings
 from .feedback import Feedback, public_preview
 from .logging_utils import redact, SENSITIVE
@@ -24,17 +25,25 @@ class Orchestrator:
         self.config, self.browser, self.registry, self.state = config, browser, registry, state
         self.findings = Findings(state.directory)
         self.prompts = PromptBuilder(config, registry, state, self.findings)
-        self.approvals = ApprovalManager(state, approval_decider)
         self.policy = PathPolicy(config.allowed_roots, excluded_roots=[config.profile_dir])
         self.display = display
         self.feedback = Feedback(display, state)
+        self.approvals = ApprovalManager(state, approval_decider, self.feedback)
+        self.process_registry = ManagedProcessRegistry(state.directory)
         self.live_seen = {}
         if hasattr(browser, 'set_feedback'):
             browser.set_feedback(self._live_feedback)
         self.initialized = False
         self.approved_attachment_hashes = {}
-        self.base_context = {'config': config, 'session_dir': state.directory, 'browser': browser, 'approved': False, 'pending_image_attachments': [], 'created_snapshots': {}}
+        self.base_context = {'config': config, 'session_dir': state.directory, 'browser': browser, 'approved': False,
+                             'pending_image_attachments': [], 'created_snapshots': {},
+                             'process_registry': self.process_registry}
         self.download_service = None
+
+    def _code_runner(self):
+        return CodeRunner(self.policy, self.state.directory,
+                          {'tool_timeout': self.config.tool_timeout,
+                           'max_output_chars': self.config.max_output_chars})
 
     def _live_feedback(self, event):
         request_id = event['request_id']
@@ -54,8 +63,41 @@ class Orchestrator:
                                  ' (verify: ' + str(item.get('verification', '')) + ')' for item in value if isinstance(item, dict))
             else:
                 text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-            self.feedback.emit('Copilot (Agent)', 'Live preview (unvalidated) | ' + labels[key] + ': ' + str(text)[:4000],
+            self.feedback.emit('Copilot', 'UNVALIDATED PREVIEW — ' + labels[key] + '\n  ' + str(text)[:4000],
                                request_id=request_id, validated=False, generation_stopped=event.get('generation_stopped'))
+
+    def _action_text(self, response):
+        return '; '.join(str(step.get('step', '?')) + '. ' + str(step.get('action', '')) +
+                         ' | verify: ' + str(step.get('verification', ''))
+                         for step in response.get('action_plan', []) if isinstance(step, dict))
+
+    def _emit_validated_response(self, response, title):
+        request_id = response.get('request_id')
+        seen = self.live_seen.get(request_id, {})
+        reply = response.get('user_response', '')
+        reply_text = ('The identical live preview above is now validated.'
+                      if reply and seen.get('user_response') == reply else reply)
+        self.feedback.section('Copilot', title, [
+            ('Task', None if seen.get('task_interpretation') == response.get('task_interpretation') else response.get('task_interpretation')),
+            ('Action', self._action_text(response)),
+            ('Reply', reply_text),
+            ('Status', response.get('completion_status')),
+        ], request_id=request_id, validated=True)
+
+    def _emit_tool_result(self, name, result):
+        payload = result.get('result', {}) if isinstance(result, dict) else {}
+        verification = payload.get('verification', {}) if isinstance(payload, dict) else {}
+        windows = verification.get('windows', []) if isinstance(verification, dict) else []
+        output_paths = [item.get('path') for item in payload.get('outputs', []) if isinstance(item, dict) and item.get('readable')]
+        self.feedback.section('Tool/' + name, 'RESULT', [
+            ('Status', payload.get('status', 'completed' if result.get('ok') else 'failed')),
+            ('Outputs', output_paths),
+            ('Verification', ({'ok': verification.get('ok'), 'visible_windows': len([item for item in windows if item.get('visible')]),
+                               'target_displays': sorted({item.get('display_index') for item in windows})}
+                              if windows else None)),
+            ('Error', result.get('error', {}).get('message') if isinstance(result.get('error'), dict) else None),
+            ('Audit', payload.get('audit_path')),
+        ])
 
     def _attachment_record(self, path: Path) -> dict:
         allowed = SUPPORTED_EXTENSIONS
@@ -211,7 +253,7 @@ class Orchestrator:
                 self.state.event('response_invalid', request_id=request_id, attempt=attempt, code=exc.code, errors=exc.errors)
                 recovery = ('correction budget exhausted.' if attempt == self.config.max_corrections else
                             'requesting correction ' + str(attempt + 1) + '/' + str(self.config.max_corrections) + '.')
-                self.feedback.emit('Orchestrator', 'Response rejected: ' + str(exc) + '; ' + recovery, request_id=request_id)
+                self.feedback.emit('Error', 'Response rejected: ' + str(exc) + '; ' + recovery, request_id=request_id)
                 if hasattr(self.browser, 'diagnostics'):
                     try:
                         evidence = await self.browser.diagnostics('protocol_' + exc.code)
@@ -239,7 +281,7 @@ class Orchestrator:
             if hasattr(self.registry, 'validate_call'):
                 self.registry.validate_call(call['name'], call['arguments'], self.base_context)
             if call['name'] == 'code_runner':
-                CodeRunner(self.policy, self.state.directory).validate(call['arguments'])
+                self._code_runner().validate(call['arguments'])
                 if response['code_runner_proposal'] is not None and response['code_runner_proposal'] != call['arguments']:
                     raise PolicyError('Code proposal and execution arguments conflict')
 
@@ -250,7 +292,7 @@ class Orchestrator:
         self.initialized = True
         self.state.data['status'] = 'ready_with_uncertain_operations' if any(c['status'] == 'uncertain' for c in self.state.data['calls'].values()) else 'ready'
         self.state.save()
-        self.feedback.emit('Copilot (Agent)', 'Validated reply: ' + response['user_response'])
+        self._emit_validated_response(response, 'READY')
         return response
 
     async def turn(self, user_input: str, attachments=()):
@@ -305,7 +347,7 @@ class Orchestrator:
                 self.state.data['summary'] = response['task_interpretation'] + '\n' + response['user_response']
                 self.state.data['decisions'].append({'request': user_input, 'outcome': response['user_response']})
                 self.state.save()
-                self.feedback.emit('Copilot (Agent)', 'Validated reply: ' + response['user_response'])
+                self._emit_validated_response(response, 'FINAL RESULT')
                 if delivery.get('mode') != 'none' and response.get('completion_status') == 'complete':
                     for report in delivery_reports:
                         if report.get('tool') == 'copilot.download':
@@ -325,8 +367,9 @@ class Orchestrator:
                 if response['clarification']:
                     self.state.data['unresolved_questions'].append(response['clarification'])
                 self.state.save()
-                self.feedback.emit('Copilot (Agent)', 'Validated ' + response['response_type'] + ': ' +
-                                   (response['clarification'] or response['user_response']))
+                self.feedback.section('Copilot', response['response_type'].upper(), [
+                    ('Message', response['clarification'] or response['user_response']),
+                    ('Status', response.get('completion_status'))])
                 return response
             if round_number == self.config.max_tool_rounds:
                 self.state.data['status'] = 'blocked'
@@ -336,13 +379,14 @@ class Orchestrator:
             plan = {'action_plan': response['action_plan'], 'tool_requests': response['tool_requests'], 'risk_summary': response['risk_summary']}
             prepared_plan = None
             if len(response['tool_requests']) > 1 and all(call['name'] == 'code_runner' for call in response['tool_requests']):
-                prepared_plan = {call['call_id']: CodeRunner(self.policy, self.state.directory).prepare(call['arguments'])
+                prepared_plan = {call['call_id']: self._code_runner().prepare(call['arguments'])
                                  for call in response['tool_requests']}
-            self.feedback.emit('Copilot (Agent)', response['user_response'] or response['decision_summary'])
-            self.feedback.emit('Copilot (Agent)', 'Action plan: ' + '; '.join(step['action'] for step in response['action_plan']))
+            self._emit_validated_response(response, 'PROPOSED ACTION')
             results = []
             for call in response['tool_requests']:
-                self.feedback.emit('Orchestrator', 'Tool requested: ' + call['name'] + ' [' + call['call_id'] + ']')
+                self.feedback.section('Orchestrator', 'TOOL REQUEST', [
+                    ('Tool', call['name']), ('Call', call['call_id']),
+                    ('Purpose', call.get('arguments', {}).get('purpose'))])
                 definition = catalog[call['name']]
                 context = dict(self.base_context)
                 context['source_request_id'] = response['request_id']
@@ -351,7 +395,7 @@ class Orchestrator:
                 artifact = None
                 if call['name'] == 'code_runner':
                     needs_approval = True
-                    prepared = CodeRunner(self.policy, self.state.directory).prepare(call['arguments'])
+                    prepared = self._code_runner().prepare(call['arguments'])
                 if call['name'] == 'ocr.image':
                     artifact = self._attachment_record(self.policy.resolve(call['arguments']['path'], True))
                     prepared = {'approved_image_attachment': artifact, 'destination': self.config.copilot_url}
@@ -398,9 +442,11 @@ class Orchestrator:
                     if artifact:
                         self.approved_attachment_hashes[artifact['path']] = artifact['sha256']
                 self.state.begin_call(call, state_changing=needs_approval)
-                self.feedback.emit('Tool/' + call['name'], 'Starting ' + call['call_id'] +
-                                   (' after approval. ' if needs_approval else ' under read-only policy. ') +
-                                   'Arguments: ' + json.dumps(redact(call['arguments']), ensure_ascii=False)[:12000])
+                self.feedback.section('Tool/' + call['name'], 'STARTING', [
+                    ('Call', call['call_id']),
+                    ('Authority', 'exact explicit approval' if needs_approval else 'read-only policy'),
+                    ('Language', call.get('arguments', {}).get('language')),
+                    ('Expected effects', call.get('arguments', {}).get('expected_effects'))])
                 try:
                     result = await asyncio.wait_for(self.registry.execute(call['name'], call['arguments'], context), timeout=float(definition.get('timeout', definition.get('limits', {}).get('timeout_seconds', 30))) + 1)
                 except asyncio.TimeoutError:
@@ -408,7 +454,7 @@ class Orchestrator:
                 except Exception as exc:
                     result = {'ok': False, 'error': {'code': 'tool_error', 'message': str(exc)}}
                 self.state.finish_call(call['call_id'], result)
-                self.feedback.emit('Tool/' + call['name'], 'Outcome: ' + json.dumps(redact(result), ensure_ascii=False)[:self.config.max_output_chars])
+                self._emit_tool_result(call['name'], result)
                 results.append({'call_id': call['call_id'], **result})
                 if result.get('ok') and call['name'] in {'copilot.download', 'archives.extract'}:
                     delivery_reports.append({'tool': call['name'], **self._delivery_result(call['name'], result)})
@@ -474,6 +520,10 @@ class Orchestrator:
     async def close(self, *, preserve_browser_process=False):
         self.state.data['status'] = 'closed'
         self.state.save()
+        cleaned = await asyncio.to_thread(self.process_registry.cleanup_all)
+        if cleaned:
+            self.feedback.emit('Orchestrator', 'Cleaned up ' + str(sum(1 for item in cleaned if item['stopped'])) +
+                               '/' + str(len(cleaned)) + ' managed persistent process(es).')
         if preserve_browser_process:
             await self.browser.close(preserve_browser_process=True)
         else:

@@ -2,6 +2,12 @@
 
 The setup update and original release evidence are recorded below. Earlier failed reports are preserved; they are never relabelled as passed. Evidence files stay in the operator's selected OneDrive and are excluded from the source release.
 
+## Approved local Python and terminal update
+
+The current complete automated suite ran **320 tests: 319 passed, one skipped, zero failures or errors**. New coverage executes the real bounded local-Python worker for declared imports/argv/scoped files, immutable runtime hashing, undeclared-access rejection, failure, timeout, asynchronous cancellation, retained audit receipts and owned-process termination. It also covers changed-plan hashes, managed persistent cleanup, coloured/plain terminal rendering, malformed/incomplete preview handling, and mocked independent verification of three visible viewer windows on display 2 with failure cleanup.
+
+This is automated development evidence, not a live three-display result. No physical-display capture or real viewer placement was performed during this implementation turn. A target Windows workstation must still complete the steps in `VISUAL_ACCEPTANCE.md`; fewer than three displays, a locked/noninteractive desktop, missing Tk/GDI access or organizational policy must be reported as blocked rather than bypassed.
+
 ## Existing environment without pip
 
 An isolated full Setup run started from a real Python environment created without pip while the selected base Python had working pip. Setup found the base pip, retained the original environment and its marker file, rebuilt the environment, verified pip, installed all four pinned packages, and completed OneDrive and Edge setup. A second full run selected the pip-less project environment itself; Setup resolved its reported base executable before moving it, then completed the same recovery. Both runs used a local wheelhouse and a development-drive fixture, not the private S-drive VDI. The original files and both recovered environments remain in the ignored pip-recovery fixture. The complete suite ran 287 tests: 286 passed and one skipped for unavailable Windows symlink privilege. Retained evidence: workspace/user-storage/workspace/pip-recovery-20261006/report.json.
@@ -60,12 +66,12 @@ SHA-256: `051193104ae2eb28123a6fc755653928f1b7340d862ce3388576b35f4bda95bd`. The
 
 One malformed execution request required a real UI correction; no action was taken from invalid output. After the completed execution, the detector incorrectly treated `download` inside a filename as a new artifact request. A subsequent read-only recovery also exposed a negated request being misclassified. Both detector cases now have regressions. The successful recovery used the production detector and reports only the earlier verified execution. The failed recovery attempts remain retained separately.
 
-Several supported scripts can be approved as one complete immutable prepared plan; this has offline approval/integration coverage. A real multi-script execution was not performed, and ordinary projects using imports or external dependencies remain unsupported.
+Several scripts can be approved as one complete immutable prepared plan; this has offline approval/integration coverage. A real multi-script execution was not performed. Declared imports already installed in the selected environment are supported only through a separately reviewed `local_python` plan; package installation and arbitrary unreviewed project execution remain unsupported.
 
 ## Earlier retained evidence and acceptance limits
 
 `runtime/acceptance/conversation-20261006T143125Z-35d181/report.json` records 15 passed conversation steps and one blocked legacy Created-delivery check. It includes actual deterministic tools, denial without execution, correction, durable findings and the separate explicitly approved `print('approval-test')` run. The old local Documents location was incorrect for the clarified OneDrive workflow; that historical check is not evidence of a failure in the correct account.
 
-The user deferred `Documents/Copilot/Created` verification and instructed no organizational FNZ OneDrive access. Monitoring remains disabled. Local Valcer Strategies OneDrive retention/extraction was exercised; cloud synchronization to another device was not inferred. Private S-drive/VDI paths, production-scale sessions, lock/offline behavior, fresh-profile sign-in, live OCR quality, message-20 findings upload, headless operation and general Python/package execution have not been established. See `KNOWN_LIMITATIONS.md`.
+The user deferred `Documents/Copilot/Created` verification and instructed no organizational FNZ OneDrive access. Monitoring remains disabled. Local Valcer Strategies OneDrive retention/extraction was exercised; cloud synchronization to another device was not inferred. Private S-drive/VDI paths, production-scale sessions, lock/offline behavior, fresh-profile sign-in, live OCR quality, message-20 findings upload, headless operation, three-physical-display capture/viewer placement and unrestricted package execution have not been established. See `KNOWN_LIMITATIONS.md`.
 
 The original CDD repository remains unchanged. The release contains source, guidance, schemas, documentation and tests; personal settings, browser profiles, execution evidence and generated files remain outside source control.
