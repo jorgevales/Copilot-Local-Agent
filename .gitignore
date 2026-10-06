@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+runtime/
+workspace/
+config.local.json
+.history/
+python-launcher.txt

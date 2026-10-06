@@ -1,0 +1,25 @@
+{
+  "debug_port": 9443,
+  "attach_existing": false,
+  "visible": true,
+  "allowed_roots": [
+    "workspace",
+    "deliveries"
+  ],
+  "allowed_domains": [
+    "example.com"
+  ],
+  "response_timeout": 180,
+  "max_corrections": 2,
+  "max_tool_rounds": 12,
+  "sync_timeout": 120,
+  "created_dir": null,
+  "created_sync_enabled": false,
+  "download_timeout": 90,
+  "max_download_bytes": 20971520,
+  "max_delivery_retries": 3,
+  "copilot_download_hosts": [
+    "eu-prod.asyncgw.teams.microsoft.com",
+    "m365.cloud.microsoft"
+  ]
+}

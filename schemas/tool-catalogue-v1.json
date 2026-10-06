@@ -1,0 +1,3009 @@
+{
+  "schema_version": "1.0",
+  "tools": [
+    {
+      "name": "files.list",
+      "version": "1.0",
+      "description": "List up to 200 immediate children inside allowed roots.",
+      "intended_use": "List up to 200 immediate children inside allowed roots.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Read-only operation"
+      ],
+      "risk_level": "low",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "read_only",
+      "side_effects": [],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "path": "example.txt"
+          }
+        }
+      ]
+    },
+    {
+      "name": "files.exists",
+      "version": "1.0",
+      "description": "Check a path inside allowed roots.",
+      "intended_use": "Check a path inside allowed roots.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Read-only operation"
+      ],
+      "risk_level": "low",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "read_only",
+      "side_effects": [],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "path": "example.txt"
+          }
+        }
+      ]
+    },
+    {
+      "name": "files.read",
+      "version": "1.0",
+      "description": "Read bounded UTF-8 text; binary or oversized reads fail.",
+      "intended_use": "Read bounded UTF-8 text; binary or oversized reads fail.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Read-only operation"
+      ],
+      "risk_level": "low",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "read_only",
+      "side_effects": [],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "path": "example.txt"
+          }
+        }
+      ]
+    },
+    {
+      "name": "files.create",
+      "version": "1.0",
+      "description": "Create a new UTF-8 file exclusively. Never overwrite.",
+      "intended_use": "Create a new UTF-8 file exclusively. Never overwrite.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Explicit user grant for side effects"
+      ],
+      "risk_level": "moderate",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 100000
+          }
+        },
+        "required": [
+          "path",
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "user_approval",
+      "side_effects": [
+        "filesystem creation or append"
+      ],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "path": "example.txt",
+            "text": "example.txt"
+          }
+        }
+      ]
+    },
+    {
+      "name": "files.append",
+      "version": "1.0",
+      "description": "Append text to an existing file after explicit approval; preserves prior content.",
+      "intended_use": "Append text to an existing file after explicit approval; preserves prior content.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Explicit user grant for side effects"
+      ],
+      "risk_level": "moderate",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 100000
+          }
+        },
+        "required": [
+          "path",
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "user_approval",
+      "side_effects": [
+        "filesystem creation or append"
+      ],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "path": "example.txt",
+            "text": "example.txt"
+          }
+        }
+      ]
+    },
+    {
+      "name": "files.copy",
+      "version": "1.0",
+      "description": "Copy one bounded file to a new exclusive destination.",
+      "intended_use": "Copy one bounded file to a new exclusive destination.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Explicit user grant for side effects"
+      ],
+      "risk_level": "moderate",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "destination": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "source",
+          "destination"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "user_approval",
+      "side_effects": [
+        "filesystem creation or append"
+      ],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "source": "example.txt",
+            "destination": "example.txt"
+          }
+        }
+      ]
+    },
+    {
+      "name": "files.metadata",
+      "version": "1.0",
+      "description": "Read size, modification time and type.",
+      "intended_use": "Read size, modification time and type.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Read-only operation"
+      ],
+      "risk_level": "low",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "read_only",
+      "side_effects": [],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "path": "example.txt"
+          }
+        }
+      ]
+    },
+    {
+      "name": "files.hash",
+      "version": "1.0",
+      "description": "Calculate SHA-256 for a file up to 20 MB.",
+      "intended_use": "Calculate SHA-256 for a file up to 20 MB.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Read-only operation"
+      ],
+      "risk_level": "low",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "read_only",
+      "side_effects": [],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "path": "example.txt"
+          }
+        }
+      ]
+    },
+    {
+      "name": "files.mkdir",
+      "version": "1.0",
+      "description": "Create a new directory with an existing allowed parent.",
+      "intended_use": "Create a new directory with an existing allowed parent.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Explicit user grant for side effects"
+      ],
+      "risk_level": "moderate",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "user_approval",
+      "side_effects": [
+        "filesystem creation or append"
+      ],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "path": "example.txt"
+          }
+        }
+      ]
+    },
+    {
+      "name": "system.versions",
+      "version": "1.0",
+      "description": "Read Python and operating system versions; no environment variables.",
+      "intended_use": "Read Python and operating system versions; no environment variables.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Read-only operation"
+      ],
+      "risk_level": "low",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "read_only",
+      "side_effects": [],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "name": "system.disk",
+      "version": "1.0",
+      "description": "Read filesystem capacity for an allowed path.",
+      "intended_use": "Read filesystem capacity for an allowed path.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Read-only operation"
+      ],
+      "risk_level": "low",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "read_only",
+      "side_effects": [],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "path": "example.txt"
+          }
+        }
+      ]
+    },
+    {
+      "name": "system.processes",
+      "version": "1.0",
+      "description": "Report this agent PID and the explicitly launched owned Edge PID when available; no wider process or command-line inventory.",
+      "intended_use": "Report this agent PID and the explicitly launched owned Edge PID when available; no wider process or command-line inventory.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Read-only operation"
+      ],
+      "risk_level": "low",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "read_only",
+      "side_effects": [],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "name": "browser.open",
+      "version": "1.0",
+      "description": "Navigate the owned tool tab to an exact allowlisted HTTPS domain.",
+      "intended_use": "Navigate the owned tool tab to an exact allowlisted HTTPS domain.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Explicit user grant for side effects"
+      ],
+      "risk_level": "moderate",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "user_approval",
+      "side_effects": [
+        "browser interaction or screenshot"
+      ],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "url": "https://example.com/"
+          }
+        }
+      ]
+    },
+    {
+      "name": "browser.back",
+      "version": "1.0",
+      "description": "Navigate backward only if the target history URL passes policy.",
+      "intended_use": "Navigate backward only if the target history URL passes policy.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Explicit user grant for side effects"
+      ],
+      "risk_level": "moderate",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "user_approval",
+      "side_effects": [
+        "browser interaction or screenshot"
+      ],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "name": "browser.forward",
+      "version": "1.0",
+      "description": "Navigate forward only if the target history URL passes policy.",
+      "intended_use": "Navigate forward only if the target history URL passes policy.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Explicit user grant for side effects"
+      ],
+      "risk_level": "moderate",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "user_approval",
+      "side_effects": [
+        "browser interaction or screenshot"
+      ],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "name": "browser.info",
+      "version": "1.0",
+      "description": "Read tool-tab URL and title.",
+      "intended_use": "Read tool-tab URL and title.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Read-only operation"
+      ],
+      "risk_level": "low",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "read_only",
+      "side_effects": [],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "name": "browser.read",
+      "version": "1.0",
+      "description": "Read bounded visible body text from the owned tool tab.",
+      "intended_use": "Read bounded visible body text from the owned tool tab.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Read-only operation"
+      ],
+      "risk_level": "low",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "read_only",
+      "side_effects": [],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "name": "browser.structure",
+      "version": "1.0",
+      "description": "Read visible control roles, labels, text, stable attributes, enabled state and unique CSS selectors; exclude input values and URL queries.",
+      "intended_use": "Read visible control roles, labels, text, stable attributes, enabled state and unique CSS selectors; exclude input values and URL queries.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Read-only operation"
+      ],
+      "risk_level": "low",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "controls": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "tag": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "role": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "label": {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        "text": {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        "attributes": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "maxLength": 250
+                            },
+                            "name": {
+                              "type": "string",
+                              "maxLength": 250
+                            },
+                            "data-testid": {
+                              "type": "string",
+                              "maxLength": 250
+                            },
+                            "data-test-id": {
+                              "type": "string",
+                              "maxLength": 250
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "visible": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "selector": {
+                          "type": "string"
+                        },
+                        "href": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "tag",
+                        "type",
+                        "role",
+                        "label",
+                        "text",
+                        "attributes",
+                        "visible",
+                        "enabled",
+                        "selector",
+                        "href"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 100
+                  }
+                },
+                "required": [
+                  "controls"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "truncated": {
+                    "const": true
+                  },
+                  "retained_result": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "truncated",
+                  "retained_result"
+                ]
+              }
+            ]
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "read_only",
+      "side_effects": [],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "name": "browser.click",
+      "version": "1.0",
+      "description": "Click one visible selector on the owned tool tab. May change third-party state.",
+      "intended_use": "Click one visible selector on the owned tool tab. May change third-party state.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Explicit user grant for side effects"
+      ],
+      "risk_level": "moderate",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "selector"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "user_approval",
+      "side_effects": [
+        "browser interaction or screenshot"
+      ],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "selector": "example.txt"
+          }
+        }
+      ]
+    },
+    {
+      "name": "browser.fill",
+      "version": "1.0",
+      "description": "Fill one ordinary text field; password fields are forbidden.",
+      "intended_use": "Fill one ordinary text field; password fields are forbidden.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Explicit user grant for side effects"
+      ],
+      "risk_level": "moderate",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "selector",
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "user_approval",
+      "side_effects": [
+        "browser interaction or screenshot"
+      ],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "selector": "example.txt",
+            "text": "example.txt"
+          }
+        }
+      ]
+    },
+    {
+      "name": "browser.scroll",
+      "version": "1.0",
+      "description": "Scroll the owned tool page.",
+      "intended_use": "Scroll the owned tool page.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Explicit user grant for side effects"
+      ],
+      "risk_level": "moderate",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "pixels": {
+            "type": "integer",
+            "minimum": -10000,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "pixels"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "user_approval",
+      "side_effects": [
+        "browser interaction or screenshot"
+      ],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "pixels": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "browser.screenshot",
+      "version": "1.0",
+      "description": "Save a screenshot of the owned tool tab to a unique session file.",
+      "intended_use": "Save a screenshot of the owned tool tab to a unique session file.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Explicit user grant for side effects"
+      ],
+      "risk_level": "moderate",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "user_approval",
+      "side_effects": [
+        "browser interaction or screenshot"
+      ],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "name": "browser.errors",
+      "version": "1.0",
+      "description": "Report captured tool-page console errors if the browser adapter supplies them.",
+      "intended_use": "Report captured tool-page console errors if the browser adapter supplies them.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Read-only operation"
+      ],
+      "risk_level": "low",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "read_only",
+      "side_effects": [],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "name": "browser.downloads",
+      "version": "1.0",
+      "description": "Report observed tool-page download events; absence is not delivery proof.",
+      "intended_use": "Report observed tool-page download events; absence is not delivery proof.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Read-only operation"
+      ],
+      "risk_level": "low",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "read_only",
+      "side_effects": [],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "name": "ocr.image",
+      "version": "1.0",
+      "description": "Check a local image; OCR requires an explicitly available integrated image capability.",
+      "intended_use": "Check a local image; OCR requires an explicitly available integrated image capability.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Explicit user grant for side effects"
+      ],
+      "risk_level": "moderate",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "user_approval",
+      "side_effects": [
+        "browser interaction or screenshot"
+      ],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "path": "example.txt"
+          }
+        }
+      ]
+    },
+    {
+      "name": "created.snapshot",
+      "version": "1.0",
+      "description": "When explicitly enabled, record a baseline of the configured OneDrive Copilot Created files. Otherwise report disabled without filesystem access.",
+      "intended_use": "When explicitly enabled, record a baseline of the configured OneDrive Copilot Created files. Otherwise report disabled without filesystem access.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Read-only operation"
+      ],
+      "risk_level": "low",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "read_only",
+      "side_effects": [],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "name": "created.wait",
+      "version": "1.0",
+      "description": "When explicitly enabled, wait for stable readable new or changed local OneDrive Created files. Report disabled without filesystem access otherwise.",
+      "intended_use": "When explicitly enabled, wait for stable readable new or changed local OneDrive Created files. Report disabled without filesystem access otherwise.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Read-only operation"
+      ],
+      "risk_level": "low",
+      "timeout": 300,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "baseline_id": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "pattern": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "expected_names": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "maxItems": 100
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "read_only",
+      "side_effects": [],
+      "limits": {
+        "timeout_seconds": 300,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "name": "copilot.download",
+      "version": "1.0",
+      "description": "Download one real file link in this exact Copilot response. Inspect Edge download settings first; save and verify an exclusive local artifact. Plaintext and sandbox links are not delivery.",
+      "intended_use": "Download one real file link in this exact Copilot response. Inspect Edge download settings first; save and verify an exclusive local artifact. Plaintext and sandbox links are not delivery.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Explicit user grant for side effects"
+      ],
+      "risk_level": "moderate",
+      "timeout": 300,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "expected_name": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "link_text": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "expected_sha256": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "expected_name"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "user_approval",
+      "side_effects": [
+        "filesystem creation or append"
+      ],
+      "limits": {
+        "timeout_seconds": 300,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "expected_name": "package.zip"
+          }
+        }
+      ]
+    },
+    {
+      "name": "archives.inspect",
+      "version": "1.0",
+      "description": "Inspect a bounded ZIP manifest, archive SHA-256 and native Office container type without extracting.",
+      "intended_use": "Inspect a bounded ZIP manifest, archive SHA-256 and native Office container type without extracting.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Read-only operation"
+      ],
+      "risk_level": "low",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "read_only",
+      "side_effects": [],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "path": "example.txt"
+          }
+        }
+      ]
+    },
+    {
+      "name": "archives.extract",
+      "version": "1.0",
+      "description": "Extract a reviewed SHA-256-bound ZIP exclusively inside allowed roots; preflight paths and verify all files without executing code. Preserve original and partial outputs.",
+      "intended_use": "Extract a reviewed SHA-256-bound ZIP exclusively inside allowed roots; preflight paths and verify all files without executing code. Preserve original and partial outputs.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Explicit user grant for side effects"
+      ],
+      "risk_level": "moderate",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "destination": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "expected_files": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "maxItems": 1000
+          },
+          "expected_sha256": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "path",
+          "destination",
+          "expected_sha256"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "user_approval",
+      "side_effects": [
+        "filesystem creation or append"
+      ],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "path": "package.zip",
+            "destination": "delivered-project",
+            "expected_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "expected_files": [
+              "README.md"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "code_runner",
+      "version": "1.0",
+      "description": "Evaluate reviewed python_subset script with mediated declared files and strict local limits. For downloaded source, include both source_path and source_sha256, declare its read permission, and preserve the source's exact UTF-8 script bytes.",
+      "intended_use": "Evaluate reviewed python_subset script with mediated declared files and strict local limits. For downloaded source, include both source_path and source_sha256, declare its read permission, and preserve the source's exact UTF-8 script bytes.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Explicit user grant for side effects"
+      ],
+      "risk_level": "moderate",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "commands": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "maxItems": 100
+          },
+          "create_paths": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "maxItems": 100
+          },
+          "expected_outputs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "maxItems": 100
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "network_destinations": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "maxItems": 100
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "maxItems": 100
+          },
+          "purpose": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "read_paths": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "maxItems": 100
+          },
+          "recovery_notes": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "risk_summary": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "script": {
+            "type": "string",
+            "maxLength": 50000
+          },
+          "source_path": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "source_sha256": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "subprocesses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "maxItems": 100
+          },
+          "working_directory": {
+            "type": "string",
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "commands",
+          "create_paths",
+          "expected_outputs",
+          "language",
+          "network_destinations",
+          "permissions",
+          "purpose",
+          "read_paths",
+          "recovery_notes",
+          "risk_summary",
+          "script",
+          "working_directory"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "immutable_plan_approval",
+      "side_effects": [
+        "filesystem creation or append"
+      ],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "script": "print('reviewed computation')",
+            "purpose": "Compute a bounded result",
+            "language": "python_subset",
+            "working_directory": ".",
+            "read_paths": [],
+            "create_paths": [],
+            "expected_outputs": [],
+            "commands": [],
+            "network_destinations": [],
+            "permissions": [],
+            "risk_summary": "No external side effects",
+            "recovery_notes": "Review failure output before retry"
+          }
+        }
+      ]
+    }
+  ]
+}
