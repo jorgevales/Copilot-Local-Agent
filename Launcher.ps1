@@ -92,9 +92,37 @@ function Invoke-SetupPython([string]$Executable, [string[]]$Arguments) {
 }
 
 function Get-PipConfiguration([string]$Executable, [string[]]$PythonFlags) {
+    $ErrorActionPreference = 'Continue'
     $configuration = @(& $Executable @PythonFlags -m pip config list)
     if ($LASTEXITCODE -ne 0) { throw 'Unable to verify pip installation settings. Existing files were retained.' }
     return ($configuration -join "`n")
+}
+
+function Get-WorkingPip([string]$Executable, [string[]]$PythonFlags) {
+    $ErrorActionPreference = 'Continue'
+    $description = @(& $Executable @PythonFlags -m pip --version 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $description.Count -eq 0) { return $null }
+    return ($description -join ' ').Trim()
+}
+
+function Get-RecoveryBasePython([string]$SelectedPython, [string[]]$PythonFlags, [string]$EnvironmentPython) {
+    if ([System.IO.Path]::GetFullPath($SelectedPython) -ine [System.IO.Path]::GetFullPath($EnvironmentPython)) { return $SelectedPython }
+    $ErrorActionPreference = 'Continue'
+    $locator = @'
+import sys
+print(getattr(sys, '_base_executable', ''))
+print(sys.base_prefix)
+'@
+    $reported = @(& $SelectedPython @PythonFlags -c $locator 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $reported.Count -lt 2) { throw 'The selected project environment cannot report its base Python installation. Existing files were retained.' }
+    $possible = @([string]$reported[0], (Join-Path ([string]$reported[1]) 'python.exe'))
+    foreach ($candidate in $possible) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            Write-Host ('Using the project environment''s reported base Python: ' + $candidate)
+            return $candidate
+        }
+    }
+    throw 'The selected project environment has no accessible base Python executable. Existing files were retained.'
 }
 
 function Initialize-AgentEnvironment([string]$BasePython, [string[]]$PythonFlags, [string]$Probe, [string]$RuntimeMode, [string]$ProjectRoot) {
@@ -112,16 +140,27 @@ function Initialize-AgentEnvironment([string]$BasePython, [string[]]$PythonFlags
         try {
             $setupLock = [System.IO.File]::Open((Join-Path $ProjectRoot '.venv-setup.lock'), [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
         } catch { throw 'Another setup is running, or this project is not writable. Retry after setup completes.' }
+        $BasePython = Get-RecoveryBasePython $BasePython $PythonFlags $environmentPython
         Invoke-SetupPython $BasePython ($PythonFlags + @('-c',$Probe,($RuntimeMode + '-bootstrap'),$requirements))
         if (Test-Path -LiteralPath $environmentPath) {
             $environmentEntry = Get-Item -LiteralPath $environmentPath -Force
             if (-not (Test-SafePythonEntry $environmentEntry)) { throw 'The project .venv must be a real directory, not a redirected path.' }
+            $recoveryReason = $null
             if (-not (Test-Path -LiteralPath (Join-Path $environmentPath 'pyvenv.cfg') -PathType Leaf) -or -not (Test-Path -LiteralPath $environmentPython -PathType Leaf)) {
+                $recoveryReason = 'The existing project Python environment is incomplete.'
+            } elseif (-not (Get-WorkingPip $environmentPython $PythonFlags)) {
+                $recoveryReason = 'The existing project Python environment has no working pip.'
+            }
+            if ($recoveryReason) {
+                Write-Host $recoveryReason
+                $basePip = Get-WorkingPip $BasePython $PythonFlags
+                if ($basePip) { Write-Host ('Located pip in the selected Python installation: ' + $basePip) }
+                else { Write-Host 'The selected Python has no working pip; the bundled bootstrap will seed it in the project environment.' }
                 $archivePath = Join-Path $ProjectRoot ('.venv-incomplete-' + [guid]::NewGuid().ToString('N'))
                 $projectFull = [System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\') + '\'
                 if (-not ([System.IO.Path]::GetFullPath($environmentPath).StartsWith($projectFull, [System.StringComparison]::OrdinalIgnoreCase) -and [System.IO.Path]::GetFullPath($archivePath).StartsWith($projectFull, [System.StringComparison]::OrdinalIgnoreCase))) { throw 'Environment recovery paths are outside the project.' }
                 Move-Item -LiteralPath $environmentPath -Destination $archivePath -ErrorAction Stop
-                Write-Host ('Preserved the incomplete environment at ' + $archivePath)
+                Write-Host ('Preserved the previous environment at ' + $archivePath)
             } else {
                 Write-Host 'Reusing the existing project Python environment.'
             }
@@ -142,6 +181,8 @@ function Initialize-AgentEnvironment([string]$BasePython, [string[]]$PythonFlags
             if ($candidates.Count -ne 1) { throw 'Project environment Python is redirected or unavailable.' }
         } finally { $candidates = $priorCandidates; $seen = $priorSeen }
         Invoke-SetupPython $environmentPython ($PythonFlags + @('-c',$Probe,($RuntimeMode + '-bootstrap'),$requirements,$environmentPath))
+        if (-not (Get-WorkingPip $environmentPython $PythonFlags)) { throw 'Project environment pip is unavailable after creation or reuse. Packages were not installed; existing files were retained.' }
+        Write-Host 'Project environment pip verified.'
         if ($env:PIP_TARGET) { throw 'PIP_TARGET redirects package installation. Clear that override before running Setup; no settings were changed.' }
         $pipConfiguration = Get-PipConfiguration $environmentPython $PythonFlags
         if ($pipConfiguration -match '(?im)^\s*[^=]*\.target\s*=') { throw 'Pip configuration redirects installation with target. Remove that override before Setup; no settings were changed.' }

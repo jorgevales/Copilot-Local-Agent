@@ -237,6 +237,16 @@ class PythonSetupChoiceTests(unittest.TestCase):
         self.assertIn('RuntimeError: 12345', result.stderr)
         self.assertIn('Python setup command failed with exit code 1', result.stdout)
 
+    def test_pip_probe_detects_working_and_missing_module_without_traceback(self):
+        source = (Path(__file__).resolve().parents[1] / 'Launcher.ps1').read_text(encoding='utf-8-sig')
+        helper = source[source.index('function Get-WorkingPip('):source.index('function Get-RecoveryBasePython(')]
+        executable = sys.executable.replace("'", "''")
+        script = "$ErrorActionPreference='Stop'; " + helper + " $working=Get-WorkingPip '" + executable + "' @('-B'); $missing=Get-WorkingPip '" + executable + "' @('-B','-S'); if (-not $working -or $missing) { throw 'Pip probe misclassified Python' }; Write-Output 'passed'"
+        result = subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', script], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('passed', result.stdout)
+        self.assertNotIn('Traceback', result.stderr)
+
 
     def test_cloud_tags_only_allowed_for_local_development(self):
         output = self.run_helpers("foreach ($tag in @(2415919130,2415923226,2415980570)) { if (-not (Test-AllowedCloudTag $tag)) { throw 'Known CLOUD tag denied' } }; foreach ($tag in @(2684354572,2684354563,2415919131,2952790042)) { if (Test-AllowedCloudTag $tag) { throw 'Unknown or surrogate tag accepted' } }; $productionShare=$true; if (Test-AllowedCloudTag 2415919130) { throw 'Cloud allowed on S' }; Write-Output 'passed'")
@@ -247,7 +257,7 @@ class PythonSetupChoiceTests(unittest.TestCase):
         bootstrap.mkdir()
         shutil.copyfile(Path(__file__).resolve().parents[1] / 'bootstrap' / 'virtualenv.pyz', bootstrap / 'virtualenv.pyz')
         path = str(directory).replace("'", "''")
-        return self.run_helpers("$global:operations=[System.Collections.Generic.List[string]]::new(); function Get-PipConfiguration { return '' }; function Invoke-SetupPython($Executable,$Arguments) { $global:operations.Add(($Arguments -join '|')); " + fail + " if (($Arguments -join '|') -like '*virtualenv.pyz*') { $envPath=$Arguments[-1]; New-Item -ItemType Directory -Path (Join-Path $envPath 'Scripts') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $envPath 'pyvenv.cfg') -Value 'fixture'; Set-Content -LiteralPath (Join-Path $envPath 'Scripts\\python.exe') -Value 'fixture' } }; " + body.replace('PROJECT', "'"+path+"'"))
+        return self.run_helpers("$global:operations=[System.Collections.Generic.List[string]]::new(); function Get-PipConfiguration { return '' }; function Get-WorkingPip { return 'pip fixture' }; function Invoke-SetupPython($Executable,$Arguments) { $global:operations.Add(($Arguments -join '|')); " + fail + " if (($Arguments -join '|') -like '*virtualenv.pyz*') { $envPath=$Arguments[-1]; New-Item -ItemType Directory -Path (Join-Path $envPath 'Scripts') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $envPath 'pyvenv.cfg') -Value 'fixture'; Set-Content -LiteralPath (Join-Path $envPath 'Scripts\\python.exe') -Value 'fixture' } }; " + body.replace('PROJECT', "'"+path+"'"))
 
     def test_setup_creates_environment_installs_pins_and_retains_lock(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -278,6 +288,23 @@ class PythonSetupChoiceTests(unittest.TestCase):
             (Path(directory) / '.venv').mkdir()
             (Path(directory) / '.venv' / 'old-file.txt').write_text('keep me')
             output = self.environment_fixture(directory, "$result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; $archives=@(Get-ChildItem -LiteralPath PROJECT -Directory -Filter '.venv-incomplete-*'); if ($archives.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $archives[0].FullName 'old-file.txt')) -or $operations.Count -ne 4) { throw 'Incomplete environment not preserved and repaired' }; Write-Output 'passed'")
+            self.assertIn('passed', output)
+
+    def test_setup_rebuilds_pipless_existing_environment_and_preserves_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env = Path(directory) / '.venv'
+            (env / 'Scripts').mkdir(parents=True)
+            (env / 'Scripts' / 'python.exe').write_bytes(b'fixture')
+            (env / 'pyvenv.cfg').write_text('fixture')
+            (env / 'old-file.txt').write_text('keep me')
+            body = r"$global:rebuilt=$false; $global:pipChecks=[System.Collections.Generic.List[string]]::new(); function Get-WorkingPip($Executable,$PythonFlags) { $global:pipChecks.Add($Executable); if ($Executable -like '*Scripts\python.exe' -and -not $global:rebuilt) { return $null }; return 'pip from selected Python' }; $result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; $archives=@(Get-ChildItem -LiteralPath PROJECT -Directory -Filter '.venv-incomplete-*'); if ($archives.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $archives[0].FullName 'old-file.txt')) -or $operations.Count -ne 4 -or $pipChecks.Count -ne 3 -or $pipChecks[1] -ne 'base' -or -not $global:rebuilt) { throw 'Pipless environment was not safely repaired' }; Write-Output 'passed'"
+            output = self.environment_fixture(directory, body,
+                                              "if (($Arguments -join '|') -like '*virtualenv.pyz*') { $global:rebuilt=$true };")
+            self.assertIn('passed', output)
+
+    def test_setup_stops_before_packages_when_replacement_has_no_pip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = self.environment_fixture(directory, r"function Get-WorkingPip { return $null }; try { Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; throw 'Missing pip accepted' } catch { if ($_.Exception.Message -notlike '*pip is unavailable*') { throw } }; if ($operations.Count -ne 3 -or -not (Test-Path -LiteralPath (Join-Path PROJECT '.venv\pyvenv.cfg'))) { throw 'Packages installed or replacement lost' }; Write-Output 'passed'")
             self.assertIn('passed', output)
 
     def test_pip_target_configuration_stops_before_install(self):
