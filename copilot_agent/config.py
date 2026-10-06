@@ -31,7 +31,7 @@ class Config:
     edge_executable: str = ''
     attach_existing: bool = False
     visible: bool = True
-    startup_timeout: float = 60
+    startup_timeout: float = 120
     response_timeout: float = 180
     poll_interval: float = .5
     capture_stable_samples: int = 3

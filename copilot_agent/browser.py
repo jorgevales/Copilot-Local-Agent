@@ -296,20 +296,27 @@ class BrowserAdapter:
                 edge.validate_endpoint(self.endpoint, payload)
                 if not self.config.attach_existing:
                     raise BrowserUIError('This port already has an Edge session. Enable explicit existing-session attachment or choose another port.')
-                await asyncio.to_thread(edge.validate_profile_ownership, self.config.debug_port, profile)
+                if self._launched_process is not None:
+                    await asyncio.to_thread(edge.validate_launched_endpoint, self.config.debug_port, profile,
+                                            self._launched_process)
+                else:
+                    await asyncio.to_thread(edge.validate_profile_ownership, self.config.debug_port, profile)
             else:
                 if self.config.attach_existing:
                     raise BrowserUIError('No existing dedicated Edge debugging session was found on this port.')
                 executable = edge.find_edge_executable(self.config.edge_executable)
+                print('[System] Starting a visible Edge window with the dedicated agent profile.')
                 self._launched_process = edge.launch_edge(executable, self.config.debug_port, profile)
             from playwright.async_api import async_playwright
             self._manager = async_playwright()
             self._playwright = await self._manager.start()
-            self.browser = await edge.connect_bounded(self._playwright, self.endpoint, self.config.startup_timeout)
-            # Also prove ownership for a fresh launch: a pre-existing non-CDP profile
-            # may swallow the command-line request into a different process.
+            self.browser = await edge.connect_bounded(self._playwright, self.endpoint, self.config.startup_timeout,
+                                                      process=self._launched_process)
+            # Prove the fresh listener belongs to this Popen process; fall back to
+            # exact profile inspection if Edge handed off to a different process.
             if __import__('os').name == 'nt':
-                await asyncio.to_thread(edge.validate_profile_ownership, self.config.debug_port, profile)
+                await asyncio.to_thread(edge.validate_launched_endpoint, self.config.debug_port, profile,
+                                        self._launched_process)
             self.context = self.browser.contexts[0]
             self.page = await asyncio.wait_for(self.context.new_page(), 10)
             self.tool_context = await asyncio.wait_for(self.browser.new_context(accept_downloads=False, service_workers='block', java_script_enabled=False), 10)
@@ -765,7 +772,7 @@ class BrowserAdapter:
         self.last_diagnostics = str(path)
         return path
 
-    async def close(self):
+    async def close(self, *, preserve_browser_process=False):
         # Never Browser.close(): CDP disconnect must not shut down an existing browser.
         for page in (self.tool_page, self.page):
             if page is not None:
@@ -787,6 +794,9 @@ class BrowserAdapter:
             except Exception:
                 pass
         self._playwright = self.browser = self.context = None
+        if not preserve_browser_process and self._launched_process is not None:
+            await asyncio.to_thread(edge.stop_launched_edge, self._launched_process)
+        self._launched_process = None
         if self._mutex:
             self._mutex[0].CloseHandle(self._mutex[1])
             self._mutex = None

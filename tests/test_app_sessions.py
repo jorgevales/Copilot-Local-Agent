@@ -56,6 +56,16 @@ class NewSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('OLD_TOPIC_UNIQUE', json.dumps(fresh_browser.sent[0]['message']))
         await new.close()
 
+    async def test_new_session_keeps_only_the_agents_launched_edge_process(self):
+        root, config, state, registry, old_browser, old = self.previous()
+        owned_process = object()
+        old_browser._launched_process = owned_process
+        fresh_browser = SessionBrowser([final_response])
+        with patch('copilot_agent.app.BrowserAdapter', return_value=fresh_browser):
+            new = await start_new_session(config, old, 'Synthetic model', registry)
+        self.assertIs(fresh_browser._launched_process, owned_process)
+        await new.close()
+
     async def test_uncertainty_cannot_be_erased_through_new_session(self):
         root, config, state, registry, old_browser, old = self.previous()
         state.data['calls']['uncertain'] = {'status': 'uncertain', 'state_changing': True}

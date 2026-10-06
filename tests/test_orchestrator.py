@@ -32,7 +32,7 @@ class MockBrowser:
         result = response(message) if callable(response) else response
         return result if isinstance(result, str) else encoded(result)
 
-    async def close(self):
+    async def close(self, *, preserve_browser_process=False):
         self.closed = True
 
 

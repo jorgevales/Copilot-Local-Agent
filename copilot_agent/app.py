@@ -90,11 +90,13 @@ async def start_new_session(config, previous, model_label, registry=None):
                                              for call in old.data['calls'].values()):
         raise RuntimeError('Reconcile uncertain submissions or state-changing calls before starting a new session.')
     old.event('new_session_requested')
-    await previous.close()
+    owned_process = getattr(previous.browser, '_launched_process', None)
+    await previous.close(preserve_browser_process=True)
     fresh_config = replace(config, attach_existing=True, model=model_label)
     directory = config.runtime_dir / 'sessions' / uuid.uuid4().hex
     state = SessionState(directory)
     browser = BrowserAdapter(fresh_config)
+    browser._launched_process = owned_process
     engine = None
     try:
         await browser.start()
@@ -110,7 +112,7 @@ async def start_new_session(config, previous, model_label, registry=None):
         state.data['status'] = 'blocked'
         state.save()
         await browser.close()
-        raise RuntimeError('New session setup stopped; previous records and new diagnostics are retained at ' + str(directory)) from exc
+        raise RuntimeError('New session setup stopped; previous records and new diagnostics are retained in your selected OneDrive storage.') from exc
 
 
 async def run(args):
@@ -168,9 +170,9 @@ async def run(args):
     browser = BrowserAdapter(config)
     orchestrator = None
     system('Copilot Local Agent — reasoning through Microsoft 365 Copilot web UI')
-    system('Session: ' + str(directory))
+    system('Session records are kept in your selected OneDrive storage.')
     system('Browser: Visible. Non-visible Copilot operation has not passed acceptance and is unavailable.')
-    system('Permitted file roots: ' + ', '.join(config.allowed_roots))
+    system('Permitted file roots: ' + ', '.join(Path(root).name for root in config.allowed_roots))
     system('Third-party browser domains: ' + ', '.join(config.allowed_domains))
     system('No files will be deleted. Generated-code execution always requires approval.')
     system('Useful Findings are saved on any valid turn; their file is attached every ten messages.')
@@ -246,7 +248,7 @@ async def run(args):
                     browser, state = orchestrator.browser, orchestrator.state
                     directory = state.directory
                     pending_files = orchestrator.attachment_queue()
-                    system('New independent session: ' + str(directory))
+                    system('New independent session started; its records are kept in your selected OneDrive storage.')
                     if first_message:
                         await orchestrator.turn(first_message)
                     continue
@@ -290,7 +292,7 @@ async def run(args):
             except (ValueError, RuntimeError, OSError) as exc:
                 state.event('turn_error', error=str(exc))
                 system('Action stopped: ' + str(exc))
-                system('Session/evidence retained at ' + str(directory))
+                system('Session evidence was retained in your selected OneDrive storage.')
                 if state.data['status'] == 'closed':
                     system('The previous session was archived. Restart the application to try a fresh session.')
                     break

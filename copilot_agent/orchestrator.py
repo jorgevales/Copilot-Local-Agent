@@ -471,7 +471,10 @@ class Orchestrator:
             actual.update(Path(report['path']).name.casefold() for report in downloads)
         return bool(actual) and expected.issubset(actual)
 
-    async def close(self):
+    async def close(self, *, preserve_browser_process=False):
         self.state.data['status'] = 'closed'
         self.state.save()
-        await self.browser.close()
+        if preserve_browser_process:
+            await self.browser.close(preserve_browser_process=True)
+        else:
+            await self.browser.close()
