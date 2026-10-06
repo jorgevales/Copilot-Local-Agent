@@ -1,18 +1,8 @@
-# Personal/runtime files are never part of the shared source repository.
-**/.git/
-**/.venv/
-**/venv/
-**/__pycache__/
-*.py[cod]
-*.log
-**/.history/
-**/runtime/
-**/workspace/
-**/node_modules/
-**/config.local.json
-**/python-launcher.txt
-**/python_path.txt
-**/.env
-**/.env.local
-**/*.pem
-**/*.key
+.venv/
+__pycache__/
+*.pyc
+runtime/
+workspace/
+config.local.json
+.history/
+python-launcher.txt
