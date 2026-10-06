@@ -19,6 +19,7 @@ from .file_picker import select_files
 from .attachments import MAX_USER_FILES
 from .storage import default_storage, discover_onedrive_accounts, machine_key, read_user_settings, save_user_settings, validate_storage_directory
 from . import reused_browser as edge
+from .setup_resources import choose_account, choose_edge
 
 
 def system(message):
@@ -116,23 +117,7 @@ async def run(args):
     config = Config.load(args.config)
     if config.storage_dir is None:
         accounts = getattr(config, '_storage_candidates', None) or discover_onedrive_accounts()
-        if not accounts:
-            raise RuntimeError('No configured OneDrive account is available. Sign in to OneDrive and run setup again; no local-storage fallback is used.')
-        system('Choose your OneDrive account once for personal settings, sessions and delivered files:')
-        for index, account in enumerate(accounts, 1):
-            system(f'{index}. {account.label}: {account.path}')
-        selected = None
-        for attempt in range(5):
-            response = (await ask('Choose an account number' + (' [Enter for 1]' if len(accounts) == 1 else '') + ': ')).strip()
-            if not response and len(accounts) == 1:
-                selected = accounts[0]
-                break
-            if response.isdigit() and 1 <= int(response) <= len(accounts):
-                selected = accounts[int(response) - 1]
-                break
-            system('Choose a displayed account number.')
-        if selected is None:
-            raise RuntimeError('OneDrive selection exhausted five attempts; no files were created.')
+        selected = await choose_account(accounts, ask, system)
         config.select_storage(default_storage(selected))
     settings = read_user_settings(config.storage_dir)
     if args.config is None and isinstance(settings.get('config'), dict):
@@ -159,6 +144,7 @@ async def run(args):
     os.environ['TEMP'] = str(transient)
     os.environ['TMP'] = str(transient)
     os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+    await choose_edge(config, settings, ask, system, force=getattr(args, 'setup_only', False))
     settings['python_executable'] = sys.executable
     settings['config'] = {key: value for key, value in config.as_dict().items() if key in {
         'allowed_domains', 'allowed_roots', 'model', 'response_timeout', 'max_corrections', 'max_tool_rounds',
@@ -169,7 +155,7 @@ async def run(args):
     save_user_settings(config.storage_dir, settings)
     if getattr(args, 'setup_only', False):
         system('Setup verified. Personal storage: ' + str(config.storage_dir))
-        system('Shared Python dependencies are installed by the operator; setup does not create a virtual environment or install packages.')
+        system('Python resource setup verified. Setup.cmd creates the project virtual environment and installs pinned dependencies before this storage step.')
         return
     await choose_browser_endpoint(config, args, settings)
     save_user_settings(config.storage_dir, settings)

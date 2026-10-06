@@ -7,20 +7,134 @@ $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer
 
 function Add-PythonCandidate([string]$Value) {
     if ([string]::IsNullOrWhiteSpace($Value)) { return }
-    $candidate = $Value.Trim().Trim('"')
+    $candidate = $Value.Trim().Trim('"').Trim("'")
+    if ($candidate -notmatch '^(?:[A-Za-z]:\\|\\\\[^\\]+\\[^\\]+\\)') { return }
+    if (Test-Path -LiteralPath $candidate -PathType Container) {
+        Add-PythonCandidate (Join-Path $candidate 'python.exe')
+        Add-PythonCandidate (Join-Path $candidate 'Scripts\python.exe')
+        return
+    }
     if ([System.IO.Path]::GetFileName($candidate) -ine 'python.exe') { return }
     if ($productionShare -and ([System.IO.Path]::GetPathRoot($candidate) -ine 'S:\')) { return }
     if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { return }
     $entry = Get-Item -LiteralPath $candidate -Force
-    if (($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return }
+    if (-not (Test-SafePythonEntry $entry)) { return }
     $parent = $entry.Directory
     while ($parent) {
-        if (($parent.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return }
+        if (-not (Test-SafePythonEntry $parent)) { return }
         $parent = $parent.Parent
     }
     $resolved = (Resolve-Path -LiteralPath $candidate).Path
     if ($productionShare -and ([System.IO.Path]::GetPathRoot($resolved) -ine 'S:\')) { return }
     if ($seen.Add($resolved)) { $candidates.Add($resolved) }
+}
+
+function Test-AllowedCloudTag([uint64]$Tag) {
+    return (-not $productionShare -and ($Tag -band 4294905855) -eq 2415919130 -and ($Tag -band 536870912) -eq 0)
+}
+
+function Test-SafePythonEntry($Entry) {
+    if (($Entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) { return $true }
+    if ($productionShare) { return $false }
+    if (-not ('CopilotLauncher.ReparseMetadata' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+namespace CopilotLauncher {
+ public static class ReparseMetadata {
+  [StructLayout(LayoutKind.Sequential)] private struct TagInfo { public uint Attributes; public uint Tag; }
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] private static extern SafeFileHandle CreateFileW(string path, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
+  [DllImport("kernel32.dll", SetLastError=true)] private static extern bool GetFileInformationByHandleEx(SafeFileHandle handle, int infoClass, out TagInfo info, uint size);
+  public static uint ReadTag(string path) {
+   using (var handle = CreateFileW(path,0,7,IntPtr.Zero,3,0x02200000,IntPtr.Zero)) {
+    if (handle.IsInvalid) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+    TagInfo info;
+    if (!GetFileInformationByHandleEx(handle,9,out info,8)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+    return info.Tag;
+   }
+  }
+ }
+}
+'@
+    }
+    try { return (Test-AllowedCloudTag ([CopilotLauncher.ReparseMetadata]::ReadTag($Entry.FullName))) } catch { return $false }
+}
+
+function Read-PythonMethod {
+    Write-Host 'Python setup: 1. Detect automatically  2. Paste an installation folder or python.exe path'
+    for ($attempt = 0; $attempt -lt 5; $attempt++) {
+        $answer = (Read-Host 'Choose 1 or 2').Trim()
+        if ($answer -in @('1','2')) { return $answer }
+        Write-Host 'Enter 1 for automatic detection or 2 to paste a path.'
+    }
+    throw 'Python setup selection stopped after five attempts.'
+}
+
+function Read-PythonPath {
+    Write-Host 'Paste the full path to python.exe or its installation folder. Surrounding quotes are allowed.'
+    if ($productionShare) { Write-Host 'The complete Python installation must be on S:.' }
+    for ($attempt = 0; $attempt -lt 5; $attempt++) {
+        Add-PythonCandidate (Read-Host 'Python path')
+        if ($candidates.Count -gt 0) { return }
+        Write-Host 'No usable python.exe was found at that absolute path. Check the folder and access permissions.'
+    }
+    throw 'Python path entry stopped after five attempts.'
+}
+
+function Invoke-SetupPython([string]$Executable, [string[]]$Arguments) {
+    & $Executable @Arguments | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw ('Python setup command failed with exit code ' + $LASTEXITCODE + '. Existing files were retained.') }
+}
+
+function Get-PipConfiguration([string]$Executable, [string[]]$PythonFlags) {
+    $configuration = @(& $Executable @PythonFlags -m pip config list)
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to verify pip installation settings. Existing files were retained.' }
+    return ($configuration -join "`n")
+}
+
+function Initialize-AgentEnvironment([string]$BasePython, [string[]]$PythonFlags, [string]$Probe, [string]$RuntimeMode, [string]$ProjectRoot) {
+    $environmentPath = Join-Path $ProjectRoot '.venv'
+    $environmentPython = Join-Path $environmentPath 'Scripts\python.exe'
+    $requirements = Join-Path $ProjectRoot 'requirements.lock.txt'
+    $setupLock = $null
+    try {
+        $lockPath = Join-Path $ProjectRoot '.venv-setup.lock'
+        if (Test-Path -LiteralPath $lockPath) {
+            if (-not (Test-SafePythonEntry (Get-Item -LiteralPath $lockPath -Force))) { throw 'Setup lock must not be a redirected path.' }
+        }
+        try {
+            $setupLock = [System.IO.File]::Open((Join-Path $ProjectRoot '.venv-setup.lock'), [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        } catch { throw 'Another setup is running, or this project is not writable. Retry after setup completes.' }
+        Invoke-SetupPython $BasePython ($PythonFlags + @('-c',$Probe,($RuntimeMode + '-bootstrap'),$requirements))
+        if (Test-Path -LiteralPath $environmentPath) {
+            $environmentEntry = Get-Item -LiteralPath $environmentPath -Force
+            if (-not (Test-SafePythonEntry $environmentEntry)) { throw 'The project .venv must be a real directory, not a redirected path.' }
+            if (-not (Test-Path -LiteralPath (Join-Path $environmentPath 'pyvenv.cfg') -PathType Leaf) -or -not (Test-Path -LiteralPath $environmentPython -PathType Leaf)) {
+                throw 'Existing .venv is incomplete. Files were retained; ask the operator to repair or rename it before retrying Setup.'
+            }
+            Write-Host 'Reusing the existing project Python environment.'
+        } else {
+            Write-Host 'Creating the project Python environment.'
+            Invoke-SetupPython $BasePython ($PythonFlags + @('-m','venv',$environmentPath))
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $environmentPath 'pyvenv.cfg') -PathType Leaf) -or -not (Test-Path -LiteralPath $environmentPython -PathType Leaf)) { throw 'Virtual environment creation was incomplete. Files were retained.' }
+        $priorCandidates = $candidates
+        $priorSeen = $seen
+        try {
+            $candidates = [System.Collections.Generic.List[string]]::new()
+            $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            Add-PythonCandidate $environmentPython
+            if ($candidates.Count -ne 1) { throw 'Project environment Python is redirected or unavailable.' }
+        } finally { $candidates = $priorCandidates; $seen = $priorSeen }
+        Invoke-SetupPython $environmentPython ($PythonFlags + @('-c',$Probe,($RuntimeMode + '-bootstrap'),$requirements,$environmentPath))
+        if ($env:PIP_TARGET) { throw 'PIP_TARGET redirects package installation. Clear that override before running Setup; no settings were changed.' }
+        $pipConfiguration = Get-PipConfiguration $environmentPython $PythonFlags
+        if ($pipConfiguration -match '(?im)^\s*[^=]*\.target\s*=') { throw 'Pip configuration redirects installation with target. Remove that override before Setup; no settings were changed.' }
+        Write-Host 'Installing the pinned project dependencies (the configured package mirror is respected).'
+        Invoke-SetupPython $environmentPython ($PythonFlags + @('-m','pip','install','--requirement',$requirements,'--disable-pip-version-check','--no-user','--prefix',$environmentPath))
+        return $environmentPython
+    } finally { if ($setupLock) { $setupLock.Dispose() } }
 }
 
 function Get-OneDriveRoots {
@@ -57,59 +171,77 @@ try {
         Add-PythonCandidate $env:COPILOT_PYTHON
         if ($candidates.Count -ne 1) { throw 'COPILOT_PYTHON must identify an existing Python executable on S: for a shared-drive deployment.' }
     } else {
-        foreach ($value in $savedInterpreters) { Add-PythonCandidate $value }
-        if ($candidates.Count -eq 0) {
-            $operatorConfig = Join-Path $repoRoot 'python-launcher.txt'
-            if (Test-Path -LiteralPath $operatorConfig -PathType Leaf) {
-                Add-PythonCandidate ([string](Get-Content -LiteralPath $operatorConfig -Encoding UTF8 -TotalCount 1))
-            }
-        }
-        if ($candidates.Count -eq 0 -and -not $productionShare) {
+        if ($Mode -ne 'Setup') {
             Add-PythonCandidate (Join-Path $repoRoot '.venv\Scripts\python.exe')
-        }
-        if ($candidates.Count -eq 0) {
-            foreach ($command in @(Get-Command python.exe -All -ErrorAction SilentlyContinue)) { Add-PythonCandidate $command.Source }
-            $pythonLauncher = Get-Command py.exe -ErrorAction SilentlyContinue
-            if ($pythonLauncher) {
-                foreach ($line in @(& $pythonLauncher.Source -0p 2>$null)) {
-                    if ($line -match '([A-Za-z]:\\.+?python\.exe)\s*$') { Add-PythonCandidate $Matches[1] }
+            if ($candidates.Count -eq 0) { foreach ($value in $savedInterpreters) { Add-PythonCandidate $value } }
+            if ($candidates.Count -eq 0) {
+                $operatorConfig = Join-Path $repoRoot 'python-launcher.txt'
+                if (Test-Path -LiteralPath $operatorConfig -PathType Leaf) {
+                    Add-PythonCandidate ([string](Get-Content -LiteralPath $operatorConfig -Encoding UTF8 -TotalCount 1))
                 }
             }
-            $nearby = [System.Collections.Generic.List[string]]::new()
-            $cursor = [System.IO.DirectoryInfo]::new($repoRoot)
-            for ($depth = 0; $depth -lt 4 -and $cursor; $depth++) {
-                if (-not $productionShare -or $cursor.Root.FullName -ieq 'S:\') {
-                    $nearby.Add($cursor.FullName)
-                    foreach ($folder in @('Python','python','Shared Python','.venv')) {
-                        $nearby.Add((Join-Path $cursor.FullName $folder))
+        }
+        $method = if ($candidates.Count -eq 0) { Read-PythonMethod } else { 'saved' }
+        if ($method -eq '2') { Read-PythonPath }
+        if ($method -eq '1') {
+            foreach ($value in $savedInterpreters) { Add-PythonCandidate $value }
+            if ($candidates.Count -eq 0) {
+                $operatorConfig = Join-Path $repoRoot 'python-launcher.txt'
+                if (Test-Path -LiteralPath $operatorConfig -PathType Leaf) {
+                    Add-PythonCandidate ([string](Get-Content -LiteralPath $operatorConfig -Encoding UTF8 -TotalCount 1))
+                }
+            }
+            if ($candidates.Count -eq 0 -and -not $productionShare) {
+                Add-PythonCandidate (Join-Path $repoRoot '.venv\Scripts\python.exe')
+            }
+            if ($candidates.Count -eq 0) {
+                foreach ($command in @(Get-Command python.exe -All -ErrorAction SilentlyContinue)) { Add-PythonCandidate $command.Source }
+                $pythonLauncher = Get-Command py.exe -ErrorAction SilentlyContinue
+                if ($pythonLauncher) {
+                    foreach ($line in @(& $pythonLauncher.Source -0p 2>$null)) {
+                        if ($line -match '([A-Za-z]:\\.+?python\.exe)\s*$') { Add-PythonCandidate $Matches[1] }
                     }
                 }
-                $cursor = $cursor.Parent
-            }
-            foreach ($directory in $nearby) {
-                Add-PythonCandidate (Join-Path $directory 'python.exe')
-                Add-PythonCandidate (Join-Path $directory 'Scripts\python.exe')
-            }
-        }
-        if ($candidates.Count -eq 0 -and (Test-Path -LiteralPath 'S:\' -PathType Container)) {
-            Write-Host 'Finding shared Python on S: (bounded directory search, no account or document scanning).'
-            $queue = [System.Collections.Generic.Queue[object]]::new()
-            $queue.Enqueue(@{ Path='S:\'; Depth=0 })
-            $visited = 0
-            while ($queue.Count -gt 0 -and $visited -lt 20000) {
-                $item = $queue.Dequeue()
-                $visited++
-                Add-PythonCandidate (Join-Path $item.Path 'python.exe')
-                if ($item.Depth -ge 8) { continue }
-                foreach ($child in @(Get-ChildItem -LiteralPath $item.Path -Directory -Force -ErrorAction SilentlyContinue)) {
-                    if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
-                    if ($child.Name -in @('.git','node_modules','runtime','workspace','deliveries')) { continue }
-                    if ($queue.Count -lt 20000) { $queue.Enqueue(@{ Path=$child.FullName; Depth=$item.Depth+1 }) }
+                $nearby = [System.Collections.Generic.List[string]]::new()
+                $cursor = [System.IO.DirectoryInfo]::new($repoRoot)
+                for ($depth = 0; $depth -lt 4 -and $cursor; $depth++) {
+                    if (-not $productionShare -or $cursor.Root.FullName -ieq 'S:\') {
+                        $nearby.Add($cursor.FullName)
+                        foreach ($folder in @('Python','python','Shared Python','.venv')) {
+                            $nearby.Add((Join-Path $cursor.FullName $folder))
+                        }
+                    }
+                    $cursor = $cursor.Parent
                 }
+                foreach ($directory in $nearby) {
+                    Add-PythonCandidate (Join-Path $directory 'python.exe')
+                    Add-PythonCandidate (Join-Path $directory 'Scripts\python.exe')
+                }
+            }
+            if ($candidates.Count -eq 0 -and (Test-Path -LiteralPath 'S:\' -PathType Container)) {
+                Write-Host 'Finding shared Python on S: (bounded directory search, no account or document scanning).'
+                $queue = [System.Collections.Generic.Queue[object]]::new()
+                $queue.Enqueue(@{ Path='S:\'; Depth=0 })
+                $visited = 0
+                while ($queue.Count -gt 0 -and $visited -lt 20000) {
+                    $item = $queue.Dequeue()
+                    $visited++
+                    Add-PythonCandidate (Join-Path $item.Path 'python.exe')
+                    if ($item.Depth -ge 8) { continue }
+                    foreach ($child in @(Get-ChildItem -LiteralPath $item.Path -Directory -Force -ErrorAction SilentlyContinue)) {
+                        if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+                        if ($child.Name -in @('.git','node_modules','runtime','workspace','deliveries')) { continue }
+                        if ($queue.Count -lt 20000) { $queue.Enqueue(@{ Path=$child.FullName; Depth=$item.Depth+1 }) }
+                    }
+                }
+            }
+            if ($candidates.Count -eq 0) {
+                Write-Host 'Automatic detection found no usable Python. Paste its path to continue.'
+                Read-PythonPath
             }
         }
     }
-    if ($candidates.Count -eq 0) { throw 'No shared Python was found within the bounded S: search. Ask the shared-Python operator to check installation/access; no private paths need to be supplied to chat.' }
+    if ($candidates.Count -eq 0) { throw 'No usable Python interpreter was selected.' }
     if ($candidates.Count -eq 1) {
         $python = $candidates[0]
     } else {
@@ -168,10 +300,19 @@ def assert_dependencies(installed, expected, require_shared):
             raise RuntimeError('Shared dependency '+name+' must be installed on S:, not in a local or per-user package directory.')
 
 assert sys.version_info >= (3, 10), 'Python 3.10+ is required'
-shared = sys.argv[1] == 'shared'
+if len(sys.argv) > 3:
+    expected_prefix = ntpath.normcase(ntpath.abspath(sys.argv[3]))
+    if ntpath.normcase(ntpath.abspath(sys.prefix)) != expected_prefix or sys.prefix == sys.base_prefix:
+        raise RuntimeError('Existing project environment is not a valid virtual environment at the expected path. Files were retained.')
+bootstrap = sys.argv[1].endswith('-bootstrap')
+shared = sys.argv[1].startswith('shared')
 if shared:
     assert_shared_runtime(sys.executable, sys.base_prefix,
                           getattr(sys, '_base_executable', None), sysconfig.get_path('stdlib'))
+if bootstrap:
+    print('Base Python runtime verified.')
+    sys.exit(0)
+if shared:
     with open(sys.argv[2], encoding='utf-8-sig') as stream:
         expected = locked_versions(stream.read(65537))
 else:
@@ -184,9 +325,10 @@ assert_dependencies(installed, expected, shared)
 print('Python runtime and Playwright verified.')
 '@
     $runtimeMode = if ($productionShare) { 'shared' } else { 'development' }
-    $pythonArgs = if ($productionShare) { @('-B','-E','-s') } else { @('-B') }
+    [string[]]$pythonArgs = if ($productionShare) { @('-B','-E','-s') } else { @('-B') }
+    if ($Mode -eq 'Setup') { $python = Initialize-AgentEnvironment $python $pythonArgs $pythonProbe $runtimeMode $repoRoot }
     & $python @pythonArgs -c $pythonProbe $runtimeMode (Join-Path $repoRoot 'requirements.lock.txt')
-    if ($LASTEXITCODE -ne 0) { throw 'Shared dependencies are unavailable. The operator must install the approved requirements once; this launcher does not create a virtual environment or install packages.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Python or pinned dependencies are unavailable. Run Setup.cmd to create or repair the project environment; existing files are retained.' }
     Push-Location -LiteralPath $repoRoot
     try {
         if ($Mode -eq 'Setup') {

@@ -4,7 +4,9 @@ A Windows/VDI repository with continuous conversation, Microsoft 365 Copilot web
 
 ## Setup and run
 
-Put the repository on the shared **S:** drive alongside the organisation's Python installation. Double-click **Setup.cmd** to check prerequisites, then **Start Agent.cmd**. The launcher discovers Python on S: without needing private paths in the repository. On first run, choose your OneDrive account; the app remembers it there. Shared Python needs the exact dependencies in `requirements.lock.txt`; there is no per-user package installation or browser download. See [SHARED_VDI.md](docs/SHARED_VDI.md).
+Put the repository on the shared **S:** drive alongside the organisation's Python installation. Double-click **Setup.cmd**, choose **1: Automatic detection** or **2: Paste a path**, and select Python. You may paste the quoted full `python.exe` path or its installation folder. Setup creates or reuses the project's `.venv` and installs the pinned packages from `requirements.lock.txt`; then use **Start Agent.cmd**. On S:, the base Python and virtual environment remain shared on S:. No browser download is needed. See [SHARED_VDI.md](docs/SHARED_VDI.md).
+
+First-run OneDrive selection also offers detection or pasting a registered account folder. Edge setup offers detection or pasting `msedge.exe` or its installation folder; failed detection falls back to a path prompt. Choices are remembered in your selected OneDrive, with Edge paths stored per VDI machine. **Start Agent.cmd** reuses valid saved resources. Rerun **Setup.cmd** to review Python and Edge choices. Dependencies need network access to the organization's configured package index and permission to create/update the project environment; errors stop setup with their actual cause.
 
 The visible terminal shows setup, discovered exact model labels, plans, approval previews and answers. Complete sign-in/MFA yourself in the dedicated Edge window. Select a displayed model or accept the documented suggested choice. Visible operation is the only accepted mode; headless Copilot operation is not established.
 
@@ -38,7 +40,7 @@ User uploads may come from individually selected files in your chosen OneDrive a
 
 Validated Useful Findings may be saved on any response. The cumulative `useful-findings.md` file is attached at submitted message numbers 10, 20, 30, etc. Initialization, tool results and corrections count; uploads, local approval interactions, polling and assistant responses do not. Structured entries retain provenance, timestamps and deduplication hashes.
 
-Session state, redacted events, response diagnostics and immutable script/approval previews are retained under your OneDrive `Copilot Agent/runtime/sessions`. Replaced state versions are retained in `.history`; the application and tests perform no deletion. Storage therefore grows and retention is a user responsibility. Runtime/session/profile/workspace files are excluded from source control.
+Session state, redacted events, response diagnostics and immutable script/approval previews are retained under your OneDrive `Copilot Agent/runtime/sessions`. Replaced state versions are retained in `.history`; application file tools preserve files. Setup uses standard venv/pip package management. Retained storage grows and retention is a user responsibility. Runtime/session/profile/workspace files are excluded from source control.
 
 ## Verification and limitations
 
