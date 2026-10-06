@@ -150,11 +150,16 @@ class PythonSetupChoiceTests(unittest.TestCase):
 
     def environment_fixture(self, directory, body, fail=''):
         path = str(directory).replace("'", "''")
-        return self.run_helpers("$global:operations=[System.Collections.Generic.List[string]]::new(); function Get-PipConfiguration { return '' }; function Invoke-SetupPython($Executable,$Arguments) { $global:operations.Add(($Arguments -join '|')); " + fail + " if ($Arguments -contains 'venv') { $envPath=$Arguments[-1]; New-Item -ItemType Directory -Path (Join-Path $envPath 'Scripts') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $envPath 'pyvenv.cfg') -Value 'fixture'; Set-Content -LiteralPath (Join-Path $envPath 'Scripts\\python.exe') -Value 'fixture' } }; " + body.replace('PROJECT', "'"+path+"'"))
+        return self.run_helpers("$global:operations=[System.Collections.Generic.List[string]]::new(); function Get-PipConfiguration { return '' }; function Test-VenvModule { return $true }; function Invoke-SetupPython($Executable,$Arguments) { $global:operations.Add(($Arguments -join '|')); " + fail + " if ($Arguments -contains 'venv') { $envPath=$Arguments[-1]; New-Item -ItemType Directory -Path (Join-Path $envPath 'Scripts') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $envPath 'pyvenv.cfg') -Value 'fixture'; Set-Content -LiteralPath (Join-Path $envPath 'Scripts\\python.exe') -Value 'fixture' } }; " + body.replace('PROJECT', "'"+path+"'"))
 
     def test_setup_creates_environment_installs_pins_and_retains_lock(self):
         with tempfile.TemporaryDirectory() as directory:
             output = self.environment_fixture(directory, "$result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; if ($operations.Count -ne 4 -or $operations[1] -notlike '*-m|venv*' -or $operations[3] -notlike '*pip|install|--requirement*--no-user|--prefix*') { throw 'Wrong setup sequence' }; if ($result -notlike '*Scripts\\python.exe') { throw 'Wrong interpreter' }; if (-not (Test-Path -LiteralPath (Join-Path PROJECT '.venv-setup.lock'))) { throw 'Lock not retained' }; Write-Output 'passed'")
+            self.assertIn('passed', output)
+
+    def test_missing_venv_bootstraps_virtualenv_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = self.environment_fixture(directory, "function Test-VenvModule { return $false }; function Invoke-SetupPython($Executable,$Arguments) { $global:operations.Add(($Arguments -join '|')); if ($Arguments -contains 'venv') { throw 'venv must not be called' }; if ($Arguments -contains 'virtualenv') { $envPath=$Arguments[-1]; New-Item -ItemType Directory -Path (Join-Path $envPath 'Scripts') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $envPath 'pyvenv.cfg') -Value 'fixture'; Set-Content -LiteralPath (Join-Path $envPath 'Scripts\\python.exe') -Value 'fixture' } }; $result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; if (($operations -join '|') -notlike '*pip|install|virtualenv*' -or ($operations -join '|') -notlike '*virtualenv*') { throw 'virtualenv fallback not used' }; Write-Output 'passed'")
             self.assertIn('passed', output)
 
     def test_setup_reuses_existing_environment_and_propagates_install_failure(self):

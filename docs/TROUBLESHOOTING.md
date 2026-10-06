@@ -5,6 +5,7 @@ Start with the session's structured events and current status. Keep diagnostic d
 | Symptom | Safe investigation and response |
 |---|---|
 | Edge does not start or CDP connection fails | Confirm configured Edge executable, dedicated profile and loopback port. Check the recorded launch/connection error. Do not attach an unrelated personal browser silently. |
+| `No module named venv` during Setup | Setup tries the standard module first, then installs the `virtualenv` bootstrap helper with the selected Python and retries. Confirm the configured package index is reachable and the repository is writable; a real pip error is retained and shown if bootstrap installation fails. |
 | Copilot asks for sign-in | Sign in manually in the visible window. Do not extract browser cookies, credentials or tokens. |
 | Model cannot be discovered/selected | Capture displayed names and actual UI state. Check isolated adapter selectors and permissions. Do not assume an example model exists. |
 | Copilot reports daily access exhausted and switches to Auto | The selected model is unavailable. The app stops rather than silently accepting another model or sending format corrections. Start fresh setup, select an actually available model, or wait for the account allowance to return. |

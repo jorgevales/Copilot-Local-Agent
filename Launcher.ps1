@@ -93,6 +93,11 @@ function Get-PipConfiguration([string]$Executable, [string[]]$PythonFlags) {
     return ($configuration -join "`n")
 }
 
+function Test-VenvModule([string]$Executable, [string[]]$PythonFlags) {
+    @(& $Executable @PythonFlags -c 'import venv' 2>&1) | Out-Null
+    return ($LASTEXITCODE -eq 0)
+}
+
 function Initialize-AgentEnvironment([string]$BasePython, [string[]]$PythonFlags, [string]$Probe, [string]$RuntimeMode, [string]$ProjectRoot) {
     $environmentPath = Join-Path $ProjectRoot '.venv'
     $environmentPython = Join-Path $environmentPath 'Scripts\python.exe'
@@ -116,7 +121,13 @@ function Initialize-AgentEnvironment([string]$BasePython, [string[]]$PythonFlags
             Write-Host 'Reusing the existing project Python environment.'
         } else {
             Write-Host 'Creating the project Python environment.'
-            Invoke-SetupPython $BasePython ($PythonFlags + @('-m','venv',$environmentPath))
+            if (-not (Test-VenvModule $BasePython $PythonFlags)) {
+                Write-Host 'The selected Python has no venv module. Bootstrapping virtualenv with that Python and retrying environment creation.'
+                Invoke-SetupPython $BasePython ($PythonFlags + @('-m','pip','install','virtualenv','--disable-pip-version-check','--no-user'))
+                Invoke-SetupPython $BasePython ($PythonFlags + @('-m','virtualenv',$environmentPath))
+            } else {
+                Invoke-SetupPython $BasePython ($PythonFlags + @('-m','venv',$environmentPath))
+            }
         }
         if (-not (Test-Path -LiteralPath (Join-Path $environmentPath 'pyvenv.cfg') -PathType Leaf) -or -not (Test-Path -LiteralPath $environmentPython -PathType Leaf)) { throw 'Virtual environment creation was incomplete. Files were retained.' }
         $priorCandidates = $candidates
