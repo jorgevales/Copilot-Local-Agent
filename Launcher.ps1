@@ -83,8 +83,12 @@ function Read-PythonPath {
 }
 
 function Invoke-SetupPython([string]$Executable, [string[]]$Arguments) {
+    # Windows PowerShell 5 turns native stderr into a terminating error when
+    # ErrorActionPreference is Stop. Let Python print its complete diagnostic.
+    $ErrorActionPreference = 'Continue'
     & $Executable @Arguments | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw ('Python setup command failed with exit code ' + $LASTEXITCODE + '. Existing files were retained.') }
+    $commandExitCode = $LASTEXITCODE
+    if ($commandExitCode -ne 0) { throw ('Python setup command failed with exit code ' + $commandExitCode + '. See the complete Python error above. Existing files were retained.') }
 }
 
 function Get-PipConfiguration([string]$Executable, [string[]]$PythonFlags) {
@@ -93,15 +97,12 @@ function Get-PipConfiguration([string]$Executable, [string[]]$PythonFlags) {
     return ($configuration -join "`n")
 }
 
-function Test-VenvModule([string]$Executable, [string[]]$PythonFlags) {
-    @(& $Executable @PythonFlags -c 'import venv' 2>&1) | Out-Null
-    return ($LASTEXITCODE -eq 0)
-}
-
 function Initialize-AgentEnvironment([string]$BasePython, [string[]]$PythonFlags, [string]$Probe, [string]$RuntimeMode, [string]$ProjectRoot) {
     $environmentPath = Join-Path $ProjectRoot '.venv'
     $environmentPython = Join-Path $environmentPath 'Scripts\python.exe'
     $requirements = Join-Path $ProjectRoot 'requirements.lock.txt'
+    $bootstrap = Join-Path $ProjectRoot 'bootstrap\virtualenv.pyz'
+    $bootstrapSha256 = '9096EFA6E3A8457CC3EC56E749A2D1E17505B756EE3CB2B7E889526367EFC187'
     $setupLock = $null
     try {
         $lockPath = Join-Path $ProjectRoot '.venv-setup.lock'
@@ -116,18 +117,20 @@ function Initialize-AgentEnvironment([string]$BasePython, [string[]]$PythonFlags
             $environmentEntry = Get-Item -LiteralPath $environmentPath -Force
             if (-not (Test-SafePythonEntry $environmentEntry)) { throw 'The project .venv must be a real directory, not a redirected path.' }
             if (-not (Test-Path -LiteralPath (Join-Path $environmentPath 'pyvenv.cfg') -PathType Leaf) -or -not (Test-Path -LiteralPath $environmentPython -PathType Leaf)) {
-                throw 'Existing .venv is incomplete. Files were retained; ask the operator to repair or rename it before retrying Setup.'
-            }
-            Write-Host 'Reusing the existing project Python environment.'
-        } else {
-            Write-Host 'Creating the project Python environment.'
-            if (-not (Test-VenvModule $BasePython $PythonFlags)) {
-                Write-Host 'The selected Python has no venv module. Bootstrapping virtualenv with that Python and retrying environment creation.'
-                Invoke-SetupPython $BasePython ($PythonFlags + @('-m','pip','install','virtualenv','--disable-pip-version-check','--no-user'))
-                Invoke-SetupPython $BasePython ($PythonFlags + @('-m','virtualenv',$environmentPath))
+                $archivePath = Join-Path $ProjectRoot ('.venv-incomplete-' + [guid]::NewGuid().ToString('N'))
+                $projectFull = [System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\') + '\'
+                if (-not ([System.IO.Path]::GetFullPath($environmentPath).StartsWith($projectFull, [System.StringComparison]::OrdinalIgnoreCase) -and [System.IO.Path]::GetFullPath($archivePath).StartsWith($projectFull, [System.StringComparison]::OrdinalIgnoreCase))) { throw 'Environment recovery paths are outside the project.' }
+                Move-Item -LiteralPath $environmentPath -Destination $archivePath -ErrorAction Stop
+                Write-Host ('Preserved the incomplete environment at ' + $archivePath)
             } else {
-                Invoke-SetupPython $BasePython ($PythonFlags + @('-m','venv',$environmentPath))
+                Write-Host 'Reusing the existing project Python environment.'
             }
+        }
+        if (-not (Test-Path -LiteralPath $environmentPath)) {
+            Write-Host 'Creating the project Python environment.'
+            if (-not (Test-Path -LiteralPath $bootstrap -PathType Leaf) -or -not (Test-SafePythonEntry (Get-Item -LiteralPath $bootstrap -Force))) { throw 'Bundled virtualenv bootstrap is missing or redirected. Restore the official repository files and retry Setup.' }
+            if ((Get-FileHash -LiteralPath $bootstrap -Algorithm SHA256).Hash -ne $bootstrapSha256) { throw 'Bundled virtualenv bootstrap failed its SHA-256 check. Restore the official repository files and retry Setup.' }
+            Invoke-SetupPython $BasePython ($PythonFlags + @($bootstrap,'--no-download','--no-periodic-update',$environmentPath))
         }
         if (-not (Test-Path -LiteralPath (Join-Path $environmentPath 'pyvenv.cfg') -PathType Leaf) -or -not (Test-Path -LiteralPath $environmentPython -PathType Leaf)) { throw 'Virtual environment creation was incomplete. Files were retained.' }
         $priorCandidates = $candidates

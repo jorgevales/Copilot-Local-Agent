@@ -1,4 +1,5 @@
 .venv/
+.venv-incomplete-*
 .venv-setup.lock
 __pycache__/
 *.pyc

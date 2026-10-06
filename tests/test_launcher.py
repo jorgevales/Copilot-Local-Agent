@@ -143,23 +143,41 @@ class PythonSetupChoiceTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout.strip(), 'native-argument-preserved')
 
+    def test_python_setup_reports_complete_native_error(self):
+        source = (Path(__file__).resolve().parents[1] / 'Launcher.ps1').read_text(encoding='utf-8-sig')
+        helper = source[source.index('function Invoke-SetupPython('):source.index('function Get-PipConfiguration(')]
+        executable = sys.executable.replace("'", "''")
+        script = "$ErrorActionPreference='Stop'; " + helper + " try { Invoke-SetupPython '" + executable + "' @('-c','raise RuntimeError(12345)'); throw 'Failure was ignored' } catch { Write-Output ('CAUGHT: ' + $_.Exception.Message) }"
+        result = subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', script], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('RuntimeError: 12345', result.stderr)
+        self.assertIn('Python setup command failed with exit code 1', result.stdout)
+
 
     def test_cloud_tags_only_allowed_for_local_development(self):
         output = self.run_helpers("foreach ($tag in @(2415919130,2415923226,2415980570)) { if (-not (Test-AllowedCloudTag $tag)) { throw 'Known CLOUD tag denied' } }; foreach ($tag in @(2684354572,2684354563,2415919131,2952790042)) { if (Test-AllowedCloudTag $tag) { throw 'Unknown or surrogate tag accepted' } }; $productionShare=$true; if (Test-AllowedCloudTag 2415919130) { throw 'Cloud allowed on S' }; Write-Output 'passed'")
         self.assertIn('passed', output)
 
     def environment_fixture(self, directory, body, fail=''):
+        bootstrap = Path(directory) / 'bootstrap'
+        bootstrap.mkdir()
+        shutil.copyfile(Path(__file__).resolve().parents[1] / 'bootstrap' / 'virtualenv.pyz', bootstrap / 'virtualenv.pyz')
         path = str(directory).replace("'", "''")
-        return self.run_helpers("$global:operations=[System.Collections.Generic.List[string]]::new(); function Get-PipConfiguration { return '' }; function Test-VenvModule { return $true }; function Invoke-SetupPython($Executable,$Arguments) { $global:operations.Add(($Arguments -join '|')); " + fail + " if ($Arguments -contains 'venv') { $envPath=$Arguments[-1]; New-Item -ItemType Directory -Path (Join-Path $envPath 'Scripts') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $envPath 'pyvenv.cfg') -Value 'fixture'; Set-Content -LiteralPath (Join-Path $envPath 'Scripts\\python.exe') -Value 'fixture' } }; " + body.replace('PROJECT', "'"+path+"'"))
+        return self.run_helpers("$global:operations=[System.Collections.Generic.List[string]]::new(); function Get-PipConfiguration { return '' }; function Invoke-SetupPython($Executable,$Arguments) { $global:operations.Add(($Arguments -join '|')); " + fail + " if (($Arguments -join '|') -like '*virtualenv.pyz*') { $envPath=$Arguments[-1]; New-Item -ItemType Directory -Path (Join-Path $envPath 'Scripts') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $envPath 'pyvenv.cfg') -Value 'fixture'; Set-Content -LiteralPath (Join-Path $envPath 'Scripts\\python.exe') -Value 'fixture' } }; " + body.replace('PROJECT', "'"+path+"'"))
 
     def test_setup_creates_environment_installs_pins_and_retains_lock(self):
         with tempfile.TemporaryDirectory() as directory:
-            output = self.environment_fixture(directory, "$result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; if ($operations.Count -ne 4 -or $operations[1] -notlike '*-m|venv*' -or $operations[3] -notlike '*pip|install|--requirement*--no-user|--prefix*') { throw 'Wrong setup sequence' }; if ($result -notlike '*Scripts\\python.exe') { throw 'Wrong interpreter' }; if (-not (Test-Path -LiteralPath (Join-Path PROJECT '.venv-setup.lock'))) { throw 'Lock not retained' }; Write-Output 'passed'")
+            output = self.environment_fixture(directory, "$result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; if ($operations.Count -ne 4 -or $operations[1] -notlike '*virtualenv.pyz|--no-download|--no-periodic-update*' -or $operations[3] -notlike '*pip|install|--requirement*--no-user|--prefix*') { throw 'Wrong setup sequence' }; if ($result -notlike '*Scripts\\python.exe') { throw 'Wrong interpreter' }; if (-not (Test-Path -LiteralPath (Join-Path PROJECT '.venv-setup.lock'))) { throw 'Lock not retained' }; Write-Output 'passed'")
             self.assertIn('passed', output)
 
-    def test_missing_venv_bootstraps_virtualenv_fallback(self):
+    def test_environment_bootstrap_needs_neither_base_venv_nor_base_pip(self):
         with tempfile.TemporaryDirectory() as directory:
-            output = self.environment_fixture(directory, "function Test-VenvModule { return $false }; function Invoke-SetupPython($Executable,$Arguments) { $global:operations.Add(($Arguments -join '|')); if ($Arguments -contains 'venv') { throw 'venv must not be called' }; if ($Arguments -contains 'virtualenv') { $envPath=$Arguments[-1]; New-Item -ItemType Directory -Path (Join-Path $envPath 'Scripts') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $envPath 'pyvenv.cfg') -Value 'fixture'; Set-Content -LiteralPath (Join-Path $envPath 'Scripts\\python.exe') -Value 'fixture' } }; $result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; if (($operations -join '|') -notlike '*pip|install|virtualenv*' -or ($operations -join '|') -notlike '*virtualenv*') { throw 'virtualenv fallback not used' }; Write-Output 'passed'")
+            output = self.environment_fixture(directory, "$result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; if (($operations -join '|') -like '*-m|venv*' -or ($operations -join '|') -like '*-m|pip|install|virtualenv*' -or $operations[1] -notlike '*virtualenv.pyz*') { throw 'Base Python module dependency found' }; Write-Output 'passed'")
+            self.assertIn('passed', output)
+
+    def test_modified_bootstrap_stops_before_execution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = self.environment_fixture(directory, "Set-Content -LiteralPath (Join-Path PROJECT 'bootstrap\\virtualenv.pyz') -Value 'modified'; try { Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; throw 'Tampered bootstrap ran' } catch { if ($_.Exception.Message -notlike '*SHA-256*') { throw } }; if ($operations.Count -ne 1 -or (Test-Path -LiteralPath (Join-Path PROJECT '.venv'))) { throw 'Tampered bootstrap changed environment' }; Write-Output 'passed'")
             self.assertIn('passed', output)
 
     def test_setup_reuses_existing_environment_and_propagates_install_failure(self):
@@ -171,10 +189,11 @@ class PythonSetupChoiceTests(unittest.TestCase):
             output = self.environment_fixture(directory, "try { Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; throw 'Failure lost' } catch { if ($_.Exception.Message -ne 'install failed') { throw } }; if ($operations.Count -ne 3 -or ($operations -join '|') -like '*|venv|*') { throw 'Existing env recreated' }; $lock=[IO.File]::Open((Join-Path PROJECT '.venv-setup.lock'),'Open','ReadWrite','None'); $lock.Dispose(); Write-Output 'passed'", "if ($Arguments -contains 'install') { throw 'install failed' };")
             self.assertIn('passed', output)
 
-    def test_setup_preserves_incomplete_environment(self):
+    def test_setup_archives_and_repairs_incomplete_environment(self):
         with tempfile.TemporaryDirectory() as directory:
             (Path(directory) / '.venv').mkdir()
-            output = self.environment_fixture(directory, "try { Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; throw 'Incomplete env accepted' } catch { if ($_.Exception.Message -notlike '*incomplete*') { throw } }; if ($operations.Count -ne 1) { throw 'Modified incomplete env' }; Write-Output 'passed'")
+            (Path(directory) / '.venv' / 'old-file.txt').write_text('keep me')
+            output = self.environment_fixture(directory, "$result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; $archives=@(Get-ChildItem -LiteralPath PROJECT -Directory -Filter '.venv-incomplete-*'); if ($archives.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $archives[0].FullName 'old-file.txt')) -or $operations.Count -ne 4) { throw 'Incomplete environment not preserved and repaired' }; Write-Output 'passed'")
             self.assertIn('passed', output)
 
     def test_pip_target_configuration_stops_before_install(self):
