@@ -10,7 +10,7 @@ from unittest.mock import patch
 from copilot_agent.browser import CaptureTimeoutError, SubmissionAmbiguousError
 from copilot_agent.orchestrator import Orchestrator
 from copilot_agent.policy import PolicyError
-from copilot_agent.protocol import ProtocolError
+from copilot_agent.protocol import BEGIN, END, ProtocolError
 from tests.test_protocol_state import encoded, envelope, make_fixture
 
 
@@ -453,6 +453,24 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(10, persisted['message_count'])
         self.assertEqual('capture_failed', persisted['status'])
         self.assertEqual([], registry.calls)
+        self.assertEqual([], state.data['retry_records'])
+        self.assertEqual(['initialize', 'user_turn'], [item['message']['kind'] for item in browser.sent])
+
+    async def test_completed_malformed_reply_uses_plain_error_and_correction(self):
+        root, config, state, registry, browser, app = self.fixture(
+            [final_response, BEGIN + '\n{"genuinely":"completed",}\n' + END, final_response])
+        lines = []
+        app.feedback.sink = lines.append
+        await app.initialize()
+        result = await app.turn('Exercise a genuine completed-format correction.')
+        self.assertEqual('final', result['response_type'])
+        error_lines = [line for line in lines if '[Error]' in line]
+        self.assertEqual(1, len(error_lines))
+        self.assertIn('response format was invalid', error_lines[0])
+        self.assertIn('No local action ran', error_lines[0])
+        self.assertNotIn('missing_envelope', error_lines[0])
+        self.assertEqual('correction', browser.sent[-1]['message']['kind'])
+        self.assertEqual('invalid_json', state.data['retry_records'][0]['reason'])
 
     async def test_final_after_uncertain_effect_does_not_mark_session_ready(self):
         root, config, state, registry, browser, app = self.fixture(

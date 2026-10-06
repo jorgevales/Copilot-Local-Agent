@@ -51,20 +51,9 @@ class Orchestrator:
             self.feedback.emit('System', event['message'], request_id=request_id)
             return
         preview = public_preview(event.get('raw', ''), self.state.session_id, request_id)
-        seen = self.live_seen.setdefault(request_id, {})
-        labels = {'user_response':'Reply', 'task_interpretation':'Task', 'decision_summary':'Decision summary',
-                  'assumptions':'Assumptions', 'action_plan':'Action plan', 'risk_summary':'Risk summary'}
-        for key, value in preview.items():
-            if seen.get(key) == value or value in ('', [], None):
-                continue
-            seen[key] = value
-            if key == 'action_plan' and isinstance(value, list):
-                text = '; '.join(str(item.get('step', '?')) + '. ' + str(item.get('action', '')) +
-                                 ' (verify: ' + str(item.get('verification', '')) + ')' for item in value if isinstance(item, dict))
-            else:
-                text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-            self.feedback.emit('Copilot', 'UNVALIDATED PREVIEW — ' + labels[key] + '\n  ' + str(text)[:4000],
-                               request_id=request_id, validated=False, generation_stopped=event.get('generation_stopped'))
+        self.feedback.record('Copilot', 'Streaming preview retained for diagnostics.',
+                             request_id=request_id, validated=False,
+                             generation_ended=event.get('generation_ended'), fields=preview)
 
     def _action_text(self, response):
         return '; '.join(str(step.get('step', '?')) + '. ' + str(step.get('action', '')) +
@@ -73,16 +62,16 @@ class Orchestrator:
 
     def _emit_validated_response(self, response, title):
         request_id = response.get('request_id')
-        seen = self.live_seen.get(request_id, {})
         reply = response.get('user_response', '')
-        reply_text = ('The identical live preview above is now validated.'
-                      if reply and seen.get('user_response') == reply else reply)
-        self.feedback.section('Copilot', title, [
-            ('Task', None if seen.get('task_interpretation') == response.get('task_interpretation') else response.get('task_interpretation')),
-            ('Action', self._action_text(response)),
-            ('Reply', reply_text),
-            ('Status', response.get('completion_status')),
-        ], request_id=request_id, validated=True)
+        if response.get('response_type') == 'tool_request':
+            self.feedback.emit('Copilot', 'Proposed a local action for review.',
+                               request_id=request_id, validated=True)
+        else:
+            self.feedback.emit('Copilot', reply, request_id=request_id, validated=True,
+                               completion_status=response.get('completion_status'))
+        self.feedback.record('Copilot', title, request_id=request_id, validated=True,
+                             task=response.get('task_interpretation'), action=self._action_text(response),
+                             completion_status=response.get('completion_status'))
 
     def _emit_tool_result(self, name, result):
         payload = result.get('result', {}) if isinstance(result, dict) else {}
@@ -96,7 +85,6 @@ class Orchestrator:
                                'target_displays': sorted({item.get('display_index') for item in windows})}
                               if windows else None)),
             ('Error', result.get('error', {}).get('message') if isinstance(result.get('error'), dict) else None),
-            ('Audit', payload.get('audit_path')),
         ])
 
     def _attachment_record(self, path: Path) -> dict:
@@ -182,8 +170,10 @@ class Orchestrator:
         if SENSITIVE.search(text):
             raise PolicyError('Sensitive values cannot be transmitted to Copilot')
         self.live_seen.clear()
-        self.feedback.emit('Orchestrator', 'Sending message ' + str(self.state.message_count + 1) + ' (' + kind +
-                           '), with ' + str(len(upload_paths)) + ' attachment(s).', request_id=request_id)
+        attachment_note = (' with ' + str(len(upload_paths)) + ' attachment(s)'
+                           if upload_paths else '')
+        self.feedback.emit('Orchestrator', 'Sending your request to Copilot' + attachment_note + '.',
+                           request_id=request_id)
         if upload_paths:
             self.feedback.emit('System', 'Upload files: ' + ', '.join(path.name for path in upload_paths), request_id=request_id)
         self.state.begin_submission(request_id, text)
@@ -243,17 +233,25 @@ class Orchestrator:
                 self.state.message('copilot', response, request_id=request_id)
                 findings_result = self.findings.accept(response['useful_findings'], request_id)
                 self.state.event('findings_processed', **findings_result)
-                self.feedback.emit('Orchestrator', 'Validated response: ' + response['response_type'] +
-                                   '; findings accepted=' + str(findings_result['accepted']) + '.', request_id=request_id)
+                self.feedback.record('Orchestrator', 'Validated response.', request_id=request_id,
+                                     response_type=response['response_type'],
+                                     findings_accepted=findings_result['accepted'])
                 return response
             except (ProtocolError, PolicyError, ValueError) as exc:
                 if not isinstance(exc, ProtocolError):
                     exc = ProtocolError('unsafe_tool_arguments', [str(exc)])
                 self.state.data['retry_records'].append({'request_id': request_id, 'attempt': attempt, 'reason': exc.code, 'errors': exc.errors})
                 self.state.event('response_invalid', request_id=request_id, attempt=attempt, code=exc.code, errors=exc.errors)
-                recovery = ('correction budget exhausted.' if attempt == self.config.max_corrections else
-                            'requesting correction ' + str(attempt + 1) + '/' + str(self.config.max_corrections) + '.')
-                self.feedback.emit('Error', 'Response rejected: ' + str(exc) + '; ' + recovery, request_id=request_id)
+                if attempt == self.config.max_corrections:
+                    message = ('Copilot finished its reply, but the response format was invalid. '
+                               'No local action ran. The correction limit was reached.')
+                else:
+                    message = ('Copilot finished its reply, but the response format was invalid. '
+                               'No local action ran. Asking Copilot to correct it (' +
+                               str(attempt + 1) + '/' + str(self.config.max_corrections) + ').')
+                self.feedback.emit('Error', message, request_id=request_id)
+                self.feedback.record('Error', 'Completed response rejected: ' + str(exc),
+                                     request_id=request_id, protocol_code=exc.code, errors=exc.errors)
                 if hasattr(self.browser, 'diagnostics'):
                     try:
                         evidence = await self.browser.diagnostics('protocol_' + exc.code)
@@ -385,7 +383,7 @@ class Orchestrator:
             results = []
             for call in response['tool_requests']:
                 self.feedback.section('Orchestrator', 'TOOL REQUEST', [
-                    ('Tool', call['name']), ('Call', call['call_id']),
+                    ('Tool', call['name']),
                     ('Purpose', call.get('arguments', {}).get('purpose'))])
                 definition = catalog[call['name']]
                 context = dict(self.base_context)
@@ -443,7 +441,6 @@ class Orchestrator:
                         self.approved_attachment_hashes[artifact['path']] = artifact['sha256']
                 self.state.begin_call(call, state_changing=needs_approval)
                 self.feedback.section('Tool/' + call['name'], 'STARTING', [
-                    ('Call', call['call_id']),
                     ('Authority', 'exact explicit approval' if needs_approval else 'read-only policy'),
                     ('Language', call.get('arguments', {}).get('language')),
                     ('Expected effects', call.get('arguments', {}).get('expected_effects'))])

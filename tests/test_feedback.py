@@ -72,7 +72,7 @@ class PreviewTests(unittest.TestCase):
 
 
 class FeedbackIntegrationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_live_preview_is_attributed_deduplicated_and_cannot_execute(self):
+    async def test_live_preview_is_hidden_from_terminal_logged_and_cannot_execute(self):
         root,config,state,registry,browser,app=helpers.OrchestratorTests().fixture([])
         lines=[]
         app.feedback.sink=lines.append
@@ -81,13 +81,15 @@ class FeedbackIntegrationTests(unittest.IsolatedAsyncioTestCase):
         event={'type':'candidate','request_id':'stream-r','raw':raw,'generation_stopped':False}
         app._live_feedback(event)
         app._live_feedback(event)
-        self.assertEqual(2,len(lines))
-        self.assertTrue(all('[Copilot] UNVALIDATED PREVIEW' in line for line in lines))
+        self.assertEqual([],lines)
         self.assertEqual([],registry.calls)
         self.assertEqual(0,state.message_count)
         self.assertEqual([],state.data['response_ids'])
         records=[json.loads(line) for line in (state.directory/'events.jsonl').read_text().splitlines()]
-        self.assertTrue(all(record.get('validated') is False for record in records if record['event']=='feedback'))
+        details=[record for record in records if record['event']=='feedback_detail']
+        self.assertEqual(2,len(details))
+        self.assertTrue(all(record.get('validated') is False for record in details))
+        self.assertTrue(all(record['fields']['user_response']=='Checking visible evidence.' for record in details))
 
     async def test_disabled_created_tools_and_turn_do_not_touch_filesystem(self):
         root,config,state,registry,browser,app=helpers.OrchestratorTests().fixture([helpers.final_response,helpers.final_response])

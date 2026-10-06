@@ -9,7 +9,7 @@ import socket
 import sys
 from pathlib import Path
 import uuid
-from .browser import BrowserAdapter, model_rank
+from .browser import BrowserAdapter, CaptureTimeoutError, model_rank
 from .config import Config
 from .orchestrator import Orchestrator
 from .state import SessionState
@@ -294,6 +294,10 @@ async def run(args):
                 await orchestrator.turn(text, attachments=pending_files.paths())
                 if state.message_count > before_send:
                     pending_files.clear()
+            except CaptureTimeoutError as exc:
+                state.event('turn_error', error=str(exc))
+                error('Copilot reply capture timed out. No local action ran for this reply.')
+                system('The sent message and capture details were retained in your selected OneDrive storage.')
             except (ValueError, RuntimeError, OSError) as exc:
                 state.event('turn_error', error=str(exc))
                 error('Action stopped: ' + str(exc))

@@ -11,7 +11,9 @@ from copilot_agent.browser import composer_comparison
 from copilot_agent.browser import SubmissionNotSentError
 from copilot_agent.browser import upload_alert_is_error
 from copilot_agent.browser import model_access_exhausted
+from copilot_agent.browser import response_envelope_closed
 from copilot_agent.reused_browser import EndpointError, cdp_endpoint, validate_endpoint
+from copilot_agent.protocol import BEGIN, END
 
 
 class CorrelationTests(unittest.TestCase):
@@ -158,7 +160,7 @@ class FakeButton:
         self.fails = fails
         self.clicks = 0
     async def is_enabled(self):
-        return True
+        return not self.owner.clicked or self.owner.current_send_ready()
     async def click(self, **kwargs):
         self.clicks += 1
         if self.fails:
@@ -168,7 +170,8 @@ class FakeButton:
 
 
 class OfflineAdapter(BrowserAdapter):
-    def __init__(self, answer='malformed but completed assistant text', click_fails=False):
+    def __init__(self, answer=None, click_fails=False, *, answers=None,
+                 stop_states=None, send_states=None):
         super().__init__(SimpleNamespace(response_timeout=0.25, poll_interval=0.001,
                                          capture_stable_samples=2, max_capture_chars=5000))
         self.page = SimpleNamespace(url='https://m365.cloud.microsoft/chat')
@@ -176,17 +179,37 @@ class OfflineAdapter(BrowserAdapter):
         self.editor = FakeEditor()
         self.button = FakeButton(self, click_fails)
         self.clicked = False
-        self.answer = answer
+        default = BEGIN + '\nmalformed but completed assistant text\n' + END
+        self.answers = list(answers if answers is not None else [default if answer is None else answer])
+        self.stop_states = list(stop_states or [False])
+        self.send_states = list(send_states or [True])
+        self.capture_index = -1
+        self.after_click_evaluations = 0
         self.diagnostic_calls = []
+
+    def _sequence_value(self, values):
+        return values[min(max(self.capture_index, 0), len(values) - 1)]
+
+    def current_send_ready(self):
+        return bool(self._sequence_value(self.send_states))
+
     async def _stop_present(self):
-        return False
+        return self.clicked and bool(self._sequence_value(self.stop_states))
     async def _evaluate(self, script, arg=None):
         if not self.clicked:
             return [dict(key=1, order=0, role='assistant', text='stale req')]
+        self.after_click_evaluations += 1
         messages = [dict(key=1, order=0, role='assistant', text='stale req'),
                     dict(key=2, order=1, role='user', text='message req')]
-        if self.answer:
-            messages.append(dict(key=3, order=2, role='assistant', text=self.answer))
+        # The first post-click snapshot proves submission. Subsequent snapshots
+        # model the response-rendering polls.
+        if self.after_click_evaluations > 1:
+            self.capture_index += 1
+            answer = self._sequence_value(self.answers)
+        else:
+            answer = ''
+        if answer:
+            messages.append(dict(key=3, order=2, role='assistant', text=answer))
         return messages
     async def _editor(self, required=True):
         return self.editor
@@ -219,13 +242,48 @@ class ExchangeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(browser.last_submission['send_attempted'])
         self.assertFalse(browser._delivery_uncertain)
 
-    async def test_commits_once_and_returns_malformed_for_correction(self):
+    async def test_commits_once_and_returns_genuinely_completed_malformed_reply(self):
         browser = OfflineAdapter()
         commits = []
         result = await browser.exchange('message req', 'req', on_submitted=lambda: commits.append('req'))
-        self.assertEqual(result, browser.answer)
+        self.assertTrue(response_envelope_closed(result))
+        self.assertIn('malformed but completed', result)
         self.assertEqual(commits, ['req'])
         self.assertEqual(browser.button.clicks, 1)
+
+    async def test_slow_line_stream_waits_for_closing_marker_and_stability(self):
+        complete = BEGIN + '\n{"partial":true}\n' + END
+        browser = OfflineAdapter(answers=[BEGIN, BEGIN + '\n{', BEGIN + '\n{"partial":true}',
+                                          complete, complete],
+                                 stop_states=[True, True, True, False, False],
+                                 send_states=[False, False, False, True, True])
+        events = []
+        browser.set_feedback(events.append)
+        result = await browser.exchange('message req', 'req')
+        self.assertEqual(complete, result)
+        candidates = [event['raw'] for event in events if event['type'] == 'candidate']
+        self.assertIn(BEGIN + '\n{"partial":true}', candidates)
+        self.assertTrue(browser.last_capture_observation['generation_ended'])
+        self.assertTrue(browser.last_capture_observation['closing_marker_present'])
+
+    async def test_delayed_closing_marker_is_not_accepted_when_send_looks_ready(self):
+        partial = BEGIN + '\n{"still":"streaming"}'
+        complete = partial + '\n' + END
+        browser = OfflineAdapter(answers=[partial, partial, complete, complete],
+                                 send_states=[True, True, True, True])
+        result = await browser.exchange('message req', 'req')
+        self.assertEqual(complete, result)
+        self.assertGreaterEqual(browser.capture_index, 3)
+
+    async def test_complete_marker_waits_for_stop_to_change_back_to_send(self):
+        complete = BEGIN + '\nnot-json\n' + END
+        browser = OfflineAdapter(answers=[complete] * 5,
+                                 stop_states=[True, True, False, False],
+                                 send_states=[False, False, True, True])
+        self.assertEqual(complete, await browser.exchange('message req', 'req'))
+        self.assertTrue(browser.last_capture_observation['generation_observed'])
+        self.assertFalse(browser.last_capture_observation['stop_present'])
+        self.assertTrue(browser.last_capture_observation['send_ready'])
 
 
 class ToolContextTests(unittest.IsolatedAsyncioTestCase):
@@ -294,6 +352,12 @@ class ToolContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(commits, ['req'])
         self.assertEqual(browser.button.clicks, 1)
         self.assertIn('capture', browser.diagnostic_calls)
+
+    async def test_incomplete_reply_times_out_even_when_send_is_ready(self):
+        browser = OfflineAdapter(answer=BEGIN + '\n{"unfinished":true}', send_states=[True])
+        with self.assertRaisesRegex(CaptureTimeoutError, 'No local action ran'):
+            await browser.exchange('message req', 'req')
+        self.assertFalse(browser.last_capture_observation['closing_marker_present'])
 
     async def test_callback_failure_marks_delivered_uncertainty(self):
         browser = OfflineAdapter()

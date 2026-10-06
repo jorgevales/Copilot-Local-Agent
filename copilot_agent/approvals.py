@@ -35,9 +35,9 @@ class ApprovalManager:
             ('Viewer windows', arguments.get('viewer_windows')),
             ('Expected effects', arguments.get('expected_effects')),
             ('Risk', arguments.get('risk_summary') or preview['complete_pending_plan'].get('risk_summary')),
-            ('Plan hash', preview['plan_hash']),
-            ('Full retained preview', str(path)),
         ])
+        self.feedback.record('Approval', 'Full immutable approval record retained.',
+                             plan_hash=preview['plan_hash'], path=str(path))
         seen = set()
         for index, item in enumerate(prepared, 1):
             digest = item.get('script_sha256')
@@ -45,7 +45,7 @@ class ApprovalManager:
                 continue
             seen.add(digest)
             script = item.get('plan', {}).get('script', '')
-            self.feedback.emit('Approval', 'EXACT SCRIPT ' + str(index) + ' | SHA-256 ' + digest +
+            self.feedback.emit('Approval', 'EXACT SCRIPT ' + str(index) +
                                '\n----- BEGIN EXACT SCRIPT -----\n' + script +
                                '\n----- END EXACT SCRIPT -----', preserve_markup=True)
 

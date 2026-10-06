@@ -13,6 +13,7 @@ import uuid
 from urllib.parse import urlparse
 
 from . import reused_browser as edge
+from .protocol import BEGIN, END
 
 
 class BrowserUIError(RuntimeError):
@@ -28,6 +29,12 @@ def model_access_exhausted(text):
     return ('<<<copilot_agent_v1_begin>>>' not in value and len(value) <= 1500 and
             value.startswith("you've used today's") and 'access' in value and
             'now using auto' in value and 'available again' in value)
+
+
+def response_envelope_closed(text: str) -> bool:
+    """Recognize a complete wire envelope without parsing or validating its JSON."""
+    return (text.count(BEGIN) == 1 and text.count(END) == 1
+            and text.index(BEGIN) < text.index(END))
 
 
 class SubmissionNotSentError(BrowserUIError):
@@ -535,6 +542,13 @@ class BrowserAdapter:
         return bool(await self._evaluate(r"""() => [...document.querySelectorAll('button')].some(n=>
           (n.offsetWidth||n.offsetHeight)&&/^(stop generating|stop|stop responding)/i.test(n.getAttribute('aria-label')||''))"""))
 
+    async def _generation_state(self):
+        """Observe the live generation control and the restored, enabled Send control."""
+        stop_present = await self._stop_present()
+        send = await self._visible(edge.SEND_SELECTOR)
+        send_ready = bool(send is not None and await send.is_enabled())
+        return stop_present, send_ready
+
     async def attach_files(self, paths):
         paths = list(paths)
         if len(paths) > 20:
@@ -706,26 +720,35 @@ class BrowserAdapter:
                         await self._feedback({'type':'generation','request_id':request_id,
                             'message':'Selected model access is exhausted; Copilot reported an Auto fallback. No protocol retry or local tool execution.'})
                         raise ModelAccessError('Copilot reported that today\'s selected-model access is exhausted and switched to Auto. Start a fresh setup and explicitly select an available model, or wait for access to return.')
-                    stopped = not await self._stop_present()
-                    if not stopped and not generation_observed:
+                    stop_present, send_ready = await self._generation_state()
+                    if stop_present and not generation_observed:
                         generation_observed = True
                         await self._feedback({'type':'generation','request_id':request_id,'message':'Copilot is generating a response.'})
                     if candidate and candidate != streamed_candidate:
                         streamed_candidate = candidate
-                        await self._feedback({'type':'candidate','request_id':request_id,'raw':candidate,'generation_stopped':stopped})
+                        await self._feedback({'type':'candidate','request_id':request_id,'raw':candidate,
+                                              'generation_ended':not stop_present and (generation_observed or send_ready)})
+                    envelope_closed = bool(candidate and response_envelope_closed(candidate))
+                    generation_ended = not stop_present and (generation_observed or send_ready)
                     self.last_capture_observation = {
                         'request_id': request_id, 'committed_user_key':user_key, 'candidate_length':len(candidate),
-                        'generation_stopped':stopped,
+                        'stop_present':stop_present, 'send_ready':send_ready,
+                        'generation_observed':generation_observed, 'generation_ended':generation_ended,
+                        'closing_marker_present':envelope_closed,
                         'nodes':[{'key':item['key'],'order':item['order'],'role':item['role'],
                                   'length':len(item['text']),'contains_request':request_id in item['text']}
                                  for item in messages[-30:]]}
-                    stable = stable + 1 if candidate and candidate == previous and stopped else 0
+                    settled = envelope_closed and generation_ended
+                    stable = (stable + 1 if candidate == previous else 1) if settled else 0
                     previous = candidate
-                    # Missing/invalid markers still return complete fresh text for protocol correction.
-                    if stable >= self.config.capture_stable_samples:
+                    # Parsing belongs after capture. Only a complete, ended, briefly stable
+                    # current-turn envelope may reach protocol validation.
+                    if stable >= max(2, self.config.capture_stable_samples):
                         return candidate
                     await asyncio.sleep(self.config.poll_interval)
-                raise CaptureTimeoutError('The committed request did not produce a stable fresh assistant response before response_timeout.')
+                raise CaptureTimeoutError(
+                    'Copilot did not finish a complete reply before the capture limit. '
+                    'No local action ran for this reply; the committed message was not resent.')
             except Exception as exc:
                 await self.diagnostics('capture')
                 if isinstance(exc, (CaptureTimeoutError, ModelAccessError)):

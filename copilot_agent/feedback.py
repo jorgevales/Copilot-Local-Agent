@@ -115,6 +115,12 @@ class Feedback:
         if self.state:
             self.state.event('feedback', actor=actor, message=message, **metadata)
 
+    def record(self, actor, message, **metadata):
+        """Retain detailed feedback in the audit log without adding terminal noise."""
+        if self.state:
+            self.state.event('feedback_detail', actor=actor,
+                             message=_terminal_text(message), **metadata)
+
     def section(self, actor, title, items=(), **metadata):
         lines = [str(title)]
         for label, value in items:
