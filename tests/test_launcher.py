@@ -3,6 +3,7 @@ import ast
 from pathlib import Path
 import re
 import unittest
+from unittest.mock import patch
 import shutil
 import subprocess
 import tempfile
@@ -18,14 +19,97 @@ class SharedRuntimeProbeTests(unittest.TestCase):
         if match is None:
             raise AssertionError('Launcher Python runtime probe is absent')
         tree = ast.parse(match[1])
-        definitions = [node for node in tree.body if isinstance(node,(ast.Import,ast.FunctionDef)) and
-                       (isinstance(node,ast.FunctionDef) or any(alias.name=='ntpath' for alias in node.names))]
+        definitions = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom, ast.FunctionDef))
+                       or (isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == 'WINDOWS_SLASH'
+                                                                 for target in node.targets))]
         namespace = {}
         exec(compile(ast.Module(body=definitions,type_ignores=[]),'Launcher.ps1 Python portability probe','exec'),namespace)
         cls.check = staticmethod(namespace['assert_shared_runtime'])
+        cls.shared_path = staticmethod(namespace['is_shared_path'])
+        cls.mapped_root = staticmethod(namespace['mapped_shared_root'])
+        cls.valid_prefix = staticmethod(namespace['valid_environment_prefix'])
         cls.dependencies = staticmethod(namespace['assert_dependencies'])
         cls.locked_versions = staticmethod(namespace['locked_versions'])
         cls.source = source
+
+    def test_mapped_s_unc_runtime_and_dependency_paths_accepted(self):
+        def resolve(path, *, strict):
+            self.assertTrue(strict)
+            return '\\' * 2 + r'server\share' if path.casefold() == 's:' + chr(92) else path
+        with patch('os.path.realpath', side_effect=resolve):
+            self.mapped_root.cache_clear()
+            self.check(r'S:\Env\Scripts\python.exe', r'S:\Python',
+                       r'\\server\share\Python\python.exe', r'\\server\share\Python\Lib')
+            self.check(r'\\server\share\Env\Scripts\python.exe', r'\\server\share\Python',
+                       r'\\server\share\Python\python.exe', r'\\server\share\Python\Lib')
+            self.dependencies({'playwright': {'version': '1.55.0',
+                                              'location': r'\\server\share\Env\Lib\site-packages'}},
+                              {'playwright': '1.55.0'}, True)
+        self.mapped_root.cache_clear()
+
+    def test_unrelated_unc_share_and_prefix_collision_rejected(self):
+        def resolve(path, *, strict):
+            self.assertTrue(strict)
+            return '\\' * 2 + r'server\share' if path.casefold() == 's:' + chr(92) else path
+        with patch('os.path.realpath', side_effect=resolve):
+            self.mapped_root.cache_clear()
+            for other in (r'\\other\share\Python\python.exe',
+                          r'\\server\share2\Python\python.exe'):
+                with self.subTest(path=other), self.assertRaisesRegex(RuntimeError, 'base executable'):
+                    self.check(r'S:\Env\Scripts\python.exe', r'S:\Python', other, r'S:\Python\Lib')
+                with self.subTest(dependency=other), self.assertRaisesRegex(RuntimeError, 'must be installed on S:'):
+                    self.dependencies({'playwright': {'version': '1.55.0', 'location': other}},
+                                      {'playwright': '1.55.0'}, True)
+        self.mapped_root.cache_clear()
+
+    def test_unc_rejected_when_s_mapping_cannot_be_verified(self):
+        with patch('os.path.realpath', side_effect=OSError('unavailable')):
+            self.mapped_root.cache_clear()
+            with self.assertRaisesRegex(RuntimeError, 'base executable'):
+                self.check(r'S:\Env\Scripts\python.exe', r'S:\Python',
+                           r'\\server\share\Python\python.exe', r'S:\Python\Lib')
+        self.mapped_root.cache_clear()
+
+    def test_extended_unc_resolution_and_redirect_outside_share(self):
+        def resolve(path, *, strict):
+            self.assertTrue(strict)
+            if path.casefold() == 's:' + chr(92):
+                return r'\\?\UNC\server\share'
+            if path == r'\\server\share\redirected\python.exe':
+                return r'C:\outside\python.exe'
+            return path
+        with patch('os.path.realpath', side_effect=resolve):
+            self.mapped_root.cache_clear()
+            self.check(r'S:\Env\Scripts\python.exe', r'S:\Python',
+                       r'\\?\UNC\server\share\Python\python.exe', r'S:\Python\Lib')
+            with self.assertRaisesRegex(RuntimeError, 'base executable'):
+                self.check(r'S:\Env\Scripts\python.exe', r'S:\Python',
+                           r'\\server\share\redirected\python.exe', r'S:\Python\Lib')
+        self.mapped_root.cache_clear()
+
+    def test_environment_prefix_uses_directory_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory) / 'base'
+            environment = Path(directory) / 'env'
+            other = Path(directory) / 'other'
+            for path in (base, environment, other):
+                path.mkdir()
+            self.assertTrue(self.valid_prefix(str(environment), str(base), str(environment)))
+            self.assertFalse(self.valid_prefix(str(environment), str(base), str(other)))
+            self.assertFalse(self.valid_prefix(str(base), str(base), str(base)))
+            self.assertFalse(self.valid_prefix(str(environment), str(base), str(environment / 'missing')))
+
+    def test_environment_prefix_accepts_unc_alias_when_file_ids_differ(self):
+        aliases = {r'S:\Env': r'\\server\share\Env',
+                   r'S:\Python': r'\\server\share\Python'}
+        with patch('os.path.samefile', return_value=False), patch(
+                'os.path.realpath', side_effect=lambda path, *, strict: aliases.get(path, path)):
+            self.assertTrue(self.valid_prefix(r'S:\Env', r'S:\Python',
+                                              r'\\server\share\Env'))
+        with patch('os.path.samefile', side_effect=OSError('unavailable')), patch(
+                'os.path.realpath', side_effect=OSError('unavailable')):
+            self.assertFalse(self.valid_prefix(r'S:\Env', r'S:\Python',
+                                               r'\\server\share\Env'))
 
     def test_complete_shared_installation_and_shared_venv_accepted(self):
         self.check(r'S:\Python\python.exe',r'S:\Python',r'S:\Python\python.exe',r'S:\Python\Lib')

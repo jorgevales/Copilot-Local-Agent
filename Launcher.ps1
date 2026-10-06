@@ -274,16 +274,70 @@ try {
     $env:PYTHONDONTWRITEBYTECODE = '1'
     $pythonProbe = @'
 import ntpath
+import os
 import sys
 import sysconfig
+from functools import lru_cache
 from importlib.metadata import distribution
+
+WINDOWS_SLASH = chr(92)
+
+def normalized_final_path(value):
+    result = os.path.realpath(value, strict=True)
+    extended = WINDOWS_SLASH * 2 + '?' + WINDOWS_SLASH
+    unc_prefix = extended + 'UNC' + WINDOWS_SLASH
+    if result[:len(unc_prefix)].casefold() == unc_prefix.casefold():
+        result = WINDOWS_SLASH * 2 + result[len(unc_prefix):]
+    elif result.startswith(extended):
+        result = result[len(extended):]
+    return ntpath.normcase(ntpath.normpath(result)).rstrip(WINDOWS_SLASH)
+
+@lru_cache(maxsize=1)
+def mapped_shared_root():
+    try:
+        result = normalized_final_path('S:' + WINDOWS_SLASH)
+    except (OSError, ValueError):
+        return None
+    return result if result.startswith(WINDOWS_SLASH * 2) else None
+
+def is_shared_path(value):
+    if not isinstance(value, str) or not ntpath.isabs(value):
+        return False
+    if ntpath.splitdrive(ntpath.normpath(value))[0].casefold() == 's:':
+        return True
+    if not value.startswith(WINDOWS_SLASH * 2):
+        return False
+    root = mapped_shared_root()
+    if root is None:
+        return False
+    try:
+        resolved = normalized_final_path(value)
+    except (OSError, ValueError):
+        return False
+    return resolved == root or resolved.startswith(root + WINDOWS_SLASH)
+
+def same_directory(left, right):
+    identity_match = None
+    try:
+        identity_match = os.path.samefile(left, right)
+    except (OSError, ValueError):
+        pass
+    if identity_match:
+        return True
+    try:
+        return normalized_final_path(left) == normalized_final_path(right)
+    except (OSError, ValueError):
+        return identity_match
+
+def valid_environment_prefix(actual, base, expected):
+    return same_directory(actual, expected) is True and same_directory(actual, base) is False
 
 def assert_shared_runtime(executable, base_prefix, base_executable, stdlib):
     paths = {'running executable': executable, 'base Python prefix': base_prefix,
              'base executable': base_executable or executable, 'standard library': stdlib}
     for label, value in paths.items():
-        if not isinstance(value, str) or not ntpath.isabs(value) or ntpath.splitdrive(value)[0].upper() != 'S:':
-            raise RuntimeError('Shared deployment requires the '+label+' on S:. This interpreter depends on a local or unmapped Python runtime; the operator must provide a complete shared installation.')
+        if not is_shared_path(value):
+            raise RuntimeError('Shared deployment requires the '+label+' on S: or its mapped UNC share. Reported runtime paths: '+repr(paths)+'. This interpreter depends on a local or unmapped Python runtime; the operator must provide a complete shared installation.')
 
 def locked_versions(text):
     if len(text) > 65536:
@@ -309,14 +363,12 @@ def assert_dependencies(installed, expected, require_shared):
         if record.get('version') != pinned:
             raise RuntimeError('Required dependency '+name+'=='+pinned+' is unavailable. The operator must install requirements.lock.txt for this shared interpreter.')
         location = record.get('location')
-        if require_shared and (not isinstance(location, str) or not ntpath.isabs(location)
-                               or ntpath.splitdrive(location)[0].upper() != 'S:'):
-            raise RuntimeError('Shared dependency '+name+' must be installed on S:, not in a local or per-user package directory.')
+        if require_shared and not is_shared_path(location):
+            raise RuntimeError('Shared dependency '+name+' must be installed on S: or its mapped UNC share, not in a local or per-user package directory. Reported location: '+repr(location))
 
 assert sys.version_info >= (3, 10), 'Python 3.10+ is required'
 if len(sys.argv) > 3:
-    expected_prefix = ntpath.normcase(ntpath.abspath(sys.argv[3]))
-    if ntpath.normcase(ntpath.abspath(sys.prefix)) != expected_prefix or sys.prefix == sys.base_prefix:
+    if not valid_environment_prefix(sys.prefix, sys.base_prefix, sys.argv[3]):
         raise RuntimeError('Existing project environment is not a valid virtual environment at the expected path. Files were retained.')
 bootstrap = sys.argv[1].endswith('-bootstrap')
 shared = sys.argv[1].startswith('shared')
