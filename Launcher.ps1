@@ -102,6 +102,9 @@ function Get-WorkingPip([string]$Executable, [string[]]$PythonFlags) {
     $ErrorActionPreference = 'Continue'
     $description = @(& $Executable @PythonFlags -m pip --version 2>$null)
     if ($LASTEXITCODE -ne 0 -or $description.Count -eq 0) { return $null }
+    # A damaged virtualenv seed can import pip but lack its distribution metadata.
+    & $Executable @PythonFlags -c 'import pip; from importlib.metadata import distribution; assert distribution(pip.__name__).version == pip.__version__' 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { return $null }
     return ($description -join ' ').Trim()
 }
 
@@ -123,6 +126,16 @@ print(sys.base_prefix)
         }
     }
     throw 'The selected project environment has no accessible base Python executable. Existing files were retained.'
+}
+
+function Preserve-ProjectEnvironment([string]$ProjectRoot, [string]$EnvironmentPath) {
+    $entry = Get-Item -LiteralPath $EnvironmentPath -Force
+    if (-not (Test-SafePythonEntry $entry)) { throw 'The project .venv must be a real directory, not a redirected path.' }
+    $archivePath = Join-Path $ProjectRoot ('.venv-incomplete-' + [guid]::NewGuid().ToString('N'))
+    $projectFull = [System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\') + '\'
+    if (-not ([System.IO.Path]::GetFullPath($EnvironmentPath).StartsWith($projectFull, [System.StringComparison]::OrdinalIgnoreCase) -and [System.IO.Path]::GetFullPath($archivePath).StartsWith($projectFull, [System.StringComparison]::OrdinalIgnoreCase))) { throw 'Environment recovery paths are outside the project.' }
+    Move-Item -LiteralPath $EnvironmentPath -Destination $archivePath -ErrorAction Stop
+    Write-Host ('Preserved the previous environment at ' + $archivePath)
 }
 
 function Initialize-AgentEnvironment([string]$BasePython, [string[]]$PythonFlags, [string]$Probe, [string]$RuntimeMode, [string]$ProjectRoot) {
@@ -156,11 +169,7 @@ function Initialize-AgentEnvironment([string]$BasePython, [string[]]$PythonFlags
                 $basePip = Get-WorkingPip $BasePython $PythonFlags
                 if ($basePip) { Write-Host ('Located pip in the selected Python installation: ' + $basePip) }
                 else { Write-Host 'The selected Python has no working pip; the bundled bootstrap will seed it in the project environment.' }
-                $archivePath = Join-Path $ProjectRoot ('.venv-incomplete-' + [guid]::NewGuid().ToString('N'))
-                $projectFull = [System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\') + '\'
-                if (-not ([System.IO.Path]::GetFullPath($environmentPath).StartsWith($projectFull, [System.StringComparison]::OrdinalIgnoreCase) -and [System.IO.Path]::GetFullPath($archivePath).StartsWith($projectFull, [System.StringComparison]::OrdinalIgnoreCase))) { throw 'Environment recovery paths are outside the project.' }
-                Move-Item -LiteralPath $environmentPath -Destination $archivePath -ErrorAction Stop
-                Write-Host ('Preserved the previous environment at ' + $archivePath)
+                Preserve-ProjectEnvironment $ProjectRoot $environmentPath
             } else {
                 Write-Host 'Reusing the existing project Python environment.'
             }
@@ -169,7 +178,14 @@ function Initialize-AgentEnvironment([string]$BasePython, [string[]]$PythonFlags
             Write-Host 'Creating the project Python environment.'
             if (-not (Test-Path -LiteralPath $bootstrap -PathType Leaf) -or -not (Test-SafePythonEntry (Get-Item -LiteralPath $bootstrap -Force))) { throw 'Bundled virtualenv bootstrap is missing or redirected. Restore the official repository files and retry Setup.' }
             if ((Get-FileHash -LiteralPath $bootstrap -Algorithm SHA256).Hash -ne $bootstrapSha256) { throw 'Bundled virtualenv bootstrap failed its SHA-256 check. Restore the official repository files and retry Setup.' }
-            Invoke-SetupPython $BasePython ($PythonFlags + @($bootstrap,'--no-download','--no-periodic-update',$environmentPath))
+            try {
+                Invoke-SetupPython $BasePython ($PythonFlags + @($bootstrap,'--no-download','--no-periodic-update',$environmentPath))
+                if (-not (Get-WorkingPip $environmentPython $PythonFlags)) { throw 'Default virtualenv seeder did not create a working pip installation.' }
+            } catch {
+                Write-Host 'Default virtualenv seeder failed. Retrying with the direct pip seeder.'
+                if (Test-Path -LiteralPath $environmentPath) { Preserve-ProjectEnvironment $ProjectRoot $environmentPath }
+                Invoke-SetupPython $BasePython ($PythonFlags + @($bootstrap,'--no-download','--no-periodic-update','--seeder','pip',$environmentPath))
+            }
         }
         if (-not (Test-Path -LiteralPath (Join-Path $environmentPath 'pyvenv.cfg') -PathType Leaf) -or -not (Test-Path -LiteralPath $environmentPython -PathType Leaf)) { throw 'Virtual environment creation was incomplete. Files were retained.' }
         $priorCandidates = $candidates

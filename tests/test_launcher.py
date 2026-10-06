@@ -247,6 +247,38 @@ class PythonSetupChoiceTests(unittest.TestCase):
         self.assertIn('passed', result.stdout)
         self.assertNotIn('Traceback', result.stderr)
 
+    def test_pip_probe_rejects_module_without_distribution_metadata(self):
+        source = (Path(__file__).resolve().parents[1] / 'Launcher.ps1').read_text(encoding='utf-8-sig')
+        helper = source[source.index('function Get-WorkingPip('):source.index('function Get-RecoveryBasePython(')]
+        with tempfile.TemporaryDirectory() as directory:
+            package = Path(directory) / 'pip'
+            package.mkdir()
+            (package / '__init__.py').write_text("__version__ = '99.0'\n")
+            (package / '__main__.py').write_text("print('pip 99.0 from synthetic package')\n")
+            executable = sys.executable.replace("'", "''")
+            path = directory.replace("'", "''")
+            script = "$ErrorActionPreference='Stop'; $env:PYTHONPATH='" + path + "'; " + helper + " if (Get-WorkingPip '" + executable + "' @('-B','-S')) { throw 'Pip without metadata accepted' }; Write-Output 'passed'"
+            result = subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', script], capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('passed', result.stdout)
+
+    def test_bundled_direct_pip_seeder_creates_isolated_pip(self):
+        bootstrap = Path(__file__).resolve().parents[1] / 'bootstrap' / 'virtualenv.pyz'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            environment = root / '.venv'
+            seeded = subprocess.run([sys.executable, str(bootstrap), '--no-download', '--no-periodic-update',
+                                     '--seeder', 'pip', '--app-data', str(root / 'cache'), str(environment)],
+                                    capture_output=True, text=True, timeout=90)
+            self.assertEqual(seeded.returncode, 0, seeded.stdout + seeded.stderr)
+            interpreter = environment / 'Scripts' / 'python.exe'
+            checked = subprocess.run([str(interpreter), '-c',
+                                      'import pip, sys; from importlib.metadata import distribution; '
+                                      'assert sys.prefix != sys.base_prefix; '
+                                      'assert distribution(pip.__name__).version == pip.__version__'],
+                                     capture_output=True, text=True, timeout=30)
+            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+
 
     def test_cloud_tags_only_allowed_for_local_development(self):
         output = self.run_helpers("foreach ($tag in @(2415919130,2415923226,2415980570)) { if (-not (Test-AllowedCloudTag $tag)) { throw 'Known CLOUD tag denied' } }; foreach ($tag in @(2684354572,2684354563,2415919131,2952790042)) { if (Test-AllowedCloudTag $tag) { throw 'Unknown or surrogate tag accepted' } }; $productionShare=$true; if (Test-AllowedCloudTag 2415919130) { throw 'Cloud allowed on S' }; Write-Output 'passed'")
@@ -290,6 +322,29 @@ class PythonSetupChoiceTests(unittest.TestCase):
             output = self.environment_fixture(directory, "$result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; $archives=@(Get-ChildItem -LiteralPath PROJECT -Directory -Filter '.venv-incomplete-*'); if ($archives.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $archives[0].FullName 'old-file.txt')) -or $operations.Count -ne 4) { throw 'Incomplete environment not preserved and repaired' }; Write-Output 'passed'")
             self.assertIn('passed', output)
 
+    def test_failed_default_seed_preserves_old_and_partial_environments_then_uses_direct_pip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            old = Path(directory) / '.venv'
+            old.mkdir()
+            (old / 'old-file.txt').write_text('keep old environment')
+            failure = "if (($Arguments -join '|') -like '*virtualenv.pyz*' -and $Arguments -notcontains '--seeder') { $partial=Join-Path $Arguments[-1] 'Scripts'; New-Item -ItemType Directory -Path $partial -Force | Out-Null; Set-Content -LiteralPath (Join-Path $partial 'partial-file.txt') -Value 'keep partial'; throw 'damaged app-data pip seed' };"
+            body = "$result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; $archives=@(Get-ChildItem -LiteralPath PROJECT -Directory -Filter '.venv-incomplete-*'); $old=@($archives | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'old-file.txt') }); $partial=@($archives | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'Scripts\\partial-file.txt') }); if ($archives.Count -ne 2 -or $old.Count -ne 1 -or $partial.Count -ne 1 -or $operations.Count -ne 5 -or $operations[2] -notlike '*--seeder|pip*' -or $operations[4] -notlike '*|pip|install|*') { throw 'Seeder fallback lost files or skipped validation' }; Write-Output 'passed'"
+            output = self.environment_fixture(directory, body, failure)
+            self.assertIn('passed', output)
+
+    def test_failed_direct_seed_does_not_install_packages_or_remove_archives(self):
+        with tempfile.TemporaryDirectory() as directory:
+            failure = "if (($Arguments -join '|') -like '*virtualenv.pyz*') { $partial=Join-Path $Arguments[-1] 'Scripts'; New-Item -ItemType Directory -Path $partial -Force | Out-Null; if ($Arguments -contains '--seeder') { throw 'direct seed failed' }; throw 'default seed failed' };"
+            body = "try { Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; throw 'Failure lost' } catch { if ($_.Exception.Message -ne 'direct seed failed') { throw } }; $archives=@(Get-ChildItem -LiteralPath PROJECT -Directory -Filter '.venv-incomplete-*'); if ($archives.Count -ne 1 -or $operations.Count -ne 3 -or ($operations -join '|') -like '*|install|*') { throw 'Failed seed installed packages or lost partial environment' }; Write-Output 'passed'"
+            output = self.environment_fixture(directory, body, failure)
+            self.assertIn('passed', output)
+
+    def test_successful_default_seed_without_working_pip_is_rebuilt_directly(self):
+        with tempfile.TemporaryDirectory() as directory:
+            body = "$global:seededWithPip=$false; function Get-WorkingPip($Executable,$PythonFlags) { if ($Executable -like '*Scripts\\python.exe' -and -not $global:seededWithPip) { return $null }; return 'pip fixture' }; $result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; $archives=@(Get-ChildItem -LiteralPath PROJECT -Directory -Filter '.venv-incomplete-*'); if ($archives.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $archives[0].FullName 'pyvenv.cfg')) -or $operations.Count -ne 5 -or $operations[2] -notlike '*--seeder|pip*' -or -not $global:seededWithPip) { throw 'Invalid default seed was reused' }; Write-Output 'passed'"
+            output = self.environment_fixture(directory, body, "if ($Arguments -contains '--seeder') { $global:seededWithPip=$true };")
+            self.assertIn('passed', output)
+
     def test_setup_rebuilds_pipless_existing_environment_and_preserves_files(self):
         with tempfile.TemporaryDirectory() as directory:
             env = Path(directory) / '.venv'
@@ -297,14 +352,14 @@ class PythonSetupChoiceTests(unittest.TestCase):
             (env / 'Scripts' / 'python.exe').write_bytes(b'fixture')
             (env / 'pyvenv.cfg').write_text('fixture')
             (env / 'old-file.txt').write_text('keep me')
-            body = r"$global:rebuilt=$false; $global:pipChecks=[System.Collections.Generic.List[string]]::new(); function Get-WorkingPip($Executable,$PythonFlags) { $global:pipChecks.Add($Executable); if ($Executable -like '*Scripts\python.exe' -and -not $global:rebuilt) { return $null }; return 'pip from selected Python' }; $result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; $archives=@(Get-ChildItem -LiteralPath PROJECT -Directory -Filter '.venv-incomplete-*'); if ($archives.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $archives[0].FullName 'old-file.txt')) -or $operations.Count -ne 4 -or $pipChecks.Count -ne 3 -or $pipChecks[1] -ne 'base' -or -not $global:rebuilt) { throw 'Pipless environment was not safely repaired' }; Write-Output 'passed'"
+            body = r"$global:rebuilt=$false; $global:pipChecks=[System.Collections.Generic.List[string]]::new(); function Get-WorkingPip($Executable,$PythonFlags) { $global:pipChecks.Add($Executable); if ($Executable -like '*Scripts\python.exe' -and -not $global:rebuilt) { return $null }; return 'pip from selected Python' }; $result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; $archives=@(Get-ChildItem -LiteralPath PROJECT -Directory -Filter '.venv-incomplete-*'); if ($archives.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $archives[0].FullName 'old-file.txt')) -or $operations.Count -ne 4 -or $pipChecks.Count -ne 4 -or $pipChecks[1] -ne 'base' -or -not $global:rebuilt) { throw 'Pipless environment was not safely repaired' }; Write-Output 'passed'"
             output = self.environment_fixture(directory, body,
                                               "if (($Arguments -join '|') -like '*virtualenv.pyz*') { $global:rebuilt=$true };")
             self.assertIn('passed', output)
 
     def test_setup_stops_before_packages_when_replacement_has_no_pip(self):
         with tempfile.TemporaryDirectory() as directory:
-            output = self.environment_fixture(directory, r"function Get-WorkingPip { return $null }; try { Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; throw 'Missing pip accepted' } catch { if ($_.Exception.Message -notlike '*pip is unavailable*') { throw } }; if ($operations.Count -ne 3 -or -not (Test-Path -LiteralPath (Join-Path PROJECT '.venv\pyvenv.cfg'))) { throw 'Packages installed or replacement lost' }; Write-Output 'passed'")
+            output = self.environment_fixture(directory, r"function Get-WorkingPip { return $null }; try { Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; throw 'Missing pip accepted' } catch { if ($_.Exception.Message -notlike '*pip is unavailable*') { throw } }; $archives=@(Get-ChildItem -LiteralPath PROJECT -Directory -Filter '.venv-incomplete-*'); if ($operations.Count -ne 4 -or $archives.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path PROJECT '.venv\pyvenv.cfg')) -or ($operations -join '|') -like '*|install|*') { throw 'Packages installed or replacement lost' }; Write-Output 'passed'")
             self.assertIn('passed', output)
 
     def test_pip_target_configuration_stops_before_install(self):
