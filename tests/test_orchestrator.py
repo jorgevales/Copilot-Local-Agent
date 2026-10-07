@@ -279,6 +279,20 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual('blocked', state.data['status'])
         self.assertEqual([], registry.calls)
 
+    async def test_twelfth_completed_correction_can_succeed(self):
+        def completed_invalid(message):
+            return (BEGIN + '\n{"request_id":' + json.dumps(message['request_id']) +
+                    ',"completed_but_invalid":}\n' + END)
+        responders = [final_response] + [completed_invalid] * 12 + [final_response]
+        root, config, state, registry, browser, app = self.fixture(responders)
+        config.max_corrections = 12
+        await app.initialize()
+        result = await app.turn('Use every allowed completed-response correction if needed.')
+        self.assertEqual('final', result['response_type'])
+        self.assertEqual(12, len(state.data['retry_records']))
+        self.assertEqual(12, [item['message']['kind'] for item in browser.sent].count('correction'))
+        self.assertEqual([], registry.calls)
+
     async def test_uncertain_submission_blocks_resend_without_counting(self):
         root, config, state, registry, browser, app = self.fixture(
             [final_response, SubmissionAmbiguousError('Delivery uncertain')])

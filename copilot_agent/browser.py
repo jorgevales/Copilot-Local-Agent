@@ -37,6 +37,55 @@ def response_envelope_closed(text: str) -> bool:
             and text.index(BEGIN) < text.index(END))
 
 
+def copied_code_response(text: str, request_id: str) -> str:
+    """Frame a complete current-turn JSON code block without validating its JSON."""
+    if not isinstance(text, str) or not text.strip() or not request_id:
+        return ''
+    value = text.strip().replace('\r\n', '\n').replace('\r', '\n')
+    if response_envelope_closed(value):
+        body = value[value.index(BEGIN) + len(BEGIN):value.index(END)].strip()
+        candidate = value
+    else:
+        body = value
+        if body.startswith('```') and body.endswith('```'):
+            lines = body.splitlines()
+            if len(lines) < 3:
+                return ''
+            body = '\n'.join(lines[1:-1]).strip()
+        candidate = BEGIN + '\n' + body + '\n' + END
+    # A completed malformed object must reach protocol correction, but a partial
+    # or stale clipboard value must not. Use only structural/identity checks here.
+    identity = re.compile(r'"request_id"\s*:\s*' + re.escape(json.dumps(request_id)))
+    stack, quoted, escaped, closed_at = [], False, False, None
+    for index, char in enumerate(body):
+        if closed_at is not None:
+            if not char.isspace():
+                return ''
+            continue
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == '\\':
+                escaped = True
+            elif char == '"':
+                quoted = False
+            continue
+        if char == '"':
+            quoted = True
+        elif char in '{[':
+            stack.append(char)
+        elif char in '}]':
+            if not stack or (char == '}' and stack[-1] != '{') or (char == ']' and stack[-1] != '['):
+                return ''
+            stack.pop()
+            if not stack:
+                closed_at = index
+    if (not body.startswith('{') or quoted or escaped or stack or closed_at is None
+            or not identity.search(body)):
+        return ''
+    return candidate
+
+
 class SubmissionNotSentError(BrowserUIError):
     """The adapter failed before attempting Send; a persisted intent may be cancelled."""
 
@@ -629,6 +678,52 @@ class BrowserAdapter:
                 expanded += 1
         return expanded
 
+    def _response_code_groups(self, request_id):
+        roots = ('[data-testid="markdown-reply"]', '.fai-CopilotMessage__content', '[data-author="assistant"]',
+                 '[data-message-author-role="assistant"]', '[data-testid="copilot-message-reply-div"]')
+        selector = ','.join(root + ' [role="group"][aria-label="Code Preview"]' for root in roots)
+        return self.page.locator(selector).filter(has_text=request_id)
+
+    async def _copy_response_code(self, request_id):
+        """Use the accessible Copy code control attached to this turn's code block."""
+        try:
+            groups = self._response_code_groups(request_id)
+            matches = []
+            for index in range(min(await groups.count(), 10)):
+                group = groups.nth(index)
+                button = group.get_by_role('button', name=re.compile(r'^Copy code$', re.I))
+                if (await button.count() == 1 and await button.is_visible()
+                        and await button.is_enabled()):
+                    matches.append(button)
+            if len(matches) != 1:
+                return {'status':'unavailable' if not matches else 'ambiguous', 'text':''}
+            await matches[0].click(timeout=3000)
+            value = await asyncio.wait_for(self.page.evaluate(
+                """async () => { if (!navigator.clipboard?.readText) throw new Error('clipboard unavailable'); return await navigator.clipboard.readText(); }"""), 5)
+            return {'status':'copied' if isinstance(value, str) else 'clipboard_unavailable',
+                    'text':value if isinstance(value, str) else ''}
+        except Exception as exc:
+            return {'status':'clipboard_failed', 'text':'', 'error_type':type(exc).__name__}
+
+    async def _safe_dom_code_response(self, request_id):
+        """Fallback only to a non-virtualized PRE code block scoped to this response."""
+        roots = ('[data-testid="markdown-reply"]', '.fai-CopilotMessage__content', '[data-author="assistant"]',
+                 '[data-message-author-role="assistant"]', '[data-testid="copilot-message-reply-div"]')
+        selector = ','.join(root + ' pre' for root in roots)
+        blocks = self.page.locator(selector).filter(has_text=request_id)
+        ordinary = []
+        for index in range(min(await blocks.count(), 10)):
+            block = blocks.nth(index)
+            virtual_parent = block.locator('xpath=ancestor::*[@role="group" and @aria-label="Code Preview"]')
+            if await virtual_parent.count() == 0:
+                ordinary.append(block)
+        if len(ordinary) != 1:
+            return ''
+        block = ordinary[0]
+        code = block.locator('code')
+        source = code if await code.count() == 1 else block
+        return str(await source.text_content() or '')
+
     async def _prepare_submission(self, text, request_id, attachments):
         if not request_id or request_id not in text:
             raise BrowserUIError('Every outbound message must contain its unique request_id.')
@@ -706,16 +801,15 @@ class BrowserAdapter:
             await self._feedback({'type':'generation', 'request_id':request_id, 'message':'Waiting for Copilot to render its reply.'})
             streamed_candidate = ''
             generation_observed = False
+            capture_method = None
+            clipboard_status = 'not_attempted'
+            fallback_reported = False
             try:
                 while time.monotonic() < deadline:
                     if any(host in self.page.url for host in ('login.microsoftonline.com', 'login.live.com')):
                         raise CaptureTimeoutError('Authentication interrupted a committed request; do not resend automatically.')
-                    if expansions < 4:
-                        expansions += int(await self._expand_response_code(request_id) or 0)
                     messages = await self._evaluate(_MESSAGE_SNAPSHOT)
                     candidate = fresh_assistant(messages, baseline, user_key, request_id)
-                    if len(candidate) > self.config.max_capture_chars:
-                        raise CaptureTimeoutError('Assistant response exceeded max_capture_chars; refusing a truncated capture.')
                     if model_access_exhausted(candidate):
                         await self._feedback({'type':'generation','request_id':request_id,
                             'message':'Selected model access is exhausted; Copilot reported an Auto fallback. No protocol retry or local tool execution.'})
@@ -728,26 +822,49 @@ class BrowserAdapter:
                         streamed_candidate = candidate
                         await self._feedback({'type':'candidate','request_id':request_id,'raw':candidate,
                                               'generation_ended':not stop_present and (generation_observed or send_ready)})
-                    envelope_closed = bool(candidate and response_envelope_closed(candidate))
                     generation_ended = not stop_present and (generation_observed or send_ready)
+                    captured = ''
+                    if generation_ended:
+                        copied = await self._copy_response_code(request_id)
+                        clipboard_status = copied.get('status', 'clipboard_failed')
+                        captured = copied_code_response(copied.get('text', ''), request_id)
+                        if captured:
+                            capture_method = 'copy_code'
+                        else:
+                            if clipboard_status == 'copied':
+                                clipboard_status = 'stale_or_incomplete'
+                            if expansions < 4:
+                                expansions += int(await self._expand_response_code(request_id) or 0)
+                            fallback = await self._safe_dom_code_response(request_id)
+                            captured = copied_code_response(fallback, request_id)
+                            if captured:
+                                capture_method = 'dom_pre_fallback'
+                                if not fallback_reported:
+                                    fallback_reported = True
+                                    await self._feedback({'type':'generation','request_id':request_id,
+                                        'message':'Copy capture was unavailable; using the complete standard code block instead.'})
+                    if captured and len(captured) > self.config.max_capture_chars:
+                        raise CaptureTimeoutError('The copied response exceeded max_capture_chars; no partial response was accepted.')
                     self.last_capture_observation = {
                         'request_id': request_id, 'committed_user_key':user_key, 'candidate_length':len(candidate),
                         'stop_present':stop_present, 'send_ready':send_ready,
                         'generation_observed':generation_observed, 'generation_ended':generation_ended,
-                        'closing_marker_present':envelope_closed,
+                        'capture_method':capture_method, 'clipboard_status':clipboard_status,
+                        'complete_current_code':bool(captured),
                         'nodes':[{'key':item['key'],'order':item['order'],'role':item['role'],
                                   'length':len(item['text']),'contains_request':request_id in item['text']}
                                  for item in messages[-30:]]}
-                    settled = envelope_closed and generation_ended
-                    stable = (stable + 1 if candidate == previous else 1) if settled else 0
-                    previous = candidate
+                    settled = bool(captured) and generation_ended
+                    stable = (stable + 1 if captured == previous else 1) if settled else 0
+                    previous = captured
                     # Parsing belongs after capture. Only a complete, ended, briefly stable
                     # current-turn envelope may reach protocol validation.
                     if stable >= max(2, self.config.capture_stable_samples):
-                        return candidate
+                        return captured
                     await asyncio.sleep(self.config.poll_interval)
                 raise CaptureTimeoutError(
-                    'Copilot did not finish a complete reply before the capture limit. '
+                    'Copilot did not provide a complete current-turn Copy code result before the capture limit '
+                    '(last clipboard status: ' + clipboard_status + '). '
                     'No local action ran for this reply; the committed message was not resent.')
             except Exception as exc:
                 await self.diagnostics('capture')

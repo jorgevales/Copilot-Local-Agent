@@ -269,6 +269,17 @@ class StateAndPromptTests(unittest.TestCase):
         self.assertIn(builder.context_file, attachments)
         self.assertLessEqual(len(attachments), 20)
 
+    def test_catalogue_advertises_effective_code_runner_timeout_limit(self):
+        root, config, state, registry = make_fixture('runner-timeout-catalogue-')
+        from copilot_agent.tools import ToolRegistry
+        config.tool_timeout = 7
+        builder = PromptBuilder(config, ToolRegistry(), state, Findings(state.directory))
+        catalogue = json.loads(builder.catalogue.read_text(encoding='utf-8'))
+        runner = next(item for item in catalogue['tools'] if item['name'] == 'code_runner')
+        self.assertEqual(7, runner['input_schema']['properties']['timeout_seconds']['maximum'])
+        self.assertEqual(7, runner['limits']['timeout_seconds'])
+        self.assertIn('configured limit of 7 seconds', runner['description'])
+
     def test_plan_grant_covers_exact_plan_and_once_is_not_persistent(self):
         async def exercise():
             state = SessionState(retained_root('approval-'))
@@ -398,7 +409,7 @@ class StateAndPromptTests(unittest.TestCase):
             asyncio.run(exercise())
 
     def test_config_rejects_bad_types_and_unknown_settings(self):
-        for changed in ({'debug_port': True}, {'visible': 'false'}, {'max_corrections': 11},
+        for changed in ({'debug_port': True}, {'visible': 'false'}, {'max_corrections': 13},
                         {'max_tool_rounds': 0}, {'allowed_roots': []}, {'poll_interval': float('nan')}):
             with self.subTest(changed=changed), self.assertRaises(ValueError):
                 Config(**changed).validate()

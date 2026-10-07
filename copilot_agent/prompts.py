@@ -1,4 +1,5 @@
 from __future__ import annotations
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -14,7 +15,19 @@ class PromptBuilder:
             raise ValueError('Eight behavioural guidance documents are required; run setup verification')
         self.schema = config.root / 'schemas' / 'response-v1.schema.json'
         self.catalogue = state.directory / 'tool-catalogue.json'
-        write_json(self.catalogue, {'schema_version': '1.0', 'tools': registry.definitions()})
+        definitions = copy.deepcopy(registry.definitions())
+        runner_limit = max(1, min(30, int(config.tool_timeout)))
+        for definition in definitions:
+            if definition.get('name') != 'code_runner':
+                continue
+            timeout_schema = definition.get('input_schema', {}).get('properties', {}).get('timeout_seconds')
+            if isinstance(timeout_schema, dict):
+                timeout_schema['maximum'] = runner_limit
+            definition.setdefault('limits', {})['timeout_seconds'] = runner_limit
+            definition['description'] = (definition.get('description', '') +
+                ' Proposed local_python timeout_seconds must not exceed the configured limit of ' +
+                str(runner_limit) + ' seconds.').strip()
+        write_json(self.catalogue, {'schema_version': '1.0', 'tools': definitions})
         paths = [*self.guidance, self.schema, self.catalogue]
         self.manifest = [{'name': p.name, 'version': '1.0', 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()} for p in paths]
         self.component_paths = paths
@@ -23,6 +36,7 @@ class PromptBuilder:
         state.data['guidance_bundle'] = self.bundle
         state.data['constraints'] = ['Never delete files; no credentials or authentication bypass.',
                                      'Code Runner defaults to python_subset. Every local_python script requires exact immutable explicit approval and declared scope.',
+                                     'Code Runner timeout_seconds must be at most ' + str(runner_limit) + '; request an approved configuration change instead of exceeding it.',
                                      'Permitted file roots: ' + ', '.join(config.allowed_roots),
                                      'Permitted browser domains: ' + ', '.join(config.allowed_domains),
                                      'Useful Findings accepted anytime; current file sent every tenth submitted message.']

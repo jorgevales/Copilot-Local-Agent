@@ -265,6 +265,10 @@ class LocalPythonRunnerTests(unittest.TestCase):
         self.assertIsNone(result["exit_code"] if result["exit_code"] is None else None)
         self.assertTrue(Path(result["audit_path"]).is_file())
 
+    def test_timeout_limit_reports_actual_cap_and_configuration_choice(self):
+        with self.assertRaisesRegex(PolicyError, "limit of 5.*approved configuration change"):
+            self.runner.prepare(self.plan("print('never runs')\n", timeout_seconds=6))
+
     def test_task_cancellation_stops_worker_and_records_cancelled_audit(self):
         async def exercise():
             plan = self.plan("import time\ntime.sleep(30)\n", imports=["time"], timeout_seconds=5)

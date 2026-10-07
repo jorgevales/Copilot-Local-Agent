@@ -122,7 +122,10 @@ class CodeRunner:
             if type(plan[key]) is not int:
                 raise ValueError(key + " must be an integer")
         if not 1 <= plan["timeout_seconds"] <= int(self.max_seconds):
-            raise PolicyError("timeout_seconds exceeds the configured Code Runner limit")
+            raise PolicyError(
+                "timeout_seconds " + str(plan["timeout_seconds"]) +
+                " exceeds the configured Code Runner limit of " + str(int(self.max_seconds)) +
+                "; propose a value within that limit or ask the user for an approved configuration change")
         if not 1 <= plan["max_output_chars"] <= self.max_output:
             raise PolicyError("max_output_chars exceeds the configured Code Runner limit")
         for path in plan["read_paths"] + plan["modify_paths"]:

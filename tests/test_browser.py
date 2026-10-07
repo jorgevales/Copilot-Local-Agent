@@ -12,6 +12,7 @@ from copilot_agent.browser import SubmissionNotSentError
 from copilot_agent.browser import upload_alert_is_error
 from copilot_agent.browser import model_access_exhausted
 from copilot_agent.browser import response_envelope_closed
+from copilot_agent.browser import copied_code_response
 from copilot_agent.reused_browser import EndpointError, cdp_endpoint, validate_endpoint
 from copilot_agent.protocol import BEGIN, END
 
@@ -22,6 +23,13 @@ class CorrelationTests(unittest.TestCase):
         self.assertTrue(model_access_exhausted(notice))
         self.assertFalse(model_access_exhausted('<<<COPILOT_AGENT_V1_BEGIN>>> '+notice))
         self.assertFalse(model_access_exhausted('A discussion about model access.'))
+
+    def test_copied_code_requires_current_identity_and_balanced_complete_container(self):
+        complete = '{"request_id":"req","nested":{"value":1},}'
+        self.assertEqual(BEGIN + '\n' + complete + '\n' + END,
+                         copied_code_response(complete, 'req'))
+        self.assertEqual('', copied_code_response('{"request_id":"req","nested":{"value":1}', 'req'))
+        self.assertEqual('', copied_code_response('{"request_id":"stale"}', 'req'))
 
 
 class CodeExpansionTests(unittest.IsolatedAsyncioTestCase):
@@ -47,6 +55,41 @@ class CodeExpansionTests(unittest.IsolatedAsyncioTestCase):
         controls.visible = True
         self.assertEqual(1, await adapter._expand_response_code('current-request'))
         self.assertEqual(1, controls.clicks)
+
+    async def test_copy_button_is_accessible_name_scoped_to_current_code_group(self):
+        class Button:
+            clicks = 0
+            async def count(self): return 1
+            async def is_visible(self): return True
+            async def is_enabled(self): return True
+            async def click(self, **kwargs): self.clicks += 1
+        class Group:
+            def __init__(self, button): self.button = button
+            def get_by_role(self, role, **kwargs):
+                self.role, self.name = role, kwargs['name']
+                return self.button
+        class Groups:
+            def __init__(self, group): self.group = group
+            def filter(self, **kwargs): self.has_text = kwargs['has_text']; return self
+            async def count(self): return 1
+            def nth(self, index): return self.group
+        class Page:
+            def __init__(self):
+                self.button, self.group = Button(), None
+                self.group = Group(self.button)
+                self.groups = Groups(self.group)
+            def locator(self, selector): self.selector = selector; return self.groups
+            async def evaluate(self, script): return '{"request_id":"current-request"}'
+        adapter = BrowserAdapter.__new__(BrowserAdapter)
+        adapter.page = Page()
+        copied = await adapter._copy_response_code('current-request')
+        self.assertEqual('copied', copied['status'])
+        self.assertEqual('current-request', adapter.page.groups.has_text)
+        self.assertEqual('button', adapter.page.group.role)
+        self.assertEqual('^Copy code$', adapter.page.group.name.pattern)
+        self.assertIn('[aria-label="Code Preview"]', adapter.page.selector)
+        self.assertNotIn('SGs4SWpU', adapter.page.selector)
+        self.assertEqual(1, adapter.page.button.clicks)
 
 
 class RemainingCorrelationTests(unittest.TestCase):
@@ -171,7 +214,8 @@ class FakeButton:
 
 class OfflineAdapter(BrowserAdapter):
     def __init__(self, answer=None, click_fails=False, *, answers=None,
-                 stop_states=None, send_states=None):
+                 stop_states=None, send_states=None, copy_answers=None,
+                 clipboard_statuses=None, dom_answers=None):
         super().__init__(SimpleNamespace(response_timeout=0.25, poll_interval=0.001,
                                          capture_stable_samples=2, max_capture_chars=5000))
         self.page = SimpleNamespace(url='https://m365.cloud.microsoft/chat')
@@ -179,12 +223,17 @@ class OfflineAdapter(BrowserAdapter):
         self.editor = FakeEditor()
         self.button = FakeButton(self, click_fails)
         self.clicked = False
-        default = BEGIN + '\nmalformed but completed assistant text\n' + END
+        default = BEGIN + '\n{"request_id":"req","malformed":}\n' + END
         self.answers = list(answers if answers is not None else [default if answer is None else answer])
         self.stop_states = list(stop_states or [False])
         self.send_states = list(send_states or [True])
         self.capture_index = -1
         self.after_click_evaluations = 0
+        self.current_answer = ''
+        self.copy_answers = list(copy_answers) if copy_answers is not None else None
+        self.clipboard_statuses = list(clipboard_statuses or ['copied'])
+        self.dom_answers = list(dom_answers or [''])
+        self.copy_calls = 0
         self.diagnostic_calls = []
 
     def _sequence_value(self, values):
@@ -210,6 +259,7 @@ class OfflineAdapter(BrowserAdapter):
             answer = ''
         if answer:
             messages.append(dict(key=3, order=2, role='assistant', text=answer))
+        self.current_answer = answer
         return messages
     async def _editor(self, required=True):
         return self.editor
@@ -219,6 +269,18 @@ class OfflineAdapter(BrowserAdapter):
         return None
     async def _expand_response_code(self, request_id):
         return None
+    async def _copy_response_code(self, request_id):
+        self.copy_calls += 1
+        status = self._sequence_value(self.clipboard_statuses)
+        if self.copy_answers is not None:
+            value = self._sequence_value(self.copy_answers)
+        elif response_envelope_closed(self.current_answer):
+            value = self.current_answer
+        else:
+            value = self.current_answer
+        return {'status':status, 'text':value if status == 'copied' else ''}
+    async def _safe_dom_code_response(self, request_id):
+        return self._sequence_value(self.dom_answers)
     async def diagnostics(self, reason='failure'):
         self.diagnostic_calls.append(reason)
 
@@ -247,13 +309,13 @@ class ExchangeTests(unittest.IsolatedAsyncioTestCase):
         commits = []
         result = await browser.exchange('message req', 'req', on_submitted=lambda: commits.append('req'))
         self.assertTrue(response_envelope_closed(result))
-        self.assertIn('malformed but completed', result)
+        self.assertIn('"malformed":}', result)
         self.assertEqual(commits, ['req'])
         self.assertEqual(browser.button.clicks, 1)
 
     async def test_slow_line_stream_waits_for_closing_marker_and_stability(self):
-        complete = BEGIN + '\n{"partial":true}\n' + END
-        browser = OfflineAdapter(answers=[BEGIN, BEGIN + '\n{', BEGIN + '\n{"partial":true}',
+        complete = BEGIN + '\n{"request_id":"req","partial":true}\n' + END
+        browser = OfflineAdapter(answers=[BEGIN, BEGIN + '\n{', BEGIN + '\n{"request_id":"req","partial":true}',
                                           complete, complete],
                                  stop_states=[True, True, True, False, False],
                                  send_states=[False, False, False, True, True])
@@ -262,12 +324,13 @@ class ExchangeTests(unittest.IsolatedAsyncioTestCase):
         result = await browser.exchange('message req', 'req')
         self.assertEqual(complete, result)
         candidates = [event['raw'] for event in events if event['type'] == 'candidate']
-        self.assertIn(BEGIN + '\n{"partial":true}', candidates)
+        self.assertIn(BEGIN + '\n{"request_id":"req","partial":true}', candidates)
         self.assertTrue(browser.last_capture_observation['generation_ended'])
-        self.assertTrue(browser.last_capture_observation['closing_marker_present'])
+        self.assertTrue(browser.last_capture_observation['complete_current_code'])
+        self.assertEqual('copy_code', browser.last_capture_observation['capture_method'])
 
     async def test_delayed_closing_marker_is_not_accepted_when_send_looks_ready(self):
-        partial = BEGIN + '\n{"still":"streaming"}'
+        partial = BEGIN + '\n{"request_id":"req","still":"streaming"}'
         complete = partial + '\n' + END
         browser = OfflineAdapter(answers=[partial, partial, complete, complete],
                                  send_states=[True, True, True, True])
@@ -276,7 +339,7 @@ class ExchangeTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(browser.capture_index, 3)
 
     async def test_complete_marker_waits_for_stop_to_change_back_to_send(self):
-        complete = BEGIN + '\nnot-json\n' + END
+        complete = BEGIN + '\n{"request_id":"req","bad":}\n' + END
         browser = OfflineAdapter(answers=[complete] * 5,
                                  stop_states=[True, True, False, False],
                                  send_states=[False, False, True, True])
@@ -357,7 +420,34 @@ class ToolContextTests(unittest.IsolatedAsyncioTestCase):
         browser = OfflineAdapter(answer=BEGIN + '\n{"unfinished":true}', send_states=[True])
         with self.assertRaisesRegex(CaptureTimeoutError, 'No local action ran'):
             await browser.exchange('message req', 'req')
-        self.assertFalse(browser.last_capture_observation['closing_marker_present'])
+        self.assertFalse(browser.last_capture_observation['complete_current_code'])
+
+    async def test_copy_code_beats_trimmed_rendered_text_and_handles_long_json(self):
+        payload = '{"request_id":"req","content":"' + ('x' * 20000) + '"}'
+        browser = OfflineAdapter(answers=[BEGIN + '\n{"request_id":"req"'],
+                                 copy_answers=[payload], send_states=[True])
+        browser.config.max_capture_chars = 50000
+        result = await browser.exchange('message req', 'req')
+        self.assertEqual(BEGIN + '\n' + payload + '\n' + END, result)
+        self.assertGreaterEqual(browser.copy_calls, 2)
+
+    async def test_clipboard_failure_uses_only_complete_standard_code_fallback(self):
+        code = '{"request_id":"req","value":"complete"}'
+        browser = OfflineAdapter(answers=['trimmed'], clipboard_statuses=['clipboard_failed'],
+                                 dom_answers=[code], send_states=[True])
+        result = await browser.exchange('message req', 'req')
+        self.assertEqual(BEGIN + '\n' + code + '\n' + END, result)
+        self.assertEqual('dom_pre_fallback', browser.last_capture_observation['capture_method'])
+        self.assertEqual('clipboard_failed', browser.last_capture_observation['clipboard_status'])
+
+    async def test_stale_clipboard_is_rejected_until_current_turn_is_copied(self):
+        stale = '{"request_id":"old-request","value":1}'
+        current = '{"request_id":"req","value":2}'
+        browser = OfflineAdapter(answers=['trimmed'] * 4,
+                                 copy_answers=[stale, stale, current, current], send_states=[True])
+        result = await browser.exchange('message req', 'req')
+        self.assertEqual(BEGIN + '\n' + current + '\n' + END, result)
+        self.assertGreaterEqual(browser.copy_calls, 4)
 
     async def test_callback_failure_marks_delivered_uncertainty(self):
         browser = OfflineAdapter()

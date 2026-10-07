@@ -36,7 +36,7 @@ class Config:
     poll_interval: float = .5
     capture_stable_samples: int = 3
     max_capture_chars: int = 100000
-    max_corrections: int = 2
+    max_corrections: int = 12
     max_tool_rounds: int = 12
     max_context_chars: int = 16000
     max_output_chars: int = 12000
@@ -112,8 +112,8 @@ class Config:
         for key in ('capture_stable_samples', 'max_capture_chars', 'max_tool_rounds', 'max_context_chars', 'max_output_chars', 'max_attachment_bytes', 'max_download_bytes'):
             if type(getattr(self, key)) is not int or getattr(self, key) < 1:
                 raise ValueError(key + ' must be a positive integer')
-        if type(self.max_corrections) is not int or not 0 <= self.max_corrections <= 10:
-            raise ValueError('max_corrections must be from 0 to 10')
+        if type(self.max_corrections) is not int or not 0 <= self.max_corrections <= 12:
+            raise ValueError('max_corrections must be from 0 to 12')
         if type(self.max_delivery_retries) is not int or not 0 <= self.max_delivery_retries <= 5:
             raise ValueError('max_delivery_retries must be from 0 to 5')
         if not isinstance(self.copilot_download_hosts, list) or not self.copilot_download_hosts or not all(isinstance(h, str) and h and all(c.isalnum() or c in '.-' for c in h) for h in self.copilot_download_hosts):
