@@ -35,6 +35,7 @@ class SessionState:
                          'created_at': now(), 'updated_at': now(), 'message_count': 0, 'messages': [],
                          'calls': {}, 'approvals': {}, 'attachments': [], 'guidance_manifest': [],
                          'current_plan': [], 'pending_submission': None, 'retry_records': [],
+                         'approved_domains': [],
                          'response_ids': [], 'summary': '', 'requirements': [], 'decisions': [],
                          'constraints': [], 'unresolved_questions': [], 'findings_sync': []}
             self.save()
@@ -100,12 +101,23 @@ class SessionState:
     def finish_call(self, call_id: str, result: dict):
         call = self.data['calls'][call_id]
         code = result.get('error', {}).get('code')
-        uncertain = call.get('state_changing', True) and not result.get('ok') and code not in {'approval_denied', 'invalid_arguments'}
+        evidence = result.get('result', {}) if isinstance(result.get('result'), dict) else {}
+        explicitly_certain = evidence.get('side_effects_uncertain') is False
+        uncertain = (call.get('state_changing', True) and not result.get('ok')
+                     and code not in {'approval_denied', 'invalid_arguments'} and not explicitly_certain)
         if call['request']['name'] == 'copilot.download' and result.get('result', {}).get('status') == 'not_started' and result['result'].get('side_effects_uncertain') is False:
             uncertain = False
         call.update(status='uncertain' if uncertain else 'completed', result=redact(result), finished_at=now())
         self.event('tool_outcome', call_id=call_id, result=result)
         self.save()
+
+    def approve_domain(self, domain: str):
+        domain = str(domain).lower().rstrip('.')
+        domains = self.data.setdefault('approved_domains', [])
+        if domain not in domains:
+            domains.append(domain)
+            self.event('browser_domain_approved', domain=domain)
+            self.save()
 
     def reconcile_call(self, call_id: str, outcome: str):
         if outcome not in {'completed', 'not_executed'} or self.data['calls'][call_id]['status'] != 'uncertain':

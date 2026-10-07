@@ -341,6 +341,14 @@ async def execute_local_python(plan: dict, prepared: dict, session_dir: Path,
         status, error = "failed", "One or more approved expected outputs were not independently readable"
         cleanup.extend(await asyncio.to_thread(registry.cleanup, [child for child in all_children if child.get("persistent")]))
 
+    # A failed create-only desktop attempt is safe to recover automatically when
+    # retained evidence proves that it created no declared files or processes.
+    create_targets_absent = all(not Path(value).exists() for value in plan["create_paths"])
+    cleanup_complete = all(item.get("stopped") or item.get("already_stopped") for item in cleanup)
+    effects_certain = (status == "failed" and not plan["modify_paths"] and not plan["network_destinations"]
+                       and not plan["subprocesses"] and create_targets_absent and not all_children
+                       and cleanup_complete)
+
     decoded_stdout = stdout.decode("utf-8", errors="replace")
     decoded_stderr = stderr.decode("utf-8", errors="replace")
     result = {"status": status, "proposal_hash": prepared["proposal_hash"],
@@ -352,7 +360,8 @@ async def execute_local_python(plan: dict, prepared: dict, session_dir: Path,
               "missing_outputs": missing, "managed_processes": [{key: value for key, value in item.items() if key != "process"}
                                                               for item in all_children],
               "verification": verification, "cleanup": cleanup, "audit_path": str(audit_path),
-              "runtime_binding": prepared["runtime_binding"]}
+              "runtime_binding": prepared["runtime_binding"],
+              "side_effects_uncertain": False if effects_certain else status != "completed"}
     if error:
         result["error"] = error
     audit = {"schema_version": "1.0", "run_id": run_id, "plan": plan,

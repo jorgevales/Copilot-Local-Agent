@@ -244,6 +244,19 @@ class StateAndPromptTests(unittest.TestCase):
         state.begin_call(dict(original, call_id='reviewed-next-write'))
         self.assertEqual('executing', state.data['calls']['reviewed-next-write']['status'])
 
+    def test_verified_failed_call_does_not_remain_uncertain_and_domain_grant_persists(self):
+        state = SessionState(retained_root('verified-failure-recovery-'))
+        call = {'call_id': 'failed-capture', 'name': 'code_runner', 'version': '1.0',
+                'arguments': {'script': 'capture attempt'}}
+        state.begin_call(call)
+        state.finish_call(call['call_id'], {'ok': False, 'result': {
+            'status': 'failed', 'side_effects_uncertain': False, 'missing_outputs': ['one.png']},
+            'error': {'code': 'operation_failed', 'message': 'No output was created.'}})
+        self.assertEqual('completed', state.data['calls'][call['call_id']]['status'])
+        state.approve_domain('Example.COM.')
+        state.approve_domain('example.com')
+        self.assertEqual(['example.com'], state.data['approved_domains'])
+
     def test_initial_guidance_catalogue_and_schema_fit_observed_attachment_capacity(self):
         root, config, state, registry = make_fixture('initial-attachments-')
         builder = PromptBuilder(config, registry, state, Findings(state.directory))

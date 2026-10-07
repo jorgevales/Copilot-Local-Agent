@@ -93,11 +93,21 @@ class URLPolicy:
         parsed = urlsplit(url)
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
             raise PolicyError("Only HTTPS URLs without embedded credentials are allowed")
-        if parsed.hostname.lower().rstrip(".") not in self.domains:
-            raise PolicyError("Domain is outside the exact navigation allowlist")
+        hostname = parsed.hostname.lower().rstrip(".")
+        if not any(hostname == domain or hostname.endswith("." + domain) for domain in self.domains):
+            raise PolicyError("Domain is outside the approved website and subdomain scope")
         if parsed.port not in (None, 443):
             raise PolicyError("Only the HTTPS default port is allowed")
         return urlunsplit(parsed)
+
+    @staticmethod
+    def website_domain(url):
+        """Validate a proposed HTTPS navigation and return its approval scope."""
+        parsed = urlsplit(url)
+        if (not isinstance(url, str) or len(url) > 4096 or parsed.scheme != "https"
+                or not parsed.hostname or parsed.username or parsed.password or parsed.port not in (None, 443)):
+            raise PolicyError("Only HTTPS URLs without embedded credentials on the default port are allowed")
+        return parsed.hostname.lower().rstrip(".")
 
 
 def config_value(config, key, default=None):

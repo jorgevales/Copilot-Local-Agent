@@ -16,7 +16,7 @@ The orchestrator sends compact validation errors and the expected contract. Reis
 
 ## Bounded retries
 
-Every retry needs a reason, an applicable finite budget and a logged outcome. Respect the orchestrator's maximum attempts and task-step budget. When exhausted, explain the blocked operation and the next human decision. Do not circumvent a limit by renaming a call or starting an identical plan.
+Every retry needs a reason, an applicable finite budget and a logged outcome. Respect the orchestrator's maximum attempts and task-step budget. When verified evidence proves a failed method's effects are certain, continue with a materially different safe approach instead of replaying it. Changed local execution needs a fresh exact approval. When exhausted, explain the blocked operation and the next human decision. Do not circumvent a limit by renaming a call or starting an identical plan.
 
 ## Ambiguous side effects
 

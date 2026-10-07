@@ -245,6 +245,7 @@ class LocalPythonRunnerTests(unittest.TestCase):
             self.runner.prepare(self.plan("print('x')", commands=["whoami"]))
         result = self.run_plan(self.plan("open('undeclared.txt', 'w').write('x')\n"))
         self.assertEqual("failed", result["status"])
+        self.assertFalse(result["side_effects_uncertain"])
         self.assertIn("outside the approved", result["stderr"])
         self.assertFalse((self.root / "undeclared.txt").exists())
         with self.assertRaisesRegex(PolicyError, "not exposed"):

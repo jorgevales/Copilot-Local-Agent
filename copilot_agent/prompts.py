@@ -45,7 +45,8 @@ class PromptBuilder:
                                      'Code Runner defaults to python_subset. Every local_python script requires exact immutable explicit approval and declared scope.',
                                      'Code Runner timeout_seconds must be at most ' + str(runner_limit) + '; request an approved configuration change instead of exceeding it.',
                                      'Permitted file roots: ' + ', '.join(config.allowed_roots),
-                                     'Permitted browser domains: ' + ', '.join(config.allowed_domains),
+                                     ('Preconfigured browser domains: ' + ', '.join(config.allowed_domains) +
+                                      '. Any other HTTPS hostname and its subdomains may be added only by an explicitly approved browser.open request.'),
                                      'Useful Findings accepted anytime; current file sent every tenth submitted message.']
         state.data['constraints'].append('Created-file monitoring is ' + ('enabled for the configured OneDrive path.' if config.created_sync_enabled else 'disabled; OneDrive verification is deferred to the live run.'))
         state.save()

@@ -11,7 +11,7 @@ from .local_python_runner import ManagedProcessRegistry
 from .findings import Findings
 from .feedback import Feedback, public_preview
 from .logging_utils import redact, SENSITIVE
-from .policy import PathPolicy, PolicyError
+from .policy import PathPolicy, PolicyError, URLPolicy
 from .prompts import PromptBuilder
 from .protocol import ProtocolError, parse_response, correction_message
 from .state import canonical_hash
@@ -37,7 +37,12 @@ class Orchestrator:
         self.approved_attachment_hashes = {}
         self.base_context = {'config': config, 'session_dir': state.directory, 'browser': browser, 'approved': False,
                              'pending_image_attachments': [], 'created_snapshots': {},
-                             'process_registry': self.process_registry}
+                             'process_registry': self.process_registry,
+                             'approved_domains': self.state.data.setdefault('approved_domains', [])}
+        authorize = getattr(browser, 'authorize_tool_domain', None)
+        if callable(authorize):
+            for domain in self.state.data['approved_domains']:
+                authorize(domain)
         self.download_service = None
 
     def _code_runner(self):
@@ -274,6 +279,9 @@ class Orchestrator:
             action_hash = canonical_hash({k: call[k] for k in ('name', 'version', 'arguments')})
             if any(c.get('action_hash') == action_hash and c['status'] == 'uncertain' for c in self.state.data['calls'].values()):
                 raise PolicyError('An identical action has uncertain effects; user reconciliation is required')
+            if any(c.get('action_hash') == action_hash and c['status'] == 'completed'
+                   and not c.get('result', {}).get('ok') for c in self.state.data['calls'].values()):
+                raise PolicyError('This method already failed; propose a materially different safe recovery approach')
             if catalog[call['name']]['approval_policy'] != 'read_only' and any(c['status'] == 'uncertain' and c.get('state_changing', True) for c in self.state.data['calls'].values()):
                 raise PolicyError('An earlier state-changing effect is uncertain; only inspection is allowed until user reconciliation')
             if hasattr(self.registry, 'validate_call'):
@@ -394,6 +402,9 @@ class Orchestrator:
                 if call['name'] == 'code_runner':
                     needs_approval = True
                     prepared = self._code_runner().prepare(call['arguments'])
+                if call['name'] == 'browser.open':
+                    prepared = {'website_domain': URLPolicy.website_domain(call['arguments']['url']),
+                                'includes_subdomains': True, 'session_scoped': True}
                 if call['name'] == 'ocr.image':
                     artifact = self._attachment_record(self.policy.resolve(call['arguments']['path'], True))
                     prepared = {'approved_image_attachment': artifact, 'destination': self.config.copilot_url}
@@ -434,6 +445,13 @@ class Orchestrator:
                         break
                     context['approved'] = True
                     context['approval_hash'] = approval_hash
+                    if call['name'] == 'browser.open':
+                        domain = URLPolicy.website_domain(call['arguments']['url'])
+                        self.state.approve_domain(domain)
+                        context['approved_domains'] = self.state.data['approved_domains']
+                        authorize = getattr(self.browser, 'authorize_tool_domain', None)
+                        if callable(authorize):
+                            authorize(domain)
                     if prepared:
                         if 'proposal_hash' in prepared:
                             context['approved_hash'] = prepared['proposal_hash']
@@ -459,7 +477,12 @@ class Orchestrator:
                     if call['name'] == 'copilot.download' and result.get('result', {}).get('status') == 'not_started':
                         delivery_link_rejected = True
                     break
-            kind, content = 'tool_results', {'results': redact(results), 'instruction': 'Use these actual outcomes. Never infer unexecuted steps succeeded. A denial is authoritative. Continue or provide the verified final answer.'}
+            kind, content = 'tool_results', {'results': redact(results), 'instruction': (
+                'Use these actual outcomes. Never infer unexecuted steps succeeded. A denial is authoritative. '
+                'When a method fails with verified certain effects, continue within the bounded tool rounds using '
+                'a materially different safe approach available through registered tools or a newly proposed exact '
+                'Code Runner script. Every materially changed local execution requires its normal fresh approval. '
+                'Stop only at success, exhausted bounded rounds, denial, or a genuine safety/permission boundary.')}
         raise RuntimeError('Conversation turn exhausted')
 
     def _delivery_result(self, name, outcome):

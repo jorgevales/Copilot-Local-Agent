@@ -106,7 +106,7 @@ SPECS = {
     "system.versions": (obj({}), "read_only", "Read the exact current Python executable/version, operating system version and selected package versions; no environment variables."),
     "system.disk": (obj(PATH), "read_only", "Read filesystem capacity for an allowed path."),
     "system.processes": (obj({}), "read_only", "Report this agent PID and the explicitly launched owned Edge PID when available; no wider process or command-line inventory."),
-    "browser.open": (obj({"url":S}), "user_approval", "Navigate the owned tool tab to an exact allowlisted HTTPS domain."),
+    "browser.open": (obj({"url":S}), "user_approval", "After explicit approval, navigate the owned tool tab to an HTTPS website and authorize that hostname plus its subdomains for this session."),
     "browser.back": (obj({}), "user_approval", "Navigate backward only if the target history URL passes policy."),
     "browser.forward": (obj({}), "user_approval", "Navigate forward only if the target history URL passes policy."),
     "browser.info": (obj({}), "read_only", "Read tool-tab URL and title."),
@@ -193,7 +193,7 @@ class ToolRegistry:
             for key in creates:
                 if resolved[key].exists(): raise PolicyError("Create destination already exists")
                 if not resolved[key].parent.is_dir(): raise PolicyError("Create destination parent must exist")
-        if name=="browser.open": URLPolicy(config_value(config,"allowed_domains",[])).resolve(args["url"])
+        if name=="browser.open": URLPolicy.website_domain(args["url"])
         if name=="code_runner":
             CodeRunner(policy, context["session_dir"],
                        {"tool_timeout":config_value(config,"tool_timeout",10),
@@ -389,7 +389,7 @@ class ToolRegistry:
             page=getattr(browser,"tool_page",None)
             if page is None or page.is_closed(): raise PolicyError("Owned tool page is unavailable")
             if page is getattr(browser,"page",None) or page is getattr(browser,"chat_page",None): raise PolicyError("Copilot control page cannot be a tool page")
-            urls=URLPolicy(config_value(config,"allowed_domains",[]))
+            urls=URLPolicy([*config_value(config,"allowed_domains",[]), *context.get("approved_domains",[])])
             # Request-time enforcement also blocks redirects, subresources and
             # fetches to unapproved destinations before network access occurs.
             async def guard(route):

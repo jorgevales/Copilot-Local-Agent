@@ -287,6 +287,7 @@ class BrowserAdapter:
         self.page = self.tool_page = self.browser = self.context = self.tool_context = None
         self.tool_errors = []
         self.tool_downloads = []
+        self.tool_domains = {str(item).lower().rstrip('.') for item in getattr(config, 'allowed_domains', [])}
         self._tool_pages = []
         self.model_label = None
         self.models: list[dict] = []
@@ -402,11 +403,10 @@ class BrowserAdapter:
 
     async def _configure_tool_context(self):
         from .policy import URLPolicy, PolicyError
-        policy = URLPolicy(self.config.allowed_domains)
 
         async def guard(route):
             try:
-                policy.resolve(route.request.url)
+                URLPolicy(self.tool_domains).resolve(route.request.url)
             except (PolicyError, ValueError):
                 self.tool_errors.append({'type': 'blocked_request', 'url': self._safe_url(route.request.url)})
                 await route.abort('blockedbyclient')
@@ -427,11 +427,12 @@ class BrowserAdapter:
           window.open = function(url, ...args) {
             if (!url) return null;
             try { const u = new URL(url, location.href);
-              if (u.protocol !== 'https:' || !allowed.has(u.hostname.toLowerCase()) || (u.port && u.port !== '443') || u.username || u.password) return null;
+              const host=u.hostname.toLowerCase();
+              if (u.protocol !== 'https:' || ![...allowed].some(domain=>host===domain || host.endsWith('.'+domain)) || (u.port && u.port !== '443') || u.username || u.password) return null;
             } catch (_) { return null; }
             return original.call(window, url, ...args);
           };
-        })();""" % json.dumps(sorted(policy.domains)))
+        })();""" % json.dumps(sorted(self.tool_domains)))
 
         def register(page):
             self._tool_pages.append(page)
@@ -449,7 +450,7 @@ class BrowserAdapter:
                 if frame != page.main_frame or frame.url == 'about:blank':
                     return
                 try:
-                    policy.resolve(frame.url)
+                    URLPolicy(self.tool_domains).resolve(frame.url)
                 except (PolicyError, ValueError):
                     self.tool_errors.append({'type': 'blocked_navigation', 'url': self._safe_url(frame.url)})
                     # Close this owned popup/page, preserving all files and original tabs.
@@ -459,6 +460,10 @@ class BrowserAdapter:
             page.on('download', download)
             page.on('framenavigated', check_navigation)
         self.tool_context.on('page', register)
+
+    def authorize_tool_domain(self, domain):
+        """Extend only the owned tool browser after an explicit domain approval."""
+        self.tool_domains.add(str(domain).lower().rstrip('.'))
 
     @staticmethod
     def _safe_url(url):

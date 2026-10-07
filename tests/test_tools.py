@@ -45,7 +45,10 @@ class ToolTests(unittest.TestCase):
     def test_urls(self):
         policy=URLPolicy(["example.com"])
         self.assertEqual(policy.resolve("https://example.com/x"),"https://example.com/x")
-        for url in ["http://example.com", "https://sub.example.com", "https://user:password@example.com", "file:///x", "https://example.com:444"]:
+        self.assertEqual(policy.resolve("https://deep.sub.example.com/x"),"https://deep.sub.example.com/x")
+        self.assertEqual(URLPolicy.website_domain("https://any-site.test/start"), "any-site.test")
+        self.registry.validate_call("browser.open", {"url":"https://new-site.test/start"}, self.context)
+        for url in ["http://example.com", "https://notexample.com", "https://user:password@example.com", "file:///x", "https://example.com:444"]:
             with self.assertRaises((PolicyError,ValueError)): policy.resolve(url)
 
     def test_preflight_is_side_effect_free(self):

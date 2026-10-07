@@ -34,6 +34,8 @@ class ApprovalManager:
             ('Subprocesses', arguments.get('subprocesses')),
             ('Viewer windows', arguments.get('viewer_windows')),
             ('Expected effects', arguments.get('expected_effects')),
+            ('Website scope', ((preview.get('prepared_code') or {}).get('website_domain') + ' and its subdomains')
+             if (preview.get('prepared_code') or {}).get('website_domain') else None),
             ('Risk', arguments.get('risk_summary') or preview['complete_pending_plan'].get('risk_summary')),
         ])
         self.feedback.record('Approval', 'Full immutable approval record retained.',

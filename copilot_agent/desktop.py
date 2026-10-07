@@ -66,7 +66,10 @@ def capture_display(display_index: int, output_path: str | os.PathLike) -> dict:
     bounds = display["bounds"]
     width, height = bounds["right"] - bounds["left"], bounds["bottom"] - bounds["top"]
     user32, gdi32 = ctypes.windll.user32, ctypes.windll.gdi32
+    user32.GetDC.argtypes = [wintypes.HWND]
     user32.GetDC.restype = wintypes.HDC
+    user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+    user32.ReleaseDC.restype = ctypes.c_int
     gdi32.CreateCompatibleDC.argtypes = [wintypes.HDC]
     gdi32.CreateCompatibleDC.restype = wintypes.HDC
     gdi32.CreateCompatibleBitmap.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
@@ -76,10 +79,10 @@ def capture_display(display_index: int, output_path: str | os.PathLike) -> dict:
     gdi32.BitBlt.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
                              wintypes.HDC, ctypes.c_int, ctypes.c_int, wintypes.DWORD]
     gdi32.BitBlt.restype = wintypes.BOOL
-    screen = user32.GetDC(None)
-    memory = gdi32.CreateCompatibleDC(screen)
-    bitmap = gdi32.CreateCompatibleBitmap(screen, width, height)
-    previous = gdi32.SelectObject(memory, bitmap)
+    gdi32.DeleteObject.argtypes = [wintypes.HGDIOBJ]
+    gdi32.DeleteObject.restype = wintypes.BOOL
+    gdi32.DeleteDC.argtypes = [wintypes.HDC]
+    gdi32.DeleteDC.restype = wintypes.BOOL
 
     class BitmapInfoHeader(ctypes.Structure):
         _fields_ = [("biSize", wintypes.DWORD), ("biWidth", wintypes.LONG), ("biHeight", wintypes.LONG),
@@ -89,6 +92,23 @@ def capture_display(display_index: int, output_path: str | os.PathLike) -> dict:
 
     class BitmapInfo(ctypes.Structure):
         _fields_ = [("bmiHeader", BitmapInfoHeader), ("bmiColors", wintypes.DWORD * 3)]
+
+    gdi32.GetDIBits.argtypes = [wintypes.HDC, wintypes.HBITMAP, wintypes.UINT, wintypes.UINT,
+                                ctypes.c_void_p, ctypes.POINTER(BitmapInfo), wintypes.UINT]
+    gdi32.GetDIBits.restype = ctypes.c_int
+    screen = user32.GetDC(None)
+    if not screen:
+        raise ctypes.WinError()
+    memory = gdi32.CreateCompatibleDC(screen)
+    bitmap = gdi32.CreateCompatibleBitmap(screen, width, height) if memory else None
+    previous = gdi32.SelectObject(memory, bitmap) if bitmap else None
+    if not memory or not bitmap or not previous:
+        if bitmap:
+            gdi32.DeleteObject(bitmap)
+        if memory:
+            gdi32.DeleteDC(memory)
+        user32.ReleaseDC(None, screen)
+        raise ctypes.WinError()
 
     try:
         if not gdi32.BitBlt(memory, 0, 0, width, height, screen, bounds["left"], bounds["top"], 0x40CC0020):

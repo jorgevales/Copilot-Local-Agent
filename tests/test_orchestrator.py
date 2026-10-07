@@ -387,6 +387,24 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('renamed-write', state.data['calls'])
         self.assertEqual('correction', browser.sent[-1]['message']['kind'])
 
+    async def test_verified_failed_method_allows_materially_different_approved_recovery(self):
+        root, config, state, registry, browser, app = self.fixture(
+            [final_response, lambda msg: tool_response(msg, 'failed-first', 'synthetic.write', {'path':'first.txt'}),
+             lambda msg: tool_response(msg, 'different-recovery', 'synthetic.write', {'path':'second.txt'}),
+             final_response], lambda preview: 'once')
+        async def execute(name, arguments, context):
+            registry.calls.append((name, copy.deepcopy(arguments), dict(context)))
+            if arguments['path'] == 'first.txt':
+                return {'ok':False, 'result':{'status':'failed', 'side_effects_uncertain':False},
+                        'error':{'code':'operation_failed', 'message':'Verified no declared effect.'}}
+            return {'ok':True, 'result':{'evidence':'Different recovery completed.'}}
+        registry.execute = execute
+        await app.initialize()
+        result = await app.turn('Recover continuously with a different safe method.')
+        self.assertEqual('Verified answer.', result['user_response'])
+        self.assertEqual(['first.txt', 'second.txt'], [item[1]['path'] for item in registry.calls])
+        self.assertEqual('completed', state.data['calls']['failed-first']['status'])
+
     async def test_alias_write_blocked_while_read_only_inspection_remains_available(self):
         root, config, state, registry, browser, app = self.fixture(
             [final_response, lambda msg: tool_response(msg, 'first-write', 'synthetic.write'),
