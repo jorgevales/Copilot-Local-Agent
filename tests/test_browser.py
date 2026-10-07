@@ -86,6 +86,7 @@ class CodeExpansionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual('copied', copied['status'])
         self.assertEqual('current-request', adapter.page.groups.has_text)
         self.assertEqual('button', adapter.page.group.role)
+        self.assertEqual('button', adapter.page.group.role)
         self.assertEqual('^Copy code$', adapter.page.group.name.pattern)
         self.assertIn('[aria-label="Code Preview"]', adapter.page.selector)
         self.assertNotIn('SGs4SWpU', adapter.page.selector)

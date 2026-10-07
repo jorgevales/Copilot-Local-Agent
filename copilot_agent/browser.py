@@ -720,7 +720,12 @@ class BrowserAdapter:
             matches = []
             for index in range(min(await groups.count(), 10)):
                 group = groups.nth(index)
-                button = group.get_by_role('button', name=re.compile(r'^Copy code$', re.I))
+                # Copilot's current Fluent button has a stable id and accessible
+                # name; keep the group scope to avoid copying another response.
+                button = (group.locator('#copy-button[aria-label="Copy code"]')
+                          if hasattr(group, 'locator') else None)
+                if button is None or await button.count() != 1:
+                    button = group.get_by_role('button', name=re.compile(r'^Copy code$', re.I))
                 if (await button.count() == 1 and await button.is_visible()
                         and await button.is_enabled()):
                     matches.append(button)
