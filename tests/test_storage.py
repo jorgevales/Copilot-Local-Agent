@@ -24,6 +24,9 @@ class StorageTests(unittest.TestCase):
         self.second.mkdir()
         self.accounts = [OneDriveAccount(self.first.name, self.first), OneDriveAccount(self.second.name, self.second)]
 
+    def test_config_defaults_to_gpt_6_sol(self):
+        self.assertEqual('GPT-6 Sol', Config().model)
+
     def test_discovery_deduplicates_env_and_registry_without_scanning_contents(self):
         accounts = discover_onedrive_accounts({'OneDrive': str(self.first), 'OneDriveCommercial': str(self.first)}, [str(self.second)])
         self.assertEqual([self.first, self.second], [item.path for item in accounts])

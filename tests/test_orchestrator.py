@@ -39,6 +39,23 @@ class MockBrowser:
         self.closed = True
 
 
+class PreloadingBrowser(MockBrowser):
+    def __init__(self, responders):
+        super().__init__(responders)
+        self.preloads = []
+        self.attachment_preloads = []
+
+    async def preload_exchange(self, text, request_id, attachments=()):
+        self.preloads.append({'text': text, 'request_id': request_id,
+                              'attachments': list(attachments)})
+
+    async def preload_attachments(self, paths):
+        paths = list(paths)
+        self.attachment_preloads.append(paths)
+        return {'status': 'prepared', 'count': len(paths),
+                'names': [path.name for path in paths]}
+
+
 def final_response(message, **changes):
     return envelope(message['session_id'], message['request_id'], **changes)
 
@@ -52,6 +69,53 @@ def tool_response(message, call_id='read-one', name='synthetic.read', arguments=
 
 
 class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_prepared_pending_files_keep_the_exact_immutable_identity_later_sent(self):
+        root, config, state, registry = make_fixture('next-turn-preload-')
+        browser = PreloadingBrowser([final_response])
+        app = Orchestrator(config, browser, registry, state, display=lambda text: None)
+        source = root / 'workspace' / 'review.txt'
+        source.write_text('approved review material', encoding='utf-8')
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        app.base_context['pending_file_attachments'].append(str(source))
+        app.approved_attachment_hashes[str(source)] = digest
+
+        prepared = await app.prepare_pending_attachments()
+        raw, request_id = await app._send('user_turn', 'Use the prepared review file.')
+
+        self.assertEqual('prepared', prepared['status'])
+        self.assertIn(request_id, raw)
+        self.assertEqual(1, len(browser.attachment_preloads))
+        prepared_path = browser.attachment_preloads[0][0]
+        sent_path = browser.sent[0]['attachments'][0]
+        self.assertNotEqual(source, prepared_path)
+        self.assertEqual(prepared_path, sent_path)
+        self.assertEqual(hashlib.sha256(prepared_path.read_bytes()).hexdigest(), digest)
+        self.assertEqual([], app.base_context['pending_file_attachments'])
+
+    async def test_initialization_can_upload_before_model_choice_then_send_exact_preload(self):
+        root, config, state, registry = make_fixture('preloaded-initialization-')
+        browser = PreloadingBrowser([final_response])
+        app = Orchestrator(config, browser, registry, state, display=lambda text: None)
+
+        prepared = await app.prepare_initialization()
+
+        self.assertEqual(0, state.message_count)
+        self.assertEqual(1, len(browser.preloads))
+        preload = browser.preloads[0]
+        self.assertEqual(8, len(preload['attachments']))
+        self.assertEqual(prepared['request_id'], preload['request_id'])
+        self.assertEqual(8, prepared['attachment_count'])
+        self.assertIn(prepared['request_id'], preload['text'])
+
+        result = await app.initialize()
+
+        self.assertEqual('final', result['response_type'])
+        self.assertEqual(1, state.message_count)
+        self.assertEqual(1, len(browser.sent))
+        self.assertEqual(preload['request_id'], browser.sent[0]['message']['request_id'])
+        self.assertEqual(preload['attachments'], browser.sent[0]['attachments'])
+        self.assertEqual(json.loads(preload['text']), browser.sent[0]['message'])
+
     @unittest.skipUnless(os.name == 'nt', 'Windows desktop capability')
     async def test_planner_approval_worker_import_display_and_artifact_progress_end_to_end(self):
         root, config, state, _ = make_fixture('desktop-e2e-')

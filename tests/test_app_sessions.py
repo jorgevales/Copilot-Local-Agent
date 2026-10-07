@@ -10,15 +10,35 @@ from tests.test_protocol_state import make_fixture
 
 
 class SessionBrowser(MockBrowser):
+    def __init__(self, responders):
+        super().__init__(responders)
+        self.events = []
+
     async def start(self):
+        self.events.append('start')
         return self
 
     async def discover_models(self):
+        self.events.append('discover_models')
         return [{'label': 'Synthetic model', 'enabled': True}]
 
     async def select_model(self, label):
+        self.events.append('select_model:' + label)
         self.model_label = label
         return {'label': label, 'checked': True}
+
+    async def preload_exchange(self, text, request_id, attachments=()):
+        self.events.append('preload_exchange')
+        self.preloaded = {'text': text, 'request_id': request_id,
+                          'attachments': list(attachments)}
+
+    async def exchange(self, text, request_id, attachments=(), on_submitted=None):
+        self.events.append('exchange')
+        return await super().exchange(text, request_id, attachments, on_submitted)
+
+    async def verify_interaction_ready(self, expected_model):
+        self.events.append('verify_interaction_ready:' + str(expected_model))
+        return {'ready': True, 'model': expected_model}
 
 
 class NewSessionTests(unittest.IsolatedAsyncioTestCase):
@@ -53,6 +73,17 @@ class NewSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], new.findings.data['findings'])
         self.assertEqual(1, new.state.message_count)
         self.assertEqual(8, len(fresh_browser.sent[0]['attachments']))
+        self.assertEqual(8, len(fresh_browser.preloaded['attachments']))
+        self.assertEqual(json.loads(fresh_browser.preloaded['text']),
+                         fresh_browser.sent[0]['message'])
+        self.assertEqual(fresh_browser.preloaded['request_id'],
+                         fresh_browser.sent[0]['message']['request_id'])
+        self.assertLess(fresh_browser.events.index('preload_exchange'),
+                        fresh_browser.events.index('discover_models'))
+        self.assertLess(fresh_browser.events.index('select_model:Synthetic model'),
+                        fresh_browser.events.index('exchange'))
+        self.assertLess(fresh_browser.events.index('exchange'),
+                        fresh_browser.events.index('verify_interaction_ready:Synthetic model'))
         self.assertNotIn('OLD_TOPIC_UNIQUE', json.dumps(fresh_browser.sent[0]['message']))
         await new.close()
 

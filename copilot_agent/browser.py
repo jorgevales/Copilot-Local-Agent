@@ -294,6 +294,7 @@ class BrowserAdapter:
         self._top_level_labels = set()
         self._playwright = self._manager = None
         self._exchange_lock = asyncio.Lock()
+        self._preloaded_attachment_signatures = ()
         self._delivery_uncertain = False
         self._mutex = None
         self._launched_process = None
@@ -302,6 +303,7 @@ class BrowserAdapter:
         self.last_composer_comparison = None
         self.last_capture_observation = None
         self.feedback_callback = None
+        self._preloaded_exchange = None
 
     def set_feedback(self, callback):
         self.feedback_callback = callback
@@ -368,7 +370,8 @@ class BrowserAdapter:
             self._manager = async_playwright()
             self._playwright = await self._manager.start()
             self.browser = await edge.connect_bounded(self._playwright, self.endpoint, self.config.startup_timeout,
-                                                      process=self._launched_process)
+                                                      process=self._launched_process,
+                                                      initial_payload=payload)
             # Prove the fresh listener belongs to this Popen process; fall back to
             # exact profile inspection if Edge handed off to a different process.
             if __import__('os').name == 'nt':
@@ -692,6 +695,77 @@ class BrowserAdapter:
             await self.diagnostics('attachment')
             raise
 
+    @staticmethod
+    def _attachment_signature(path):
+        resolved = Path(path).expanduser().resolve(strict=True)
+        digest = hashlib.sha256()
+        with resolved.open('rb') as handle:
+            while chunk := handle.read(65536):
+                digest.update(chunk)
+        return str(resolved), resolved.name, resolved.stat().st_size, digest.hexdigest()
+
+    async def _attachment_signatures(self, paths):
+        return tuple(await asyncio.gather(*(
+            asyncio.to_thread(self._attachment_signature, path) for path in paths)))
+
+    @staticmethod
+    def _attachment_identities(signatures):
+        return tuple((name, size, digest) for _, name, size, digest in signatures)
+
+    async def _remove_preloaded_attachments(self):
+        """Remove only the exact attachment batch prepared by this adapter."""
+        if not self._preloaded_attachment_signatures:
+            return
+        expected = Counter(item[1] for item in self._preloaded_attachment_signatures)
+        snapshot = await self._evaluate(_ATTACHMENTS)
+        if Counter(snapshot.get('names', [])) != expected:
+            self._preloaded_attachment_signatures = ()
+            raise BrowserUIError('Prepared attachments changed in the Copilot composer; refusing an unrelated send.')
+        deadline = time.monotonic() + min(15, self.config.response_timeout)
+        while time.monotonic() < deadline:
+            buttons = self.page.locator('button[aria-label^="Remove attachment "]')
+            if not await buttons.count():
+                snapshot = await self._evaluate(_ATTACHMENTS)
+                if not snapshot.get('names'):
+                    self._preloaded_attachment_signatures = ()
+                    return
+                break
+            await buttons.first.click(timeout=3000)
+            await asyncio.sleep(self.config.poll_interval)
+        raise BrowserUIError('Prepared attachments could not be removed before the next message.')
+
+    async def _reconcile_preloaded_attachments(self, paths):
+        """Reuse an exact prepared batch or detach it before uploading a new one."""
+        paths = list(paths)
+        target = await self._attachment_signatures(paths) if paths else ()
+        if (target and self._attachment_identities(self._preloaded_attachment_signatures)
+                == self._attachment_identities(target)):
+            snapshot = await self._evaluate(_ATTACHMENTS)
+            button = await self._visible(edge.SEND_SELECTOR)
+            if uploads_verified(snapshot, [item[1] for item in target],
+                                button is not None and await button.is_enabled()):
+                return
+        if self._preloaded_attachment_signatures:
+            await self._remove_preloaded_attachments()
+        await self.attach_files(paths)
+
+    async def preload_attachments(self, paths):
+        """Upload an immutable, already-authorized batch while the next request is drafted."""
+        paths = list(paths)
+        async with self._exchange_lock:
+            if self._delivery_uncertain:
+                raise SubmissionAmbiguousError('A previous delivery remains uncertain; attachment preparation is disabled.')
+            if await self._stop_present():
+                raise BrowserUIError('Copilot is still generating; attachments cannot be prepared yet.')
+            editor = await self._editor(required=False)
+            if editor is None or str(await self._editor_text(editor) or '').strip():
+                raise BrowserUIError('Copilot composer is not empty; refusing to mix prepared files with draft text.')
+            signatures = await self._attachment_signatures(paths) if paths else ()
+            await self._reconcile_preloaded_attachments(paths)
+            self._preloaded_attachment_signatures = signatures
+            return {'status': 'prepared', 'count': len(signatures),
+                    'names': [item[1] for item in signatures]}
+
     async def _editor_text(self, editor):
         for attempt in range(2):
             try:
@@ -765,10 +839,10 @@ class BrowserAdapter:
         source = code if await code.count() == 1 else block
         return str(await source.text_content() or '')
 
-    async def _prepare_submission(self, text, request_id, attachments):
+    async def _prepare_submission(self, text, request_id, attachments, *, require_model=True):
         if not request_id or request_id not in text:
             raise BrowserUIError('Every outbound message must contain its unique request_id.')
-        if not self.model_label:
+        if require_model and not self.model_label:
             raise BrowserUIError('Select and verify a discovered model before sending.')
         self.preparation_stage = 'generation_check'
         if await self._stop_present():
@@ -791,12 +865,83 @@ class BrowserAdapter:
             await self.diagnostics('composer_mismatch')
             raise BrowserUIError('The composer did not preserve the complete outbound message.')
         self.preparation_stage = 'attachment_upload'
-        await self.attach_files(attachments)
+        await self._reconcile_preloaded_attachments(attachments)
         self.preparation_stage = 'send_control_check'
         button = await self._visible(edge.SEND_SELECTOR)
         if button is None or not await button.is_enabled():
             raise BrowserUIError('The exact Send control is unavailable or disabled.')
         return baseline, old_users, button
+
+    async def preload_exchange(self, text: str, request_id: str, attachments=()):
+        """Fill and upload one exact message without sending it.
+
+        Startup uses this while the model choice is still being presented.  A
+        later exchange must match the exact payload and paths and re-verifies
+        the live composer before it is allowed to click Send.
+        """
+        async with self._exchange_lock:
+            if self._delivery_uncertain:
+                raise SubmissionAmbiguousError('A previous delivery remains uncertain. Reconcile manually before a new send.')
+            if self._preloaded_exchange is not None:
+                raise BrowserUIError('A prepared Copilot message is already waiting to be sent.')
+            if hasattr(self.page, 'bring_to_front'):
+                await self.page.bring_to_front()
+            baseline, old_users, _ = await self._prepare_submission(
+                text, request_id, attachments, require_model=False)
+            self._preloaded_exchange = {
+                'text': text,
+                'request_id': request_id,
+                'attachments': tuple(str(Path(path).expanduser().resolve()) for path in attachments),
+                'attachment_names': [Path(path).name for path in attachments],
+                'baseline': baseline,
+                'old_users': old_users,
+            }
+            return {'request_id': request_id, 'attachment_count': len(attachments)}
+
+    async def _consume_preloaded_exchange(self, text, request_id, attachments):
+        prepared = self._preloaded_exchange
+        paths = tuple(str(Path(path).expanduser().resolve()) for path in attachments)
+        if (prepared is None or prepared['text'] != text or prepared['request_id'] != request_id
+                or prepared['attachments'] != paths):
+            raise BrowserUIError('The prepared Copilot message does not match this exact submission.')
+        if not self.model_label:
+            raise BrowserUIError('Select and verify a discovered model before sending.')
+        if await self._stop_present():
+            raise BrowserUIError('Copilot is still generating; the prepared message cannot be sent.')
+        messages = await self._evaluate(_MESSAGE_SNAPSHOT)
+        if any(request_id in item['text'] for item in messages if item['role'] == 'user'):
+            self._delivery_uncertain = True
+            raise SubmissionAmbiguousError('This request_id is already present in the chat; refusing duplicate delivery.')
+        editor = await self._editor()
+        actual = await self._editor_text(editor)
+        self.last_composer_comparison = composer_comparison(text, str(actual))
+        if not self.last_composer_comparison['matches']:
+            raise BrowserUIError('The prepared composer no longer contains the complete outbound message.')
+        snapshot = await self._evaluate(_ATTACHMENTS)
+        snapshot['error'] = bool(snapshot.get('error', False) or any(
+            upload_alert_is_error(alert) for alert in snapshot.get('alerts', [])))
+        button = await self._visible(edge.SEND_SELECTOR)
+        if not uploads_verified(snapshot, prepared['attachment_names'],
+                                button is not None and await button.is_enabled()):
+            raise BrowserUIError('The prepared attachments or Send control changed before submission.')
+        self._preloaded_exchange = None
+        return prepared['baseline'], prepared['old_users'], button
+
+    async def verify_interaction_ready(self, expected_model: str):
+        """Prove the initialized live chat can accept the next user turn."""
+        deadline = time.monotonic() + min(10, self.config.startup_timeout)
+        while time.monotonic() < deadline:
+            editor = await self._editor(required=False)
+            picker = await self._visible(edge.PICKER_SELECTOR)
+            stopped = not await self._stop_present()
+            empty = editor is not None and not str(await self._editor_text(editor)).strip()
+            attachments = await self._evaluate(_ATTACHMENTS) if editor is not None else {'names': [], 'busy': True}
+            if (self.model_label == expected_model and editor is not None and picker is not None
+                    and stopped and empty and not attachments.get('names') and not attachments.get('busy', False)):
+                return True
+            await asyncio.sleep(self.config.poll_interval)
+        await self.diagnostics('interaction_readiness')
+        raise BrowserUIError('Copilot Chat did not return to a verified ready state after initialization.')
 
     async def exchange(self, text: str, request_id: str, attachments=(), on_submitted=None) -> str:
         async with self._exchange_lock:
@@ -808,7 +953,11 @@ class BrowserAdapter:
                 self.last_capture_observation = None
                 self.preparation_stage = 'initial_checks'
                 if hasattr(self.page, 'bring_to_front'): await self.page.bring_to_front()
-                baseline, old_users, button = await self._prepare_submission(text, request_id, attachments)
+                if self._preloaded_exchange is not None:
+                    baseline, old_users, button = await self._consume_preloaded_exchange(
+                        text, request_id, attachments)
+                else:
+                    baseline, old_users, button = await self._prepare_submission(text, request_id, attachments)
             except SubmissionAmbiguousError:
                 raise
             except Exception as exc:
@@ -821,6 +970,7 @@ class BrowserAdapter:
             try:
                 # Treat even a click timeout as uncertain: the remote action may have fired.
                 await button.click(timeout=5000)
+                self._preloaded_attachment_signatures = ()
                 deadline = time.monotonic() + min(20, self.config.response_timeout)
                 while time.monotonic() < deadline:
                     messages = await self._evaluate(_MESSAGE_SNAPSHOT)

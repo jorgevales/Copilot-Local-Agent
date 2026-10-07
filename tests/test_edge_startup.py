@@ -6,7 +6,7 @@ import socket
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 import urllib.request
 
 from copilot_agent import reused_browser as edge
@@ -165,6 +165,19 @@ class EdgeHandshakeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(handshake.await_count, 2)
         self.assertEqual(handshake.await_args_list[0].args[0], PAYLOAD['webSocketDebuggerUrl'])
         self.assertEqual(handshake.await_args_list[1].args[0], ENDPOINT)
+
+    async def test_prevalidated_initial_payload_connects_without_another_http_probe(self):
+        browser = SimpleNamespace(is_connected=lambda: True, contexts=[object()])
+        handshake = AsyncMock(return_value=browser)
+        playwright = SimpleNamespace(chromium=SimpleNamespace(connect_over_cdp=handshake))
+        with patch.object(edge, 'remote_debugging_blocked', return_value=False), \
+             patch.object(edge, 'get_cdp_version') as probe:
+            result = await edge.connect_bounded(
+                playwright, ENDPOINT, 1, initial_payload=PAYLOAD)
+        self.assertIs(result, browser)
+        probe.assert_not_called()
+        handshake.assert_awaited_once_with(
+            PAYLOAD['webSocketDebuggerUrl'], timeout=ANY)
 
     async def test_close_stops_owned_process_but_not_attached_browser(self):
         with patch.object(edge, 'stop_launched_edge') as stop:

@@ -47,7 +47,7 @@ class Config:
     allowed_domains: list[str] = field(default_factory=lambda: ['example.com'])
     created_dir: Path | None = None
     created_sync_enabled: bool = False
-    model: str = ''
+    model: str = 'GPT-6 Sol'
     max_attachment_bytes: int = 20 * 1024 * 1024
     download_timeout: float = 90
     max_download_bytes: int = 20 * 1024 * 1024

@@ -132,9 +132,10 @@ async def choose_browser_endpoint(config, args, settings):
     if config.debug_port not in candidates:
         candidates.append(config.debug_port)
     selected = None
-    for port in candidates:
-        endpoint = edge.cdp_endpoint(port)
-        payload = await asyncio.to_thread(edge.get_cdp_version, endpoint)
+    endpoints = [edge.cdp_endpoint(port) for port in candidates]
+    payloads = await asyncio.gather(*(
+        asyncio.to_thread(edge.get_cdp_version, endpoint) for endpoint in endpoints))
+    for port, endpoint, payload in zip(candidates, endpoints, payloads):
         if payload:
             try:
                 edge.validate_endpoint(endpoint, payload)
@@ -182,14 +183,17 @@ async def start_new_session(config, previous, model_label, registry=None):
     engine = None
     try:
         await browser.start()
+        engine = Orchestrator(fresh_config, browser, registry or ToolRegistry(), state,
+                              approval_decider=_UI_APPROVAL_DECIDER, display=_TERMINAL.sink,
+                              event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT)
+        await engine.prepare_initialization()
         # Recheck current account availability and the actual checked option.
         await browser.discover_models()
         await browser.select_model(model_label)
         state.event('model_selected', label=model_label, visible=True)
-        engine = Orchestrator(fresh_config, browser, registry or ToolRegistry(), state,
-                              approval_decider=_UI_APPROVAL_DECIDER, display=_TERMINAL.sink,
-                              event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT)
         await engine.initialize()
+        if hasattr(browser, 'verify_interaction_ready'):
+            await browser.verify_interaction_ready(model_label)
         if _UI_EVENT_SINK is not None:
             _UI_EVENT_SINK('session', {'title': 'Copilot session ' + state.session_id[:8]})
             _UI_EVENT_SINK('model', {'name': model_label, 'verified': True})
@@ -227,6 +231,10 @@ async def run(args):
         config._profile_explicit = True
     if args.model:
         config.model = args.model
+    elif not isinstance(config.model, str) or not config.model.strip():
+        # Migrate older per-user settings that persisted the former empty
+        # model value so startup consistently preselects the product default.
+        config.model = 'GPT-6 Sol'
     config.validate()
     accounts = getattr(config, '_storage_candidates', None) or discover_onedrive_accounts()
     validate_storage_directory(config.storage_dir, accounts)
@@ -280,6 +288,10 @@ async def run(args):
                 return
             state.reconcile_submission(answer == 'sent')
         await browser.start()
+        orchestrator = Orchestrator(config, browser, ToolRegistry(), state,
+                                    approval_decider=_UI_APPROVAL_DECIDER, display=_TERMINAL.sink,
+                                    event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT)
+        await orchestrator.prepare_initialization()
         models = await browser.discover_models()
         ranked = model_rank(models)
         enabled = [m for m in ranked if m.get('enabled', True)]
@@ -288,9 +300,13 @@ async def run(args):
         system('Models actually discovered in this account:')
         for i, model in enumerate(models, 1):
             system(f"{i}. {model['label']}" + (' (unavailable)' if not model.get('enabled', True) else ''))
-        preferred = next((m for m in enabled if m['label'] == config.model), enabled[0])
+        configured_default = next((m for m in enabled if m['label'] == config.model), None)
+        preferred = configured_default or enabled[0]
+        if configured_default is None:
+            system('Configured default ' + config.model + ' is unavailable; using the highest-ranked enabled model for this run.')
         system('Version ranking prefers newer versions within a family, then deeper modes. Provider families are not directly comparable.')
         system('Suggested/default: ' + preferred['label'])
+        await browser.select_model(preferred['label'])
         if args.model:
             chosen = next((m for m in enabled if m['label'] == args.model), None)
             if chosen is None:
@@ -310,17 +326,16 @@ async def run(args):
                 system('Enter an enabled model number from the displayed list.')
             if chosen is None:
                 raise ValueError('Model selection exhausted five attempts')
-        await browser.select_model(chosen['label'])
+        if chosen['label'] != preferred['label']:
+            await browser.select_model(chosen['label'])
         settings['config']['model'] = chosen['label']
         save_user_settings(config.storage_dir, settings)
         state.event('model_selected', label=chosen['label'], visible=True)
-        orchestrator = Orchestrator(config, browser, ToolRegistry(), state,
-                                    approval_decider=_UI_APPROVAL_DECIDER, display=_TERMINAL.sink,
-                                    event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT)
         if _UI_EVENT_SINK is not None:
             _UI_EVENT_SINK('model', {'name': chosen['label'], 'verified': True})
             _UI_EVENT_SINK('session', {'title': 'Copilot session ' + state.session_id[:8]})
         await orchestrator.initialize()
+        await browser.verify_interaction_ready(chosen['label'])
         system('Type your request and press Enter. For files, type :attach to open Choose files, then type your request.')
         system('Commands: :new [first message], :attach, :files, :remove <number>, :clear, :status, :exit. Advanced: :attach <path>, :resolve <call_id> completed|not_executed')
         pending_files = orchestrator.attachment_queue()

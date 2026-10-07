@@ -1,6 +1,7 @@
 """Endpoint-choice tests with mocked sockets/CDP; no live ports or profiles."""
 from pathlib import Path
 from types import SimpleNamespace
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -65,7 +66,9 @@ class BrowserEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.attach_existing)
         self.assertEqual(9555, result.debug_port)
         self.assertEqual([], sockets.binds)
-        get_version.assert_called_once_with('http://127.0.0.1:9555')
+        self.assertCountEqual(
+            [call.args[0] for call in get_version.call_args_list],
+            ['http://127.0.0.1:9555', 'http://127.0.0.1:9443'])
         endpoint.assert_called_once_with('http://127.0.0.1:9555', payload)
         owner.assert_called_once_with(9555, config.profile_dir)
 
@@ -127,3 +130,20 @@ class BrowserEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(config.attach_existing)
         self.assertEqual([('127.0.0.1', 9555), ('127.0.0.1', 9443)], sockets.binds)
         self.assertEqual(2, get_version.call_count)
+
+    async def test_remembered_and_default_endpoint_probes_start_in_parallel(self):
+        sockets = FakeSockets()
+        barrier = threading.Barrier(2)
+        observed = []
+        def probe(endpoint):
+            observed.append(endpoint)
+            barrier.wait(timeout=2)
+            return None
+        config = self.config()
+        settings = {'debug_ports': {'vdi-synthetic': 9555}}
+        with patch('copilot_agent.app.machine_key', return_value='vdi-synthetic'), \
+             patch('copilot_agent.app.system'), \
+             patch('copilot_agent.app.socket', SimpleNamespace(socket=sockets.socket)), \
+             patch('copilot_agent.app.edge.get_cdp_version', side_effect=probe):
+            await choose_browser_endpoint(config, SimpleNamespace(port=None), settings)
+        self.assertCountEqual(observed, ['http://127.0.0.1:9555', 'http://127.0.0.1:9443'])

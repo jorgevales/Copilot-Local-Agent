@@ -36,9 +36,12 @@ class Orchestrator:
         self.approvals = ApprovalManager(state, approval_decider, self.feedback)
         self.process_registry = ManagedProcessRegistry(state.directory)
         self.live_seen = {}
+        self._next_turn_preparation = None
+        self._prepared_attachment_uploads = {}
         if hasattr(browser, 'set_feedback'):
             browser.set_feedback(self._live_feedback)
         self.initialized = False
+        self._prepared_initialization = None
         self.approved_attachment_hashes = {}
         self.base_context = {'config': config, 'session_dir': state.directory, 'browser': browser, 'approved': False,
                              'pending_image_attachments': [], 'created_snapshots': {},
@@ -156,6 +159,70 @@ class Orchestrator:
                 digest.update(chunk)
         return digest.hexdigest()
 
+    def _direction_independent_attachments(self):
+        """Files whose inclusion cannot depend on the next user request."""
+        paths = []
+        if self.findings.attachment_due(self.state.message_count + 1):
+            paths.append(self.findings.attachment)
+        paths.extend(map(Path, self.base_context['pending_image_attachments']))
+        paths.extend(map(Path, self.base_context['pending_file_attachments']))
+        unique = list(dict.fromkeys(map(Path, paths)))
+        if len(unique) > 20:
+            return []
+        for path in unique:
+            record = self._attachment_record(path)
+            approved = self.approved_attachment_hashes.get(str(path))
+            if approved is not None and record['sha256'] != approved:
+                raise PolicyError('An approved attachment changed; preparation was cancelled')
+        return unique
+
+    async def prepare_pending_attachments(self):
+        """Preattach safe request-independent files during the user's think time."""
+        prepare = getattr(self.browser, 'preload_attachments', None)
+        paths = self._direction_independent_attachments()
+        if not callable(prepare) or not paths:
+            return {'status': 'skipped', 'count': 0}
+        upload_paths = []
+        for path in paths:
+            approved = self.approved_attachment_hashes.get(str(path))
+            upload_paths.append(self._stage_approved(path, approved) if approved else path)
+        result = await prepare(upload_paths)
+        self._prepared_attachment_uploads.update({
+            (str(source), self._bounded_hash(source)): upload
+            for source, upload in zip(paths, upload_paths)
+        })
+        self.state.event('next_turn_attachments_prepared', count=len(paths),
+                         names=[path.name for path in paths])
+        self.state.save()
+        return result
+
+    def _schedule_next_turn_preparation(self):
+        """Start preparation without delaying delivery of a completed response."""
+        if self._next_turn_preparation is not None and not self._next_turn_preparation.done():
+            return
+        try:
+            if not self._direction_independent_attachments():
+                self._next_turn_preparation = None
+                return
+        except (PolicyError, OSError, ValueError) as exc:
+            self.state.event('next_turn_attachment_preparation_skipped', error=str(exc))
+            self.state.save()
+            return
+        self._next_turn_preparation = asyncio.create_task(self.prepare_pending_attachments())
+
+    async def _finish_next_turn_preparation(self):
+        task = self._next_turn_preparation
+        self._next_turn_preparation = None
+        if task is None:
+            return
+        try:
+            await task
+        except (BrowserUIError, PolicyError, OSError, ValueError) as exc:
+            # Preparation never clicks Send; the normal verified upload path
+            # remains available for the actual message.
+            self.state.event('next_turn_attachment_preparation_failed', error=str(exc))
+            self.state.save()
+
     def _stage_approved(self, path: Path, expected_hash: str) -> Path:
         """Copy reviewed bytes to a retained unique upload snapshot, verify before use."""
         self._attachment_record(path)
@@ -175,8 +242,15 @@ class Orchestrator:
         return target
 
     async def _send(self, kind: str, content, extra_attachments=()):
-        request_id = uuid.uuid4().hex
-        text, attachments = self.prompts.build(kind, redact(content), request_id)
+        await self._finish_next_turn_preparation()
+        prepared = self._prepared_initialization if kind == 'initialize' and not extra_attachments else None
+        if prepared is not None:
+            request_id, text, attachments = (prepared['request_id'], prepared['text'],
+                                             list(prepared['attachments']))
+            self._prepared_initialization = None
+        else:
+            request_id = uuid.uuid4().hex
+            text, attachments = self.prompts.build(kind, redact(content), request_id)
         pending_images = self.base_context['pending_image_attachments']
         pending_files = self.base_context['pending_file_attachments']
         attachments = list(dict.fromkeys([*attachments, *map(Path, extra_attachments),
@@ -191,7 +265,17 @@ class Orchestrator:
             approved_hash = self.approved_attachment_hashes.get(entry['path'])
             if approved_hash and entry['sha256'] != approved_hash:
                 raise PolicyError('An approved attachment changed; renew approval before upload')
-            upload_paths.append(self._stage_approved(Path(entry['path']), approved_hash) if approved_hash else Path(entry['path']))
+            key = (entry['path'], entry['sha256'])
+            cached = self._prepared_attachment_uploads.get(key)
+            if cached is not None:
+                expected_name = upload_name(Path(entry['path'])) if approved_hash else Path(entry['path']).name
+                if (not cached.is_file() or cached.name != expected_name
+                        or self._bounded_hash(cached) != entry['sha256']):
+                    self._prepared_attachment_uploads.pop(key, None)
+                    cached = None
+            upload_paths.append(cached if cached is not None else
+                                self._stage_approved(Path(entry['path']), approved_hash)
+                                if approved_hash else Path(entry['path']))
         if len({path.name.casefold() for path in upload_paths}) != len(upload_paths):
             raise PolicyError('Attachments have duplicate upload filenames; rename or remove one before sending.')
         if extra_attachments:
@@ -225,6 +309,7 @@ class Orchestrator:
                 if Path(entry['path']) in list(map(Path, pending_files)):
                     history = self.base_context['transferred_attachment_hashes']
                     history[entry['sha256']] = history.get(entry['sha256'], 0) + 1
+                self._prepared_attachment_uploads.pop((entry['path'], entry['sha256']), None)
             pending_images.clear()
             pending_files.clear()
             self.state.save()
@@ -266,6 +351,30 @@ class Orchestrator:
         self.state.message('copilot_raw', raw, request_id=request_id, artifact=str(raw_path))
         self.state.save()
         return raw, request_id
+
+    async def prepare_initialization(self):
+        """Upload the immutable startup contract while model choice is pending."""
+        if self.initialized:
+            raise RuntimeError('The verified contract is already initialized')
+        if self._prepared_initialization is not None:
+            return {'request_id': self._prepared_initialization['request_id'],
+                    'text': self._prepared_initialization['text'],
+                    'attachment_count': len(self._prepared_initialization['attachments'])}
+        request_id = uuid.uuid4().hex
+        content = 'Initialize the continuous conversation under the attached contract.'
+        text, attachments = self.prompts.build('initialize', redact(content), request_id)
+        attachments = list(dict.fromkeys(map(Path, attachments)))
+        if len(attachments) > 20:
+            raise PolicyError('This message would exceed Copilot\'s 20-attachment limit.')
+        if SENSITIVE.search(text):
+            raise PolicyError('Sensitive values cannot be transmitted to Copilot')
+        self.feedback.emit('Orchestrator', 'Preparing Copilot with the startup contract and files.',
+                           request_id=request_id)
+        await self.browser.preload_exchange(text, request_id, attachments=attachments)
+        self._prepared_initialization = {'request_id': request_id, 'text': text,
+                                         'attachments': tuple(attachments)}
+        return {'request_id': request_id, 'text': text,
+                'attachment_count': len(attachments)}
 
     async def _validated_exchange(self, kind, content, extra_attachments=()):
         for attempt in range(self.config.max_corrections + 1):
@@ -422,6 +531,7 @@ class Orchestrator:
                             self.feedback.emit('Orchestrator', 'Retained artifact: ' + report['path'])
                         elif report.get('tool') == 'archives.extract':
                             self.feedback.emit('Orchestrator', 'Verified extraction: ' + report['destination'] + ' (' + str(len(report.get('verified_files', []))) + ' files). Evidence: ' + report.get('report_path', ''))
+                self._schedule_next_turn_preparation()
                 return response
             if response['response_type'] in {'clarification', 'error'}:
                 failed_calls = [item for key, item in self.state.data['calls'].items()
@@ -452,6 +562,7 @@ class Orchestrator:
                 self.feedback.section('Copilot', response['response_type'].upper(), [
                     ('Message', response['clarification'] or response['user_response']),
                     ('Status', response.get('completion_status'))])
+                self._schedule_next_turn_preparation()
                 return response
             if round_number == self.config.max_tool_rounds:
                 self.state.data['status'] = 'blocked'

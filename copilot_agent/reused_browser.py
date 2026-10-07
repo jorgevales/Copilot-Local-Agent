@@ -31,12 +31,12 @@ def cdp_endpoint(port: int) -> str:
     return f"http://127.0.0.1:{int(port)}"
 
 
-def get_cdp_version(endpoint: str) -> dict | None:
+def get_cdp_version(endpoint: str, timeout: float = 0.75) -> dict | None:
     parsed = urlparse(endpoint)
     if parsed.scheme != "http" or parsed.hostname != "127.0.0.1" or not parsed.port:
         raise EndpointError("CDP must use a loopback HTTP endpoint.")
     try:
-        with _LOOPBACK_HTTP.open(endpoint + "/json/version", timeout=0.75) as response:
+        with _LOOPBACK_HTTP.open(endpoint + "/json/version", timeout=max(0.05, min(float(timeout), 0.75))) as response:
             payload = json.loads(response.read(65536).decode("utf-8"))
         return payload if isinstance(payload, dict) and payload.get("webSocketDebuggerUrl") else None
     except (OSError, ValueError):
@@ -237,17 +237,23 @@ def stop_launched_edge(process: subprocess.Popen | None) -> None:
         pass
 
 
-async def connect_bounded(playwright, endpoint: str, timeout: float, process=None):
+async def connect_bounded(playwright, endpoint: str, timeout: float, process=None, initial_payload=None):
     """Bounded CDP startup with sanitized failure categories."""
     deadline = time.monotonic() + max(1, timeout)
     handshakes = 0
     endpoint_seen = False
     launched_exited = False
     handshake_rejected = False
+    first_payload = initial_payload
+    started = time.monotonic()
     while time.monotonic() < deadline:
         if remote_debugging_blocked():
             raise EndpointError("Microsoft Edge policy disables remote debugging. Ask your organization to permit it; the agent will not bypass this policy.")
-        payload = await asyncio.to_thread(get_cdp_version, endpoint)
+        if first_payload is not None:
+            payload, first_payload = first_payload, None
+        else:
+            remaining = max(0.05, deadline - time.monotonic())
+            payload = await asyncio.to_thread(get_cdp_version, endpoint, min(0.2, remaining))
         if payload:
             if not endpoint_seen:
                 print('[System] Edge debugging endpoint is ready; connecting Playwright.')
@@ -274,7 +280,11 @@ async def connect_bounded(playwright, endpoint: str, timeout: float, process=Non
                     print('[System] Edge responded, but the first browser handshake did not complete; retrying within the startup limit.')
         elif process is not None and process.poll() is not None:
             launched_exited = True  # Edge may hand off to a child; keep the full startup window.
-        await asyncio.sleep(min(0.25, max(0, deadline - time.monotonic())))
+        # A new local Edge listener normally appears quickly. Poll tightly at
+        # first, then back off while preserving the same bounded startup window.
+        elapsed = time.monotonic() - started
+        interval = 0.05 if elapsed < 2 else (0.1 if elapsed < 5 else 0.25)
+        await asyncio.sleep(min(interval, max(0, deadline - time.monotonic())))
     if endpoint_seen:
         if handshake_rejected:
             raise EndpointError("Edge's debugging endpoint rejected Playwright's connection. Check organizational browser security policy; the agent will not bypass it.")

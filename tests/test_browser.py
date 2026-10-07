@@ -1,9 +1,11 @@
 """Offline contract tests; no browser, file deletion, network, or Copilot send."""
 import asyncio
 from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
 
+from copilot_agent import browser as browser_module
 from copilot_agent.browser import (BrowserAdapter, BrowserUIError, CaptureTimeoutError,
                                   SubmissionAmbiguousError, fresh_assistant, model_rank)
 from copilot_agent.browser import uploads_verified
@@ -285,7 +287,72 @@ class OfflineAdapter(BrowserAdapter):
         self.diagnostic_calls.append(reason)
 
 
+class PreloadedOfflineAdapter(OfflineAdapter):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.attachment_uploads = []
+        self.attachment_names = []
+
+    async def attach_files(self, paths):
+        paths = list(paths)
+        self.attachment_uploads.append(paths)
+        self.attachment_names = [Path(path).name for path in paths]
+
+    async def _evaluate(self, script, arg=None):
+        if script == browser_module._ATTACHMENTS:
+            return {'names': list(self.attachment_names), 'busy': False,
+                    'error': False, 'alerts': []}
+        return await super()._evaluate(script, arg)
+
+
 class ExchangeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_preloaded_file_reuses_identical_approved_snapshot_path(self):
+        with tempfile.TemporaryDirectory(prefix='copilot-preload-source-') as source_dir, \
+             tempfile.TemporaryDirectory(prefix='copilot-preload-approved-') as approved_dir:
+            source = Path(source_dir) / 'reviewed.txt'
+            approved = Path(approved_dir) / source.name
+            source.write_bytes(b'exact reviewed bytes')
+            approved.write_bytes(source.read_bytes())
+            browser = PreloadedOfflineAdapter()
+
+            await browser.preload_attachments([source])
+            await browser._reconcile_preloaded_attachments([approved])
+
+            self.assertEqual([[source]], browser.attachment_uploads)
+
+    async def test_exact_preload_uploads_before_model_choice_and_is_not_uploaded_twice(self):
+        with tempfile.TemporaryDirectory(prefix='copilot-preload-') as directory:
+            attachment = Path(directory) / 'startup.md'
+            attachment.write_text('startup contract', encoding='utf-8')
+            browser = PreloadedOfflineAdapter()
+            browser.model_label = None
+
+            prepared = await browser.preload_exchange(
+                'message req', 'req', attachments=[attachment])
+
+            self.assertEqual({'request_id': 'req', 'attachment_count': 1}, prepared)
+            self.assertEqual([[attachment]], browser.attachment_uploads)
+            self.assertEqual('message req', browser.editor.text)
+            self.assertEqual(0, browser.button.clicks)
+
+            browser.model_label = 'discovered model'
+            result = await browser.exchange('message req', 'req', attachments=[attachment])
+
+            self.assertTrue(response_envelope_closed(result))
+            self.assertEqual([[attachment]], browser.attachment_uploads)
+            self.assertEqual(1, browser.button.clicks)
+            self.assertIsNone(browser._preloaded_exchange)
+
+    async def test_preloaded_message_refuses_different_submission_without_click(self):
+        browser = PreloadedOfflineAdapter()
+        await browser.preload_exchange('message req', 'req')
+
+        with self.assertRaisesRegex(SubmissionNotSentError, 'does not match'):
+            await browser.exchange('message another', 'another')
+
+        self.assertEqual(0, browser.button.clicks)
+        self.assertIsNotNone(browser._preloaded_exchange)
+
     async def test_upload_capacity_and_zip_reject_before_browser_access(self):
         adapter = BrowserAdapter(SimpleNamespace())
         with self.assertRaises(BrowserUIError):
