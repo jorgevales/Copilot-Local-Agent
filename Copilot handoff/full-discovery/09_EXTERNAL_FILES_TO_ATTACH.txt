@@ -1,0 +1,31 @@
+Source files are not embedded in this package. This standard list names the eight original source/schema attachments; for a bug fix, replace lower-priority items with the diagnostic report and the exact recommended source/test files, keeping the total at 20.
+
+## Exact 20-file send set
+
+Attach every file in this folder first: 12 files. Then attach exactly these 8 originals, in order:
+
+1. `copilot_agent/app.py` — lifecycle and entrypoint orchestration.
+2. `copilot_agent/orchestrator.py` — conversation, tool, approval, retry, and uncertainty control flow.
+3. `copilot_agent/browser.py` — visible Copilot UI exchange and response capture.
+4. `copilot_agent/protocol.py` — response parsing and validation contract.
+5. `copilot_agent/policy.py` — path/domain policy and security boundary.
+6. `copilot_agent/tools.py` — tool catalogue, policy checks, and dispatch.
+7. `schemas/response-v1.schema.json` — response contract.
+8. `schemas/tool-catalogue-v1.json` — tool contract and examples.
+
+Total: `12 + 8 = 20` files. Do not attach any additional file.
+
+## Replacement rule for a specific issue
+
+If the issue concerns execution, delivery, startup packaging, storage, or tests, replace one or more of the eight files above; never add files. Suggested replacements are:
+
+- execution: `code_runner.py`, `local_python_runner.py`, `local_python_worker.py`;
+- delivery: `downloads.py`, `archives.py`, `delivery.py`;
+- startup/context: `prompts.py`, `bundle.py`, `attachments.py`, `config.example.json`;
+- persistence: `state.py`, `persistence.py`, `logging_utils.py`;
+- tests: the directly affected `tests/test_*.py` file.
+
+The package summaries already cover `README.md`, `docs/ARCHITECTURE.md`, `docs/THREAT_MODEL.md`, `docs/KNOWN_LIMITATIONS.md`, and `docs/TEST_REPORT.md`; attach those only as replacements when exact original wording or evidence is required.
+
+Never attach `.venv/`, `runtime/`, `workspace/`, browser profiles, generated diagnostics, retained logs, live acceptance artifacts, or local settings containing user data.
+

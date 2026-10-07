@@ -39,29 +39,49 @@ async def ask(prompt: str) -> str:
     return await asyncio.to_thread(input, _TERMINAL.prompt('User', prompt))
 
 
-def _record_bug_fix(state, config, exc, operation, stage):
-    """Persist two isolated reports and show the actionable project origin."""
+def _record_bug_fix(state, config, exc, operation, stage, report_index=None):
+    """Record a failure without interrupting the current user turn."""
     try:
         generated = DiagnosticReports(config.storage_dir, state.session_id,
                                       os.environ.get('COPILOT_AGENT_EXECUTION_MODE', 'live')).create(
             exc, operation=operation, stage=stage, events=_recent_events(state))
-        state.data['status'] = 'bug_fix'
-        state.event('bug_fix_report_created', report_id=generated['internal']['report_id'],
+    except Exception as report_error:
+        try:
+            state.event('bug_report_write_failed', error=str(report_error))
+            state.save()
+        except Exception:
+            pass
+        return None
+    record = {'report_id': generated['internal']['report_id'],
+              'internal_path': str(generated['internal_path']),
+              'external_path': str(generated['external_path']),
+              'candidate_files': generated['internal']['candidate_files']}
+    if report_index is not None:
+        report_index.append(record)
+    try:
+        state.data['bug_fix'] = True
+        state.data.setdefault('bug_report_ids', []).append(record['report_id'])
+        state.event('bug_fix_report_created', report_id=record['report_id'],
                     category=generated['internal']['error_category'])
         state.save()
-        _TERMINAL.emit('BUG FIX', 'Actionable failure: ' + generated['internal']['summary'])
-        origin = generated['internal'].get('origin')
-        if origin:
-            _TERMINAL.emit('BUG FIX', f"Likely point: {origin['path']}:{origin['line']} in {origin['function']}")
-        for item in generated['internal']['candidate_files']:
-            _TERMINAL.emit('BUG FIX', f"Recommended: {item['file_name']} ({item['repository_relative_path']}:{item['line']}) — {item['why']} Sensitivity: review before upload.")
-        _TERMINAL.emit('BUG FIX', 'INTERNAL report: ' + str(generated['internal_path']))
-        _TERMINAL.emit('BUG FIX', 'SANITIZED report: ' + str(generated['external_path']))
-        _TERMINAL.emit('BUG FIX', 'Do not send the INTERNAL report to external services.')
-        return generated['external_path']
-    except Exception as report_error:
-        error('BUG FIX report could not be safely written: ' + str(report_error))
-        return None
+    except Exception:
+        pass
+    return record
+
+
+def _record_turn_error(state, exc):
+    try:
+        state.event('turn_error', error=str(exc))
+    except Exception:
+        pass
+
+
+def _show_bug_handoff(reports):
+    if not reports:
+        return
+    system(f"Bug reports saved: {len(reports)}. Internal reports: {Path(reports[0]['internal_path']).parent}")
+    system('Copilot handoff: attach the internal report(s), 08_GRAPHIFY_FINDINGS.md, and the recommended source/test files; keep total attachments within 20. See Copilot handoff/full-discovery/README.md.')
+    system('Internal reports are for authorized Copilot only. Use sanitized reports for any external review.')
 
 
 def _actionable(exc):
@@ -229,7 +249,7 @@ async def run(args):
     state = SessionState(directory, resume=bool(args.resume))
     browser = BrowserAdapter(config)
     orchestrator = None
-    latest_external_report = None
+    bug_reports = []
     system('Copilot Local Agent — reasoning through Microsoft 365 Copilot web UI')
     system('Session records are kept in your selected OneDrive storage.')
     system('Browser: Visible. Non-visible Copilot operation has not passed acceptance and is unavailable.')
@@ -286,7 +306,7 @@ async def run(args):
         orchestrator = Orchestrator(config, browser, ToolRegistry(), state)
         await orchestrator.initialize()
         system('Type your request and press Enter. For files, type :attach to open Choose files, then type your request.')
-        system('Commands: :new [first message], :attach, :files, :remove <number>, :clear, :status, :review-report, :exit. Advanced: :attach <path>, :resolve <call_id> completed|not_executed')
+        system('Commands: :new [first message], :attach, :files, :remove <number>, :clear, :status, :exit. Advanced: :attach <path>, :resolve <call_id> completed|not_executed')
         pending_files = orchestrator.attachment_queue()
         def show_files():
             records = pending_files.records()
@@ -316,17 +336,8 @@ async def run(args):
                 if text == ':status':
                     system(json.dumps({'session_id': state.session_id, 'message_count': state.message_count,
                                       'status': state.data['status'], 'findings': len(orchestrator.findings.data['findings']),
+                                      'bug_fix': bool(state.data.get('bug_fix')),
                                       'uncertain_calls': [k for k, v in state.data['calls'].items() if v['status'] == 'uncertain']}, indent=2))
-                    continue
-                if text == ':review-report':
-                    if latest_external_report is None or not Path(latest_external_report).is_file():
-                        system('No sanitized report is available in this run.')
-                    elif (await ask('Review the SANITIZED report before any external sharing. Type REVIEW to display it: ')) == 'REVIEW':
-                        system('Do not send the INTERNAL report to external services. No report is transmitted by this command.')
-                        system(Path(latest_external_report).read_text(encoding='utf-8'))
-                        system('Sanitized report path: ' + str(latest_external_report))
-                    else:
-                        system('Review cancelled; nothing was shared.')
                     continue
                 if text == ':attach' or text.lower() == 'attach files' or text.startswith(':attach '):
                     paths = ([Path(text[8:].strip().strip('"'))] if text.startswith(':attach ') else
@@ -361,16 +372,16 @@ async def run(args):
                 if state.message_count > before_send:
                     pending_files.clear()
             except CaptureTimeoutError as exc:
-                state.event('turn_error', error=str(exc))
+                _record_turn_error(state, exc)
                 error('Copilot reply capture timed out. No local action ran for this reply.')
                 system('The sent message and capture details were retained in your selected OneDrive storage.')
-                latest_external_report = _record_bug_fix(state, config, exc, 'Copilot response capture', 'turn')
+                _record_bug_fix(state, config, exc, 'Copilot response capture', 'turn', bug_reports)
             except (ValueError, RuntimeError, OSError) as exc:
-                state.event('turn_error', error=str(exc))
+                _record_turn_error(state, exc)
                 error('Action stopped: ' + str(exc))
                 system('Session evidence was retained in your selected OneDrive storage.')
                 if _actionable(exc):
-                    latest_external_report = _record_bug_fix(state, config, exc, 'Interactive agent operation', 'turn')
+                    _record_bug_fix(state, config, exc, 'Interactive agent operation', 'turn', bug_reports)
                 if state.data['status'] == 'closed':
                     system('The previous session was archived. Restart the application to try a fresh session.')
                     break
@@ -378,14 +389,22 @@ async def run(args):
                     system('Delivery is uncertain. Exit and resume with explicit reconciliation before another send.')
             except EOFError:
                 break
+            except Exception as exc:
+                _record_turn_error(state, exc)
+                _record_bug_fix(state, config, exc, 'Interactive agent operation', 'turn', bug_reports)
+                error('The error was recorded; the session is still available. You can retry or continue with another request.')
     except Exception as exc:
-        latest_external_report = _record_bug_fix(state, config, exc, 'Agent startup or session', 'startup_or_session')
+        _record_bug_fix(state, config, exc, 'Agent startup or session', 'startup_or_session', bug_reports)
         raise
     finally:
-        if orchestrator:
-            await orchestrator.close()
-        else:
-            await browser.close()
+        try:
+            if orchestrator:
+                await orchestrator.close()
+            else:
+                await browser.close()
+        except Exception as exc:
+            _record_bug_fix(state, config, exc, 'Agent shutdown', 'shutdown', bug_reports)
+        _show_bug_handoff(bug_reports)
 
 
 def main():
