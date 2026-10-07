@@ -8,6 +8,7 @@ from .protocol import BEGIN, END
 
 PUBLIC_FIELDS = ('user_response', 'task_interpretation', 'decision_summary', 'assumptions', 'action_plan', 'risk_summary')
 ROLE_STYLES = {
+    'BUG FIX': '30;103',
     'System': '97;44',
     'Orchestrator': '97;45',
     'Copilot': '30;46',
@@ -37,6 +38,8 @@ def _enable_colour(stream) -> bool:
 
 
 def _actor_style(actor: str) -> str:
+    if actor == 'BUG FIX':
+        return ROLE_STYLES['BUG FIX']
     if actor.startswith('Tool/'):
         return ROLE_STYLES['Tool']
     if actor.startswith('Copilot'):

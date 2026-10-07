@@ -141,7 +141,9 @@ def main():
             flags.append('-E')
         if sys.flags.no_user_site:
             flags.append('-s')
-        return subprocess.call([sys.executable, *flags, str(source / 'app.py')], cwd=source)
+        environment = os.environ.copy()
+        environment['COPILOT_AGENT_EXECUTION_MODE'] = 'testing' if source.is_relative_to(live / 'Copilot testing environment' / 'versions') else 'live'
+        return subprocess.call([sys.executable, *flags, str(source / 'app.py')], cwd=source, env=environment)
     except (ValueError, OSError, SyntaxError) as exc:
         print(f'Version selection stopped: {exc}')
         return 1
