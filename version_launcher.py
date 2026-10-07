@@ -14,6 +14,15 @@ from datetime import datetime, timezone
 EXCLUDED = {'.git', '.venv', '__pycache__', 'runtime', 'workspace', '.history',
             'Copilot proposals', 'Copilot testing environment', 'node_modules'}
 PRIVATE = {'config.local.json', 'python-launcher.txt', '.venv-setup.lock'}
+DROP_FOLDER = Path('Copilot testing environment') / 'Updated files'
+
+
+def prepare_drop_folder(live):
+    inbox = live / DROP_FOLDER
+    inbox.mkdir(parents=True, exist_ok=True)
+    for relative, _ in source_files(live):
+        (inbox / relative.parent).mkdir(parents=True, exist_ok=True)
+    return inbox
 
 
 def source_files(root):
@@ -23,7 +32,7 @@ def source_files(root):
                       and not (Path(directory) / name).is_symlink()]
         for name in files:
             path = Path(directory) / name
-            if name in PRIVATE or name.startswith('.env') or path.is_symlink():
+            if name in PRIVATE or name == '.gitkeep' or name.startswith('.env') or path.is_symlink():
                 continue
             if path.suffix.lower() in {'.pyc', '.pem', '.pfx', '.key', '.log'}:
                 continue
@@ -90,6 +99,7 @@ def create_version(live, proposals, previous=None):
 
 
 def choose_source(live, ask=input, choice=None):
+    inbox = prepare_drop_folder(live)
     if choice is None:
         print('Which version do you want to run?\n1. Live repository\n2. Copilot testing environment')
         choice = ask('Choose 1 or 2: ').strip()
@@ -107,21 +117,18 @@ def choose_source(live, ask=input, choice=None):
         if answer.upper() != 'L':
             if not answer.isdigit() or not 1 <= int(answer) <= len(versions):
                 raise ValueError('Invalid testing version number.')
-            previous = versions[int(answer) - 1]
-    value = ask('Folder of new Copilot files (Enter runs the selected testing version): ').strip().strip('"')
-    if not value:
+            previous = versions[int(answer) - 1].resolve()
+    print(f'Copilot replacement folder: {inbox}')
+    if not any(source_files(inbox)):
         if previous:
             return previous
-        default = live / 'Copilot proposals'
-        if not default.is_dir():
-            raise ValueError('No testing version exists. Select a folder containing Copilot replacements.')
-        proposals = default
-    else:
-        proposals = Path(value)
-        if not proposals.is_absolute():
-            proposals = live / proposals
+        raise ValueError(f'Drop Copilot files into {inbox}, matching their project-relative paths, then start again.')
+    changes = replacement_map(live, inbox)
+    if previous and all((previous / relative).is_file() and digest(previous / relative) == digest(path)
+                        for relative, path in changes.items()):
+        return previous
     print('Copilot replacements are untrusted. Review them before running; a testing copy uses your normal account permissions.')
-    return create_version(live, proposals, previous)
+    return create_version(live, inbox, previous)
 
 
 def main():

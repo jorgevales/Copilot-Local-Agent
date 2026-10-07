@@ -56,6 +56,31 @@ class VersionTests(unittest.TestCase):
         live, _ = self.fixture()
         self.assertEqual(launcher.choose_source(live, lambda _: '1'), live)
 
+    def test_fixed_drop_folder_handles_same_names_and_reuses_unchanged(self):
+        live, _ = self.fixture()
+        (live / 'copilot_agent/app.py').write_text('VALUE = 1')
+        inbox = launcher.prepare_drop_folder(live)
+        (inbox / '.gitkeep').write_text('')
+        (inbox / 'app.py').write_text('print("testing")')
+        (inbox / 'copilot_agent/app.py').write_text('VALUE = 99')
+        version = launcher.choose_source(live, choice='2')
+        self.assertEqual((version / 'app.py').read_text(), 'print("testing")')
+        self.assertEqual((version / 'copilot_agent/app.py').read_text(), 'VALUE = 99')
+        self.assertEqual(launcher.choose_source(live, lambda _: '', choice='2'), version)
+        self.assertFalse((version / '.gitkeep').exists())
+
+    def test_next_drop_updates_latest_version_automatically(self):
+        live, _ = self.fixture()
+        inbox = launcher.prepare_drop_folder(live)
+        (inbox / 'copilot_agent/first.py').write_text('VALUE = 50')
+        first = launcher.choose_source(live, choice='2')
+        (inbox / 'copilot_agent/second.py').write_text('VALUE = 60')
+        second = launcher.choose_source(live, lambda _: '', choice='2')
+        self.assertNotEqual(first, second)
+        self.assertEqual((second / 'copilot_agent/first.py').read_text(), 'VALUE = 50')
+        self.assertEqual((second / 'copilot_agent/second.py').read_text(), 'VALUE = 60')
+        self.assertEqual((live / 'copilot_agent/first.py').read_text(), 'VALUE = 1')
+
     def test_copy_runs_imports_from_its_own_updated_modules(self):
         live, delivery = self.fixture()
         (live / 'app.py').write_text('from copilot_agent.first import VALUE\nprint(VALUE)')

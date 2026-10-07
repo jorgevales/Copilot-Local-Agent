@@ -9,4 +9,8 @@ config.local.json
 .history/
 python-launcher.txt
 Copilot proposals/
-Copilot testing environment/
+Copilot testing environment/*
+!Copilot testing environment/Updated files/
+Copilot testing environment/Updated files/**
+!Copilot testing environment/Updated files/**/
+!Copilot testing environment/Updated files/**/.gitkeep
