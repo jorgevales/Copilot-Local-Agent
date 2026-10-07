@@ -376,7 +376,9 @@ class BrowserAdapter:
                                         self._launched_process)
             self.context = self.browser.contexts[0]
             self.page = await asyncio.wait_for(self.context.new_page(), 10)
-            self.tool_context = await asyncio.wait_for(self.browser.new_context(accept_downloads=False, service_workers='block', java_script_enabled=False), 10)
+            # Website automation needs JavaScript, but stays in a separate
+            # unauthenticated context with service workers and network scope blocked.
+            self.tool_context = await asyncio.wait_for(self.browser.new_context(accept_downloads=False, service_workers='block', java_script_enabled=True), 10)
             await self._configure_tool_context()
             self.tool_page = await asyncio.wait_for(self.tool_context.new_page(), 10)
             self.page.set_default_timeout(5000)
@@ -399,7 +401,12 @@ class BrowserAdapter:
             raise
 
     async def _evaluate(self, script, arg=None):
-        return await asyncio.wait_for(self.page.evaluate(script, arg), timeout=5)
+        for attempt in range(2):
+            try:
+                return await asyncio.wait_for(self.page.evaluate(script, arg), timeout=5)
+            except Exception as exc:
+                if type(exc).__name__ != 'TimeoutError' or attempt == 1: raise
+                await asyncio.sleep(min(.25, self.config.poll_interval))
 
     async def _configure_tool_context(self):
         from .policy import URLPolicy, PolicyError
@@ -667,7 +674,12 @@ class BrowserAdapter:
             raise
 
     async def _editor_text(self, editor):
-        return await asyncio.wait_for(editor.evaluate(_EDITOR_VALUE), timeout=5)
+        for attempt in range(2):
+            try:
+                return await asyncio.wait_for(editor.evaluate(_EDITOR_VALUE), timeout=5)
+            except Exception as exc:
+                if type(exc).__name__ != 'TimeoutError' or attempt == 1: raise
+                await asyncio.sleep(min(.25, self.config.poll_interval))
 
     async def _expand_response_code(self, request_id):
         """Read-only expansion of the current response's own virtualized code preview."""
@@ -734,22 +746,29 @@ class BrowserAdapter:
             raise BrowserUIError('Every outbound message must contain its unique request_id.')
         if not self.model_label:
             raise BrowserUIError('Select and verify a discovered model before sending.')
+        self.preparation_stage = 'generation_check'
         if await self._stop_present():
             raise BrowserUIError('Copilot is still generating; a second message cannot be sent.')
+        self.preparation_stage = 'message_snapshot'
         baseline_messages = await self._evaluate(_MESSAGE_SNAPSHOT)
         baseline = {item['key']: item['text'] for item in baseline_messages}
         old_users = {item['key'] for item in baseline_messages if item['role'] == 'user'}
         if any(request_id in item['text'] for item in baseline_messages if item['role'] == 'user'):
             self._delivery_uncertain = True
             raise SubmissionAmbiguousError('This request_id is already present in the chat; refusing duplicate delivery.')
+        self.preparation_stage = 'composer_lookup'
         editor = await self._editor()
+        self.preparation_stage = 'composer_fill'
         await editor.fill(text, timeout=5000)
+        self.preparation_stage = 'composer_verification'
         actual = await self._editor_text(editor)
         self.last_composer_comparison = composer_comparison(text, str(actual))
         if not self.last_composer_comparison['matches']:
             await self.diagnostics('composer_mismatch')
             raise BrowserUIError('The composer did not preserve the complete outbound message.')
+        self.preparation_stage = 'attachment_upload'
         await self.attach_files(attachments)
+        self.preparation_stage = 'send_control_check'
         button = await self._visible(edge.SEND_SELECTOR)
         if button is None or not await button.is_enabled():
             raise BrowserUIError('The exact Send control is unavailable or disabled.')
@@ -760,12 +779,19 @@ class BrowserAdapter:
             if self._delivery_uncertain:
                 raise SubmissionAmbiguousError('A previous delivery remains uncertain. Reconcile manually before a new send.')
             try:
+                self.last_submission = {'request_id': request_id, 'committed': False, 'send_attempted': False}
+                self.last_composer_comparison = None
+                self.last_capture_observation = None
+                self.preparation_stage = 'initial_checks'
+                if hasattr(self.page, 'bring_to_front'): await self.page.bring_to_front()
                 baseline, old_users, button = await self._prepare_submission(text, request_id, attachments)
             except SubmissionAmbiguousError:
                 raise
             except Exception as exc:
                 self.last_submission = {'request_id': request_id, 'committed': False, 'send_attempted': False}
-                message = str(exc) if isinstance(exc, BrowserUIError) else 'Preparation failed before attempting Send.'
+                message = str(exc) if isinstance(exc, BrowserUIError) else ('Preparation failed before Send at ' + self.preparation_stage + ' (' + type(exc).__name__ + ').')
+                try: await self.diagnostics('preparation_' + self.preparation_stage)
+                except Exception: pass
                 raise SubmissionNotSentError(message) from exc
             user_key = None
             try:
@@ -888,7 +914,8 @@ class BrowserAdapter:
         parsed = urlparse(self.page.url)
         report = {'reason': reason, 'url': f'{parsed.scheme}://{parsed.netloc}{parsed.path}',
                   'model': self.model_label, 'submission': self.last_submission,
-                  'composer_comparison': self.last_composer_comparison}
+                  'composer_comparison': self.last_composer_comparison,
+                  'preparation_stage': getattr(self, 'preparation_stage', None)}
         report['capture_observation'] = self.last_capture_observation
         try:
             report['ui'] = await asyncio.wait_for(self.page.evaluate(r"""() => ({

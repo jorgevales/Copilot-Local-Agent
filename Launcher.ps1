@@ -1,4 +1,4 @@
-param([ValidateSet('Setup','Start','Tests')][string]$Mode = 'Start')
+param([ValidateSet('Setup','Start','UI','Tests')][string]$Mode = 'Start')
 $ErrorActionPreference = 'Stop'
 $repoRoot = $PSScriptRoot
 $productionShare = ([System.IO.Path]::GetPathRoot($repoRoot) -ieq 'S:\')
@@ -227,7 +227,7 @@ function Get-OneDriveRoots {
 
 try {
     $projectVersion = $null
-    if ($Mode -eq 'Start') {
+    if ($Mode -in @('Start','UI')) {
         Write-Host 'Which version do you want to run? 1. Live repository  2. Copilot testing environment'
         $projectVersion = (Read-Host 'Choose 1 or 2').Trim()
         if ($projectVersion -notin @('1','2')) { throw 'Enter 1 or 2; no version was started.' }
@@ -462,8 +462,12 @@ print('Python runtime and Playwright verified.')
     try {
         if ($Mode -eq 'Setup') {
             & $python @pythonArgs (Join-Path $repoRoot 'app.py') --setup-only
-        } elseif ($Mode -eq 'Start') {
-            & $python @pythonArgs (Join-Path $repoRoot 'version_launcher.py') $projectVersion
+        } elseif ($Mode -in @('Start','UI')) {
+            if ($Mode -eq 'UI') {
+                & $python @pythonArgs (Join-Path $repoRoot 'version_launcher.py') $projectVersion --ui
+            } else {
+                & $python @pythonArgs (Join-Path $repoRoot 'version_launcher.py') $projectVersion
+            }
         } else {
             & $python @pythonArgs (Join-Path $repoRoot 'app.py') --setup-only
             if ($LASTEXITCODE -ne 0) { throw 'Personal storage setup must complete before running tests.' }
@@ -482,6 +486,8 @@ print('Python runtime and Playwright verified.')
             $env:TEMP = $env:COPILOT_TEST_ROOT
             $env:TMP = $env:COPILOT_TEST_ROOT
             & $python @pythonArgs -m unittest discover -s tests -v
+            if ($LASTEXITCODE -ne 0) { throw 'Core agent tests failed.' }
+            & $python @pythonArgs -m unittest discover -s agent_ui/tests -v
         }
         $result = $LASTEXITCODE
     } finally {

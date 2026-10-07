@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import json
 import platform
+import re
 import shutil
 import sys
 import uuid
@@ -106,14 +107,18 @@ SPECS = {
     "system.versions": (obj({}), "read_only", "Read the exact current Python executable/version, operating system version and selected package versions; no environment variables."),
     "system.disk": (obj(PATH), "read_only", "Read filesystem capacity for an allowed path."),
     "system.processes": (obj({}), "read_only", "Report this agent PID and the explicitly launched owned Edge PID when available; no wider process or command-line inventory."),
-    "browser.open": (obj({"url":S}), "user_approval", "After explicit approval, navigate the owned tool tab to an HTTPS website and authorize that hostname plus its subdomains for this session."),
+    "browser.open": (obj({"url":S,"allowed_domains":{"type":"array","items":S,"maxItems":30}},["url"]), "user_approval", "After explicit approval, navigate the isolated managed tab to an HTTPS website. JavaScript is enabled; explicitly requested dependency hosts are separately approved. No Copilot authentication is shared."),
     "browser.back": (obj({}), "user_approval", "Navigate backward only if the target history URL passes policy."),
     "browser.forward": (obj({}), "user_approval", "Navigate forward only if the target history URL passes policy."),
     "browser.info": (obj({}), "read_only", "Read tool-tab URL and title."),
-    "browser.read": (obj({}), "read_only", "Read bounded visible body text from the owned tool tab."),
-    "browser.structure": (obj({}), "read_only", "Read visible control roles, labels, text, stable attributes, enabled state and unique CSS selectors; exclude input values and URL queries."),
-    "browser.click": (obj({"selector":S}), "user_approval", "Click one visible selector on the owned tool tab. May change third-party state."),
-    "browser.fill": (obj({"selector":S,"text":{"type":"string","maxLength":10000}}), "user_approval", "Fill one ordinary text field; password fields are forbidden."),
+    "browser.read": (obj({"frame_selector":S},[]), "read_only", "Read bounded visible body text from the managed tab or one explicit iframe."),
+    "browser.structure": (obj({"frame_selector":S},[]), "read_only", "Read visible controls without input values from the managed tab or one explicit iframe."),
+    "browser.click": (obj({"selector":S,"frame_selector":S},["selector"]), "user_approval", "Click one unique selector in the managed tab or explicit iframe. May change third-party state."),
+    "browser.fill": (obj({"selector":S,"text":{"type":"string","maxLength":10000},"frame_selector":S},["selector","text"]), "user_approval", "Fill one unique ordinary text field; password fields are forbidden."),
+    "browser.wait": (obj({"selector":S,"state":{"type":"string"},"timeout_ms":{"type":"integer","minimum":1,"maximum":15000},"frame_selector":S},["selector"]), "read_only", "Wait for a selector to be visible, attached, hidden or detached; bounded to 15 seconds."),
+    "browser.select": (obj({"selector":S,"value":S,"frame_selector":S},["selector","value"]), "user_approval", "Select an option in one unique select control."),
+    "browser.press": (obj({"selector":S,"key":S,"frame_selector":S},["selector","key"]), "user_approval", "Press an allowlisted key on one unique non-password control; Enter may submit and is never retried automatically."),
+    "browser.frames": (obj({}), "read_only", "List iframe selectors and query-free source URLs."),
     "browser.scroll": (obj({"pixels":{"type":"integer","minimum":-10000,"maximum":10000}}), "user_approval", "Scroll the owned tool page."),
     "browser.screenshot": (obj({}), "user_approval", "Save a screenshot of the owned tool tab to a unique session file."),
     "browser.errors": (obj({}), "read_only", "Report captured tool-page console errors if the browser adapter supplies them."),
@@ -193,7 +198,15 @@ class ToolRegistry:
             for key in creates:
                 if resolved[key].exists(): raise PolicyError("Create destination already exists")
                 if not resolved[key].parent.is_dir(): raise PolicyError("Create destination parent must exist")
-        if name=="browser.open": URLPolicy.website_domain(args["url"])
+        if name=="browser.open":
+            URLPolicy.website_domain(args["url"])
+            for domain in args.get('allowed_domains', []):
+                if not isinstance(domain,str) or len(domain)>253 or not re.fullmatch(r'(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?',domain):
+                    raise ValueError('Dependency hosts must be explicit plain hostnames, not URLs or wildcards')
+        if name=='browser.wait' and args.get('state','visible') not in {'visible','attached','hidden','detached'}:
+            raise ValueError('Unsupported wait state')
+        if name=='browser.press' and args['key'] not in {'Enter','Tab','Escape','ArrowDown','ArrowUp','Space'}:
+            raise ValueError('Unsupported key')
         if name=="code_runner":
             CodeRunner(policy, context["session_dir"],
                        {"tool_timeout":config_value(config,"tool_timeout",10),
@@ -401,9 +414,14 @@ class ToolRegistry:
             await page.route("**/*",guard)
             browser._tool_policy_route=guard
             if name=="browser.open":
-                url=urls.resolve(args["url"]); await page.goto(url,wait_until="domcontentloaded",timeout=20000)
+                url=urls.resolve(args["url"])
+                for domain in args.get('allowed_domains',[]):
+                    urls.resolve('https://' + domain)
+                    if domain not in browser.tool_domains:
+                        browser.authorize_tool_domain(domain)
+                await page.goto(url,wait_until="domcontentloaded",timeout=20000)
                 urls.resolve(page.url)
-                return {"url":page.url,"title":await page.title()}
+                return {"url":page.url,"title":await page.title(),"javascript_enabled":True,"isolated_profile":True}
             if page.url!="about:blank": urls.resolve(page.url)
             if name in {"browser.back","browser.forward"}:
                 session=await page.context.new_cdp_session(page)
@@ -416,12 +434,36 @@ class ToolRegistry:
                 urls.resolve(page.url)
                 return {"url":page.url}
             if name=="browser.info": return {"url":page.url,"title":await page.title()}
-            if name=="browser.read": return {"text":(await page.locator("body").inner_text(timeout=5000))[:10000]}
+            scope=page
+            frame_selector=args.get('frame_selector')
+            if frame_selector:
+                iframe=page.locator(frame_selector)
+                if await iframe.count()!=1 or (await iframe.evaluate('(n)=>n.tagName')).upper()!='IFRAME':
+                    raise ValueError('frame_selector must identify exactly one iframe')
+                src=await iframe.get_attribute('src')
+                if src:
+                    from urllib.parse import urljoin
+                    urls.resolve(urljoin(page.url,src))
+                scope=page.frame_locator(frame_selector)
+            if name=="browser.read": return {"text":(await scope.locator("body").inner_text(timeout=10000))[:10000]}
             if name=="browser.structure":
-                return {"controls":await page.evaluate(STRUCTURE_SCRIPT)}
+                return {"controls":await scope.locator("body").evaluate(STRUCTURE_SCRIPT)}
+            if name=='browser.frames':
+                return {'frames':await page.evaluate("""() => [...document.querySelectorAll('iframe')].slice(0,30).map((n,i)=>{let src=null;try{const u=new URL(n.src,location.href);src=u.protocol+'//'+u.host+u.pathname;}catch(_){}let parts=[];for(let node=n;node&&node.nodeType===1;node=node.parentElement){const tag=node.tagName.toLowerCase();const siblings=node.parentElement?[...node.parentElement.children].filter(s=>s.tagName===node.tagName):[node];parts.unshift(tag+':nth-of-type('+(siblings.indexOf(node)+1)+')');}return {selector:parts.join(' > '),id:n.id||null,name:n.name||null,src};})""")}
+            if name=='browser.wait':
+                await scope.locator(args['selector']).wait_for(state=args.get('state','visible'),timeout=args.get('timeout_ms',10000))
+                return {'status':'observed','selector':args['selector'],'state':args.get('state','visible')}
+            if name in {'browser.select','browser.press'}:
+                locator=scope.locator(args['selector'])
+                if await locator.count()!=1: raise ValueError('Selector must identify exactly one control')
+                if (await locator.get_attribute('type') or '').lower()=='password': raise PolicyError('Password controls are unavailable')
+                if name=='browser.select': await locator.select_option(value=args['value'],timeout=10000)
+                else: await locator.press(args['key'],timeout=10000)
+                if page.url!='about:blank': urls.resolve(page.url)
+                return {'status':'performed','url':page.url}
             if name in {"browser.click","browser.fill"}:
-                locator=page.locator(args["selector"])
-                if await locator.count()!=1: raise PolicyError("Selector must identify exactly one element")
+                locator=scope.locator(args["selector"])
+                if await locator.count()!=1: raise ValueError("Selector must identify exactly one element")
                 if name=="browser.fill":
                     if (await locator.get_attribute("type") or "").lower()=="password": raise PolicyError("Password input is forbidden")
                     await locator.fill(args["text"],timeout=5000)

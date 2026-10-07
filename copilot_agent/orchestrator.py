@@ -21,12 +21,13 @@ from .storage import discover_onedrive_accounts
 
 
 class Orchestrator:
-    def __init__(self, config, browser, registry, state, approval_decider=None, display=print):
+    def __init__(self, config, browser, registry, state, approval_decider=None, display=print, event_sink=None):
         self.config, self.browser, self.registry, self.state = config, browser, registry, state
         self.findings = Findings(state.directory)
         self.prompts = PromptBuilder(config, registry, state, self.findings)
         self.policy = PathPolicy(config.allowed_roots, excluded_roots=[config.profile_dir])
         self.display = display
+        self.event_sink = event_sink
         self.feedback = Feedback(display, state)
         self.approvals = ApprovalManager(state, approval_decider, self.feedback)
         self.process_registry = ManagedProcessRegistry(state.directory)
@@ -77,6 +78,13 @@ class Orchestrator:
         self.feedback.record('Copilot', title, request_id=request_id, validated=True,
                              task=response.get('task_interpretation'), action=self._action_text(response),
                              completion_status=response.get('completion_status'))
+        if self.event_sink:
+            if response.get('response_type') == 'tool_request':
+                self.event_sink('plan', {'title': response.get('task_interpretation') or 'Action plan',
+                                         'steps': response.get('action_plan', [])})
+                self.event_sink('copilot', {'text': response.get('decision_summary') or 'Proposed an ordered action plan.'})
+            else:
+                self.event_sink('copilot', {'text': reply})
 
     def _emit_tool_result(self, name, result):
         payload = result.get('result', {}) if isinstance(result, dict) else {}
@@ -91,6 +99,13 @@ class Orchestrator:
                               if windows else None)),
             ('Error', result.get('error', {}).get('message') if isinstance(result.get('error'), dict) else None),
         ])
+        if self.event_sink:
+            status = ('completed' if result.get('ok') else 'uncertain'
+                      if payload.get('side_effects_uncertain') else 'failed')
+            summary = (result.get('error', {}).get('message') if isinstance(result.get('error'), dict)
+                       else payload.get('status', 'Observed result'))
+            self.event_sink('tool', {'name': name, 'status': status, 'summary': summary,
+                                     'result': redact(result)})
 
     def _attachment_record(self, path: Path) -> dict:
         allowed = SUPPORTED_EXTENSIONS
@@ -284,7 +299,11 @@ class Orchestrator:
                 raise PolicyError('This method already failed; propose a materially different safe recovery approach')
             if catalog[call['name']]['approval_policy'] != 'read_only' and any(c['status'] == 'uncertain' and c.get('state_changing', True) for c in self.state.data['calls'].values()):
                 raise PolicyError('An earlier state-changing effect is uncertain; only inspection is allowed until user reconciliation')
-            if hasattr(self.registry, 'validate_call'):
+            # Validate argument shape before execution; page/filesystem state may
+            # depend on an earlier successful step in this same ordered batch.
+            if hasattr(self.registry, 'validate_input'):
+                self.registry.validate_input(call['name'], call['arguments'])
+            if call['name'] == 'browser.open' and hasattr(self.registry, 'validate_call'):
                 self.registry.validate_call(call['name'], call['arguments'], self.base_context)
             if call['name'] == 'code_runner':
                 self._code_runner().validate(call['arguments'])
@@ -327,6 +346,7 @@ class Orchestrator:
         delivery = delivery_requirements(user_input)
         delivery_attempts = 0
         delivery_reports = []
+        turn_call_ids = set()
         delivery_denied = False
         delivery_link_rejected = False
         self.base_context['created_baseline'] = (CreatedSync(self.config.created_dir).baseline()
@@ -362,6 +382,20 @@ class Orchestrator:
                             self.feedback.emit('Orchestrator', 'Verified extraction: ' + report['destination'] + ' (' + str(len(report.get('verified_files', []))) + ' files). Evidence: ' + report.get('report_path', ''))
                 return response
             if response['response_type'] in {'clarification', 'error'}:
+                failed_calls = [item for key, item in self.state.data['calls'].items()
+                                if key in turn_call_ids and not item.get('result', {}).get('ok')]
+                if (response['response_type'] == 'error' and failed_calls
+                        and not delivery_denied and round_number < self.config.max_tool_rounds
+                        and not any(item.get('result', {}).get('error', {}).get('code') == 'approval_denied'
+                                    for item in failed_calls)):
+                    kind, content = 'recovery', {
+                        'goal': user_input,
+                        'instruction': ('Continue from actual retained outcomes. Do not replay uncertain effects. '
+                                        'After uncertain state changes, use read-only inspection until reconciliation. '
+                                        'Respect denial, authentication, safety and remaining budgets.'),
+                        'remaining_tool_rounds': self.config.max_tool_rounds - round_number,
+                        'failed_calls': redact(failed_calls[-3:])}
+                    continue
                 if (response['response_type'] == 'error' and delivery.get('mode') != 'none' and delivery_link_rejected and
                         not delivery_denied and delivery_attempts < self.config.max_delivery_retries and round_number < self.config.max_tool_rounds):
                     delivery_attempts += 1
@@ -387,6 +421,9 @@ class Orchestrator:
             if len(response['tool_requests']) > 1 and all(call['name'] == 'code_runner' for call in response['tool_requests']):
                 prepared_plan = {call['call_id']: self._code_runner().prepare(call['arguments'])
                                  for call in response['tool_requests']}
+            if len(response['tool_requests']) > 1 and all(call['name'].startswith('browser.') for call in response['tool_requests']):
+                prepared_plan = {call['call_id']: self._browser_preparation(call)
+                                 for call in response['tool_requests']}
             self._emit_validated_response(response, 'PROPOSED ACTION')
             results = []
             for call in response['tool_requests']:
@@ -402,9 +439,10 @@ class Orchestrator:
                 if call['name'] == 'code_runner':
                     needs_approval = True
                     prepared = self._code_runner().prepare(call['arguments'])
-                if call['name'] == 'browser.open':
-                    prepared = {'website_domain': URLPolicy.website_domain(call['arguments']['url']),
-                                'includes_subdomains': True, 'session_scoped': True}
+                if call['name'].startswith('browser.'):
+                    if call['name'] == 'browser.open':
+                        self.registry.validate_call(call['name'], call['arguments'], context)
+                    prepared = self._browser_preparation(call)
                 if call['name'] == 'ocr.image':
                     artifact = self._attachment_record(self.policy.resolve(call['arguments']['path'], True))
                     prepared = {'approved_image_attachment': artifact, 'destination': self.config.copilot_url}
@@ -446,12 +484,14 @@ class Orchestrator:
                     context['approved'] = True
                     context['approval_hash'] = approval_hash
                     if call['name'] == 'browser.open':
-                        domain = URLPolicy.website_domain(call['arguments']['url'])
-                        self.state.approve_domain(domain)
-                        context['approved_domains'] = self.state.data['approved_domains']
+                        domains = [URLPolicy.website_domain(call['arguments']['url']),
+                                   *call['arguments'].get('allowed_domains', [])]
                         authorize = getattr(self.browser, 'authorize_tool_domain', None)
-                        if callable(authorize):
-                            authorize(domain)
+                        for domain in domains:
+                            self.state.approve_domain(domain)
+                            if callable(authorize):
+                                authorize(domain)
+                        context['approved_domains'] = self.state.data['approved_domains']
                     if prepared:
                         if 'proposal_hash' in prepared:
                             context['approved_hash'] = prepared['proposal_hash']
@@ -462,6 +502,9 @@ class Orchestrator:
                     ('Authority', 'exact explicit approval' if needs_approval else 'read-only policy'),
                     ('Language', call.get('arguments', {}).get('language')),
                     ('Expected effects', call.get('arguments', {}).get('expected_effects'))])
+                if self.event_sink:
+                    self.event_sink('tool', {'name': call['name'], 'status': 'running',
+                                             'summary': 'Executing under the recorded approval and policy.'})
                 try:
                     result = await asyncio.wait_for(self.registry.execute(call['name'], call['arguments'], context), timeout=float(definition.get('timeout', definition.get('limits', {}).get('timeout_seconds', 30))) + 1)
                 except asyncio.TimeoutError:
@@ -477,13 +520,28 @@ class Orchestrator:
                     if call['name'] == 'copilot.download' and result.get('result', {}).get('status') == 'not_started':
                         delivery_link_rejected = True
                     break
-            kind, content = 'tool_results', {'results': redact(results), 'instruction': (
+            completed_ids = {item['call_id'] for item in results}
+            turn_call_ids.update(completed_ids)
+            not_executed = [{'call_id': call['call_id'], 'name': call['name'],
+                             'reason': 'Earlier prerequisite failed or was denied; not executed.'}
+                            for call in response['tool_requests'] if call['call_id'] not in completed_ids]
+            kind, content = 'tool_results', {'results': redact(results), 'not_executed': not_executed, 'instruction': (
                 'Use these actual outcomes. Never infer unexecuted steps succeeded. A denial is authoritative. '
                 'When a method fails with verified certain effects, continue within the bounded tool rounds using '
                 'a materially different safe approach available through registered tools or a newly proposed exact '
                 'Code Runner script. Every materially changed local execution requires its normal fresh approval. '
                 'Stop only at success, exhausted bounded rounds, denial, or a genuine safety/permission boundary.')}
         raise RuntimeError('Conversation turn exhausted')
+
+    @staticmethod
+    def _browser_preparation(call):
+        args = call['arguments']
+        prepared = {'isolated_profile': True, 'javascript_enabled': True,
+                    'managed_tab_only': True, 'dependency_domains': list(args.get('allowed_domains', [])),
+                    'limitations': 'Uses a separate unauthenticated profile; no credential sharing, popups or unrestricted hosts.'}
+        if call['name'] == 'browser.open':
+            prepared.update(website_domain=URLPolicy.website_domain(args['url']), includes_subdomains=True)
+        return prepared
 
     def _delivery_result(self, name, outcome):
         """Recover our hash-bound full evidence when a package exceeds chat limits."""

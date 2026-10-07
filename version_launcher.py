@@ -134,8 +134,15 @@ def choose_source(live, ask=input, choice=None):
 def main():
     live = Path(__file__).resolve().parent
     try:
-        source = choose_source(live, choice=sys.argv[1] if len(sys.argv) > 1 else None)
+        arguments = sys.argv[1:]
+        use_ui = '--ui' in arguments
+        choices = [value for value in arguments if value != '--ui']
+        if len(choices) > 1:
+            raise ValueError('Provide one live/testing selection.')
+        source = choose_source(live, choice=choices[0] if choices else None)
         print(f'Running project version: {source}')
+        if use_ui and not (source / 'agent_ui' / 'runtime.py').is_file():
+            raise ValueError('This saved testing version predates the UI launcher. Recreate it by dropping the Copilot files again, or choose the live project.')
         flags = ['-B']
         if sys.flags.ignore_environment:
             flags.append('-E')
@@ -143,7 +150,9 @@ def main():
             flags.append('-s')
         environment = os.environ.copy()
         environment['COPILOT_AGENT_EXECUTION_MODE'] = 'testing' if source.is_relative_to(live / 'Copilot testing environment' / 'versions') else 'live'
-        return subprocess.call([sys.executable, *flags, str(source / 'app.py')], cwd=source, env=environment)
+        command = ([sys.executable, *flags, '-m', 'agent_ui.runtime'] if use_ui else
+                   [sys.executable, *flags, str(source / 'app.py')])
+        return subprocess.call(command, cwd=source, env=environment)
     except (ValueError, OSError, SyntaxError) as exc:
         print(f'Version selection stopped: {exc}')
         return 1

@@ -36,10 +36,16 @@ class ApprovalManager:
             ('Expected effects', arguments.get('expected_effects')),
             ('Website scope', ((preview.get('prepared_code') or {}).get('website_domain') + ' and its subdomains')
              if (preview.get('prepared_code') or {}).get('website_domain') else None),
+            ('Browser access', 'Uses an isolated unauthenticated profile and managed tab; JavaScript enabled'
+             if (preview.get('prepared_code') or {}).get('isolated_profile') else None),
+            ('Additional hosts', (preview.get('prepared_code') or {}).get('dependency_domains')),
             ('Risk', arguments.get('risk_summary') or preview['complete_pending_plan'].get('risk_summary')),
         ])
         self.feedback.record('Approval', 'Full immutable approval record retained.',
                              plan_hash=preview['plan_hash'], path=str(path))
+        if current and all(str(item.get('name', '')).startswith('browser.') for item in current):
+            self.feedback.emit('Approval', 'EXACT ORDERED BROWSER PLAN\n' +
+                               json.dumps(current, ensure_ascii=False, indent=2), preserve_markup=True)
         seen = set()
         for index, item in enumerate(prepared, 1):
             digest = item.get('script_sha256')
@@ -57,11 +63,13 @@ class ApprovalManager:
         if prepared_plan is not None:
             calls = plan.get('tool_requests', [])
             ids = [item.get('call_id') for item in calls]
-            if (not calls or any(item.get('name') != 'code_runner' for item in calls)
+            supported_batch = (all(item.get('name') == 'code_runner' for item in calls)
+                               or all(str(item.get('name', '')).startswith('browser.') for item in calls))
+            if (not calls or not supported_batch
                     or not isinstance(prepared_plan, dict) or any(not isinstance(key, str) or not key for key in ids)
                     or len(ids) != len(set(ids)) or set(prepared_plan) != set(ids)
                     or any(not isinstance(item, dict) for item in prepared_plan.values())):
-                raise ValueError('A complete prepared plan is supported only for all-code-runner calls with exact unique call identities.')
+                raise ValueError('A complete prepared plan requires all-code-runner or all-browser calls with exact unique call identities.')
             current = next((item for item in calls if item['call_id'] == call.get('call_id')), None)
             if (current is None or canonical_hash(current) != canonical_hash(call)
                     or prepared is None or canonical_hash(prepared_plan[call['call_id']]) != canonical_hash(prepared)):

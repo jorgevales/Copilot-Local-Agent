@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 runtime/
 workspace/
+Copilot handoff/archive/
 config.local.json
 .history/
 python-launcher.txt

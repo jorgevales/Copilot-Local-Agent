@@ -26,6 +26,9 @@ from . import reused_browser as edge
 from .setup_resources import choose_account, choose_edge
 
 _TERMINAL = Feedback()
+_UI_ASK = None
+_UI_APPROVAL_DECIDER = None
+_UI_EVENT_SINK = None
 
 def system(message):
     _TERMINAL.emit('System', message)
@@ -36,6 +39,8 @@ def error(message):
 
 
 async def ask(prompt: str) -> str:
+    if _UI_ASK is not None:
+        return await _UI_ASK(_TERMINAL.prompt('User', prompt))
     return await asyncio.to_thread(input, _TERMINAL.prompt('User', prompt))
 
 
@@ -180,8 +185,13 @@ async def start_new_session(config, previous, model_label, registry=None):
         await browser.discover_models()
         await browser.select_model(model_label)
         state.event('model_selected', label=model_label, visible=True)
-        engine = Orchestrator(fresh_config, browser, registry or ToolRegistry(), state)
+        engine = Orchestrator(fresh_config, browser, registry or ToolRegistry(), state,
+                              approval_decider=_UI_APPROVAL_DECIDER, display=_TERMINAL.sink,
+                              event_sink=_UI_EVENT_SINK)
         await engine.initialize()
+        if _UI_EVENT_SINK is not None:
+            _UI_EVENT_SINK('session', {'title': 'Copilot session ' + state.session_id[:8]})
+            _UI_EVENT_SINK('model', {'name': model_label, 'verified': True})
         return engine
     except Exception as exc:
         state.event('new_session_setup_failed', error=str(exc))
@@ -303,7 +313,12 @@ async def run(args):
         settings['config']['model'] = chosen['label']
         save_user_settings(config.storage_dir, settings)
         state.event('model_selected', label=chosen['label'], visible=True)
-        orchestrator = Orchestrator(config, browser, ToolRegistry(), state)
+        orchestrator = Orchestrator(config, browser, ToolRegistry(), state,
+                                    approval_decider=_UI_APPROVAL_DECIDER, display=_TERMINAL.sink,
+                                    event_sink=_UI_EVENT_SINK)
+        if _UI_EVENT_SINK is not None:
+            _UI_EVENT_SINK('model', {'name': chosen['label'], 'verified': True})
+            _UI_EVENT_SINK('session', {'title': 'Copilot session ' + state.session_id[:8]})
         await orchestrator.initialize()
         system('Type your request and press Enter. For files, type :attach to open Choose files, then type your request.')
         system('Commands: :new [first message], :attach, :files, :remove <number>, :clear, :status, :exit. Advanced: :attach <path>, :resolve <call_id> completed|not_executed')

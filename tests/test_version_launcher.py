@@ -4,6 +4,7 @@ import tempfile
 import unittest
 import subprocess
 import sys
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('version_launcher', Path(__file__).resolve().parents[1] / 'version_launcher.py')
 launcher = importlib.util.module_from_spec(spec)
@@ -90,3 +91,16 @@ class VersionTests(unittest.TestCase):
                                 cwd=version, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), '77')
+
+    def test_ui_mode_runs_the_same_selected_source_as_a_module(self):
+        live, _ = self.fixture()
+        (live / 'agent_ui').mkdir()
+        (live / 'agent_ui' / 'runtime.py').write_text('')
+        calls=[]
+        with patch.object(launcher, 'choose_source', return_value=live), \
+             patch.object(launcher.subprocess, 'call', side_effect=lambda args, **kwargs: calls.append((args, kwargs)) or 0), \
+             patch.object(sys, 'argv', ['version_launcher.py', '2', '--ui']):
+            self.assertEqual(0, launcher.main())
+        args, kwargs = calls[0]
+        self.assertEqual(['-B', '-m', 'agent_ui.runtime'], args[1:])
+        self.assertEqual(live, kwargs['cwd'])

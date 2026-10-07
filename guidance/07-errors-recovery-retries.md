@@ -18,6 +18,8 @@ The orchestrator sends compact validation errors and the expected contract. Reis
 
 Every retry needs a reason, an applicable finite budget and a logged outcome. Respect the orchestrator's maximum attempts and task-step budget. When verified evidence proves a failed method's effects are certain, continue with a materially different safe approach instead of replaying it. Changed local execution needs a fresh exact approval. When exhausted, explain the blocked operation and the next human decision. Do not circumvent a limit by renaming a call or starting an identical plan.
 
+When a tool call fails with certain effects, use the bounded recovery turn to continue from its actual result and remaining tool-round budget. After a batch stops, use its `not_executed` list as authoritative; never infer those calls ran. Preparation timeouts before the Copilot Send click record the failing browser preparation stage and are safe to retry only after a fresh user request. Once Send is attempted, delivery is uncertain and must not be retried automatically.
+
 ## Ambiguous side effects
 
 If submission may have succeeded, reconcile the chat before another send. If a write/click/script outcome is uncertain, inspect safe evidence or request user review; never blindly repeat. Existing call IDs and immutable request hashes identify prior operations. Denial is a user decision, not a transient error.
