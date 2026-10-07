@@ -375,6 +375,13 @@ class BrowserAdapter:
                 await asyncio.to_thread(edge.validate_launched_endpoint, self.config.debug_port, profile,
                                         self._launched_process)
             self.context = self.browser.contexts[0]
+            # Grant this before opening Copilot so Edge never interrupts an
+            # exchange with its clipboard permission confirmation dialog.
+            await asyncio.wait_for(
+                self.context.grant_permissions(
+                    ['clipboard-read', 'clipboard-write'],
+                    origin='https://m365.cloud.microsoft'),
+                10)
             self.page = await asyncio.wait_for(self.context.new_page(), 10)
             # Website automation needs JavaScript, but stays in a separate
             # unauthenticated context with service workers and network scope blocked.
