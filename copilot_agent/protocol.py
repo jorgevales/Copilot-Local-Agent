@@ -112,7 +112,8 @@ def parse_response(raw: str, session_id: str, request_id: str, registry=None, se
         raise ProtocolError(code, errors[:30])
     if obj['session_id'] != session_id or obj['request_id'] != request_id:
         raise ProtocolError('stale_response', ['Response identity does not match current request'])
-    if obj['response_id'] in seen_response_ids:
+    from .web_privacy import private_id
+    if obj['response_id'] in seen_response_ids or private_id(obj['response_id']) in seen_response_ids:
         raise ProtocolError('stale_response', ['Response identifier has already been processed'])
     errors = []
     tools = obj['tool_requests']

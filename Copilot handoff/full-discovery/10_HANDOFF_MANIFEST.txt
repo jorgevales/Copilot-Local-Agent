@@ -1,10 +1,10 @@
 Local Graphify refresh record
-Generated: 2026-10-07T17:40:44.786868+01:00
+Generated: 2026-10-07T18:35:23.082012+01:00
 Scope: Scripts and projects/Copilot Local Agent
 Mode: full-discovery
 Graphify: graphifyy 0.9.79, code-only local AST extraction
 Include tests: True
-Exclude patterns: Copilot handoff/**
+Exclude patterns:
 Active files before this manifest: 17
 
 00_READ_FIRST.md | SHA256=bad9c97a74e14349829be852bd25cd595a81b3dd5002c8365e953c1a2e69b6ff
@@ -15,12 +15,12 @@ Active files before this manifest: 17
 05_TESTING_AND_OPERATIONS.md | SHA256=150ada57a068fdf08f3d545e585234738ace529e4a188bf73401015626cb63e3
 06_RISKS_AND_CHANGE_IMPACT.md | SHA256=a4c5724d0272ae9d879a7724fce4d6a071edf6966057b3db7cfb3a1ccbdd40c9
 07_SOURCE_MAP.md | SHA256=b93ecf7a8ff410d12ea1edd4a47cc273509d0728bd47fe2f756302241622b374
-08_GRAPHIFY_FINDINGS.md | SHA256=a93faa6a60352221532d8ea995c7e71a9011a520cc85d621b8118165287181ed
+08_GRAPHIFY_FINDINGS.md | SHA256=8a728839f6f2dfbaca9c7934e2c6a21ab686b4b766bf02a4880ce2b6d1165964
 09_EXTERNAL_FILES_TO_ATTACH.txt | SHA256=445604bef4e84ec8f2f8034ead8d3b3caf47e7a1f0d5d730d9ac4a4b9a539e94
 11_PROMPT_FOR_COPILOT.md | SHA256=0e021cb6ff7bcc50e593c98444c44dbf93efd955909698de2edf512b29351df2
-graphify/.graphify_analysis.json | SHA256=6b463126a8614784cc1bd997f8261e115d3c4c2cd0a05d5bf762f1c4591013e6
+graphify/.graphify_analysis.json | SHA256=7a9d7f0d8b707c5587864cfbb22b54f84e3ee2c04e9dd03674f7f22a18aaab4e
 graphify/.graphify_root | SHA256=c0a317f60910eed08bbfc7b3ac6e6de1b2029bf4922d0b0d7d3759313a24b16c
-graphify/graph.json | SHA256=4e5cef22b61a8c876aeb5e19fdfbdac4e8fdadb5076574e4e4b1b34b289f5356
-graphify/GRAPH_REPORT.md | SHA256=a93faa6a60352221532d8ea995c7e71a9011a520cc85d621b8118165287181ed
-graphify/manifest.json | SHA256=3b12decba3c74aa87c5c4e5fe07d9e71b582a93a5da01c48e0fb5fe9e9314aa3
+graphify/graph.json | SHA256=893eeec71001957fe8f6cf00610b53ede9fcf27402ddc128f25f0a7cbe430803
+graphify/GRAPH_REPORT.md | SHA256=8a728839f6f2dfbaca9c7934e2c6a21ab686b4b766bf02a4880ce2b6d1165964
+graphify/manifest.json | SHA256=483e2bb7deb3482c7566b8294bf1255313098955132f88baed4c3fb2b5e43ef8
 README.md | SHA256=cc4197d4254802ef934caf10c16f32bf4a011e805ff320103491c3fc3b9bc0cf

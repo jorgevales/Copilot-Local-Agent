@@ -17,6 +17,9 @@ from .sync import CreatedSync
 from .logging_utils import redact
 from .archives import ArchiveService, inspect_zip, ArchiveError
 from .downloads import DownloadError
+from .web_navigation import NAVIGATION_SPECS, validate_navigation, execute_navigation, clear_navigation_state
+from .web_documents import DOCUMENT_SPECS, DOCUMENT_EXAMPLES, validate_documents, execute_documents
+from .site_knowledge import KNOWLEDGE_SPECS, KNOWLEDGE_EXAMPLES, validate_knowledge, execute_knowledge
 
 
 def obj(properties, required=None):
@@ -94,6 +97,20 @@ CODE_RUNNER_PROPERTIES = {
         "title":{"type":"string", "maxLength":200}, "image_path":S,
         "display_index":{"type":"integer", "minimum":1, "maximum":32}})},
 }
+
+def schema_example(schema):
+    if 'const' in schema: return schema['const']
+    if 'enum' in schema: return schema['enum'][0]
+    kind = schema.get('type')
+    if kind == 'object':
+        return {key: schema_example(schema['properties'][key]) for key in schema.get('required', [])}
+    if kind == 'array': return [schema_example(schema['items']) for _ in range(schema.get('minItems', 0))]
+    if kind == 'integer': return schema.get('minimum', 0)
+    if kind == 'boolean': return False
+    if kind == 'string':
+        if '64' in schema.get('pattern', ''): return '0' * 64
+        return 'example.txt'
+    return None
 SPECS = {
     "files.list": (obj(PATH), "read_only", "List up to 200 immediate children inside allowed roots."),
     "files.exists": (obj(PATH), "read_only", "Check a path inside allowed roots."),
@@ -133,19 +150,19 @@ SPECS = {
 }
 
 
+SPECS.update(NAVIGATION_SPECS)
+SPECS.update(DOCUMENT_SPECS)
+SPECS.update(KNOWLEDGE_SPECS)
+GUIDANCE_TOPICS = ['index', 'reconnaissance', 'plans', 'customers', 'documents', 'tabs', 'memory', 'recovery', 'privacy', 'testing']
+SPECS['guidance.load'] = (obj({'topics': {'type': 'array', 'minItems': 1, 'maxItems': 3,
+                                         'items': {'type': 'string', 'enum': GUIDANCE_TOPICS}}}),
+                          'read_only', 'Load up to three relevant website workflow guides; use index to choose topics.')
+
+
 def validate(value, schema):
-    kind = schema.get("type")
-    expected = {"object":dict,"string":str,"integer":int,"array":list,"boolean":bool}.get(kind)
-    if expected and (not isinstance(value,expected) or kind == "integer" and isinstance(value,bool)):
-        raise ValueError(f"Expected {kind}")
-    if kind == "object":
-        if set(value)-set(schema["properties"]) or set(schema["required"])-set(value): raise ValueError("Missing or unsupported arguments")
-        for key,item in value.items(): validate(item,schema["properties"][key])
-    elif kind in {"string","array"}:
-        if len(value)>schema.get("maxLength",schema.get("maxItems",100000)): raise ValueError("Argument length exceeds limit")
-        if kind == "array":
-            for item in value: validate(item,schema["items"])
-    elif kind == "integer" and not schema.get("minimum",0)<=value<=schema.get("maximum",10000): raise ValueError("Number outside limits")
+    from .protocol import validate_schema
+    errors = validate_schema(value, schema)
+    if errors: raise ValueError('; '.join(errors[:3]))
 
 
 def configured_path_policy(config, session_dir):
@@ -160,12 +177,21 @@ class ToolRegistry:
     def definition(self, name):
         if name not in SPECS: raise ValueError("Unknown tool")
         schema,approval,description = SPECS[name]
-        examples = [{"arguments": {k: (0 if v.get("type")=="integer" else [] if v.get("type")=="array" else "example.txt") for k,v in schema["properties"].items() if k in schema["required"]}}]
+        examples = [{"arguments": schema_example(schema)}]
         if name == "code_runner":
             examples = [{"arguments":{"script":"print('reviewed computation')","purpose":"Compute a bounded result","language":"python_subset","working_directory":".","read_paths":[],"create_paths":[],"expected_outputs":[],"commands":[],"network_destinations":[],"permissions":[],"risk_summary":"No external side effects","recovery_notes":"Review failure output before retry"}}]
         if name == "browser.open": examples = [{"arguments":{"url":"https://example.com/"}}]
         if name == "copilot.download": examples = [{"arguments":{"expected_name":"package.zip"}}]
         if name == "archives.extract": examples = [{"arguments":{"path":"package.zip","destination":"delivered-project","expected_sha256":"0"*64,"expected_files":["README.md"]}}]
+        if name in KNOWLEDGE_EXAMPLES: examples = [{'arguments': KNOWLEDGE_EXAMPLES[name]}]
+        if name in DOCUMENT_EXAMPLES: examples = [{'arguments': DOCUMENT_EXAMPLES[name]}]
+        if name == 'browser.plan':
+            examples = [{'arguments': {'task_id': 'navigation', 'steps': [{'id': 'ready', 'op': 'wait', 'locator': {'role': 'heading', 'name': 'Documents'}}],
+                                      'success': [{'kind': 'visible', 'locator': {'role': 'heading', 'name': 'Documents'}}]}}]
+        if name == 'browser.customer_summary':
+            examples = [{'arguments': {'task_id': 'lookup', 'customer_key': 'approved-customer',
+                                      'identity': [{'locator': {'testid': 'customer-id'}, 'value': 'user-provided-id'}],
+                                      'fields': [{'name': 'status', 'locator': {'testid': 'status'}}]}}]
         errors=["invalid_arguments","policy_denied","unavailable","operation_failed","timeout"]
         result_schema={"type":"object"}
         if name=="browser.structure":
@@ -174,8 +200,9 @@ class ToolRegistry:
                 "attributes":{"type":"object","properties":{key:{"type":"string","maxLength":250} for key in ("id","name","data-testid","data-test-id")},"additionalProperties":False},
                 "visible":{"type":"boolean","const":True},"enabled":{"type":"boolean"},"selector":{"type":"string"},"href":{"type":["string","null"]}},
                 "required":["tag","type","role","label","text","attributes","visible","enabled","selector","href"],"additionalProperties":False}
-            result_schema={"anyOf":[{"type":"object","properties":{"controls":{"type":"array","items":control_schema,"maxItems":100}},"required":["controls"],"additionalProperties":False},{"type":"object","properties":{"truncated":{"const":True},"retained_result":{"type":"string"}},"required":["truncated","retained_result"]}]}
+            result_schema={"anyOf":[{"type":"object","properties":{"controls":{"type":"array","items":control_schema,"maxItems":100}},"required":["controls"],"additionalProperties":False},{"type":"object","properties":{"truncated":{"const":True},"retained_result":{"type":"string"}},"required":["truncated","retained_result"]},{"type":"object","properties":{"truncated":{"const":True},"followup":{"type":"string"}},"required":["truncated","followup"]}]}
         timeout = 300 if name in {"created.wait", "copilot.download"} else 30
+        if name in {'browser.plan', 'browser.download_batch'}: timeout = 125
         return {"name":name,"version":"1.0","description":description,"intended_use":description,"preconditions":["Current validated tool call", "Configured filesystem/domain boundaries", "Explicit user grant for side effects" if approval!="read_only" else "Read-only operation"],"risk_level":"low" if approval=="read_only" else "moderate","timeout":timeout,"output_size_limit":12000,"error_codes":errors,"input_schema":schema,
                 "output_schema":{"type":"object","properties":{"ok":{"type":"boolean"},"tool":{"type":"string"},"result":result_schema,"error":{"type":"object","properties":{"code":{"type":"string"},"message":{"type":"string"}},"required":["code","message"],"additionalProperties":False}},"required":["ok","tool"],"additionalProperties":False},"approval_policy":approval,
                 "side_effects":[] if approval=="read_only" else ["filesystem creation or append" if name.startswith(("files.", "archives.")) or name in {"code_runner", "copilot.download"} else "browser interaction or screenshot"],
@@ -191,6 +218,14 @@ class ToolRegistry:
         self.validate_input(name,args)
         config=context.get("config",{})
         policy=context.get("policy") or configured_path_policy(config,context["session_dir"])
+        if name in NAVIGATION_SPECS:
+            validate_navigation(name, args, context)
+        if name in DOCUMENT_SPECS:
+            validate_documents(name, args, context, policy)
+        if name in KNOWLEDGE_SPECS:
+            validate_knowledge(name, args, context, policy)
+        if name == 'files.transfer_to_copilot':
+            return {'valid': True}
         if name.startswith("files.") or name in {"system.disk","ocr.image"}:
             keys=("source","destination") if name=="files.copy" else ("path",)
             resolved={key:policy.resolve(args[key]) for key in keys}
@@ -256,6 +291,28 @@ class ToolRegistry:
         limit=min(12000,max(1000,config_value(context.get("config",{}),"max_output_chars",12000)))
         encoded=json.dumps(value,ensure_ascii=False,default=str)
         if len(encoded)<=limit: return value
+        from .web_privacy import PRIVATE_TOOLS
+        if value.get('tool') in PRIVATE_TOOLS or context.get('website_private') and value.get('tool') not in {'archives.extract', 'copilot.download'}:
+            # Large sensitive page observations stay ephemeral rather than on disk.
+            full = value.get('result', {})
+            compact = {'truncated': True, 'followup': 'Use scoped inspection or catalogue references for omitted data; content was not persisted.'}
+            for key, item in full.items():
+                if isinstance(item, (str, int, float, bool)) or item is None:
+                    compact[key] = item[:1000] if isinstance(item, str) else item
+                elif isinstance(item, list):
+                    compact[key] = item[:3]
+                    if len(item) > 3: compact[key + '_omitted_count'] = len(item) - 3
+                elif key in {'summary', 'metrics', 'error', 'last_verified_state', 'site_map', 'index'}:
+                    compact[key] = item
+            bounded = {'ok': value.get('ok', False), 'tool': value.get('tool', ''), 'result': compact}
+            if value.get('error'): bounded['error'] = value['error']
+            while len(json.dumps(bounded, ensure_ascii=False)) > limit:
+                arrays = [key for key, item in compact.items() if isinstance(item, list) and item]
+                if not arrays: break
+                largest = max(arrays, key=lambda key: len(json.dumps(compact[key])))
+                compact[largest].pop()
+                compact[largest + '_omitted_count'] = compact.get(largest + '_omitted_count', 0) + 1
+            return bounded
         folder=Path(context["session_dir"])/"tool_results"
         folder.mkdir(parents=True,exist_ok=True)
         path=folder/(uuid.uuid4().hex+".json")
@@ -285,7 +342,15 @@ class ToolRegistry:
             timeout=min(30,config_value(config,"tool_timeout",30))
             if name=="created.wait": timeout=min(300,config_value(config,"sync_timeout",120))+1
             if name=="copilot.download": timeout=min(295,config_value(config,"download_timeout",90))+1
+            if name in {'browser.plan', 'browser.download_batch'}:
+                timeout = min(125, args.get('timeout_seconds', 60) + 5)
             result=await asyncio.wait_for(self._execute(name,args,context,policy),timeout=timeout)
+            if name in NAVIGATION_SPECS or name in DOCUMENT_SPECS:
+                if result.get('status') in {'failed', 'partial', 'blocked', 'interrupted', 'cancelled', 'needs_user_input', 'uncertain'}:
+                    return self._limit({'ok': False, 'tool': name, 'result': result,
+                                        'error': {'code': result.get('error', {}).get('code', 'operation_failed')
+                                                  if isinstance(result.get('error'), dict) else 'operation_failed',
+                                                  'message': 'Workflow did not meet its verified success criteria; inspect partial results.'}}, context)
             if name=="code_runner" and result.get("status")!="completed":
                 code = "cancelled" if result.get("status") == "cancelled" else "operation_failed"
                 return self._limit({"ok":False,"tool":name,"result":result,"error":{"code":code,"message":result.get("error","Expected output was not produced")}},context)
@@ -303,6 +368,13 @@ class ToolRegistry:
 
     async def _execute(self,name,args,context,policy):
         config=context.get("config",{})
+        if name in NAVIGATION_SPECS: return await execute_navigation(name, args, context, policy)
+        if name in DOCUMENT_SPECS: return await execute_documents(name, args, context, policy)
+        if name in KNOWLEDGE_SPECS: return execute_knowledge(name, args, context, policy)
+        if name == 'guidance.load':
+            folder = Path(__file__).resolve().parents[1] / 'guidance' / 'website'
+            return {'guides': [{'topic': topic, 'text': (folder / (topic + '.md')).read_text(encoding='utf-8')[:3500]}
+                              for topic in args['topics']]}
         if name=="copilot.download":
             return await context["download_service"].download(args,context["download_binding"])
         if name=="archives.inspect": return ArchiveService(policy,context["session_dir"]).inspect(args)
@@ -408,7 +480,7 @@ class ToolRegistry:
             async def guard(route):
                 try: urls.resolve(route.request.url)
                 except (PolicyError,ValueError): await route.abort("blockedbyclient")
-                else: await route.continue_()
+                else: await route.fallback()
             previous=getattr(browser,"_tool_policy_route",None)
             if previous is not None: await page.unroute("**/*",previous)
             await page.route("**/*",guard)
@@ -419,8 +491,13 @@ class ToolRegistry:
                     urls.resolve('https://' + domain)
                     if domain not in browser.tool_domains:
                         browser.authorize_tool_domain(domain)
+                await clear_navigation_state(browser)
                 await page.goto(url,wait_until="domcontentloaded",timeout=20000)
                 urls.resolve(page.url)
+                for field in ('task_id', 'customer_key', 'tenant_id', 'site_namespace_id'):
+                    context.pop(field, None)
+                for field in ('web_document_tickets', 'document_catalogues', 'site_knowledge_bindings'):
+                    context.get(field, {}).clear()
                 return {"url":page.url,"title":await page.title(),"javascript_enabled":True,"isolated_profile":True}
             if page.url!="about:blank": urls.resolve(page.url)
             if name in {"browser.back","browser.forward"}:

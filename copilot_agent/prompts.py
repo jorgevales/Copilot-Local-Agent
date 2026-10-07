@@ -63,6 +63,49 @@ class PromptBuilder:
             if hashlib.sha256(Path(path).read_bytes()).hexdigest() != expected:
                 raise ValueError('Startup attachment changed after verification; restart contract setup')
 
+    def _private_overflow_context(self):
+        """Keep current private context inline; never write an overflow attachment.
+
+        Exact unresolved calls remain in the live orchestrator for policy checks.
+        The reasoning agent receives their status and hashes, not an incomplete
+        replacement for an authoritative plan. On restart only audit metadata
+        survives, so task/customer facts must be re-observed before continuing.
+        """
+        pending = {key: {field: call.get(field) for field in
+                        ('status', 'state_changing', 'request_hash', 'action_hash')}
+                   for key, call in self.state.data['calls'].items()
+                   if call.get('status') in {'executing', 'uncertain'}}
+        budget = self.config.max_context_chars
+        requests = self.state.data.get('requirements', [])
+        current_request = requests[-1] if requests and type(requests[-1]) is str else None
+        context = {
+            'session_id': self.state.session_id,
+            'message_count': self.state.message_count,
+            'private_context_omitted': True,
+            'context_instruction': ('Private task context remains in this live session only. Older details were omitted to fit this message; '
+                                    'use the current request and live observations. Never replay unresolved operations. After restart, re-observe '
+                                    'customer/task facts and ask the local user to reconcile uncertain effects.'),
+            'pending_operations': pending,
+            'recent_messages': self.state.context(max(1, budget // 2))['recent_messages'],
+        }
+        if current_request is not None and len(json.dumps(current_request, ensure_ascii=False)) <= budget // 3:
+            context['current_user_request'] = current_request
+        else:
+            context['current_user_request_omitted'] = True
+            context['context_instruction'] += ' If the exact user goal is unavailable in the current request, ask for it before acting.'
+        while len(json.dumps(context, ensure_ascii=False)) > budget and context['recent_messages']:
+            context['recent_messages'].pop(0)
+        if len(json.dumps(context, ensure_ascii=False)) > budget:
+            context['pending_operations'] = {'count': len(pending), 'details_omitted': True,
+                                             'requires_local_reconciliation': bool(pending)}
+        if len(json.dumps(context, ensure_ascii=False)) > budget:
+            context = {'session_id': self.state.session_id, 'private_context_omitted': True,
+                       'pending_operations_count': len(pending),
+                       'requires_local_reconciliation': bool(pending)}
+        if len(json.dumps(context, ensure_ascii=False)) > budget:
+            context = {}
+        return context
+
     def build(self, kind: str, content, request_id: str) -> tuple[str, list[Path]]:
         self.verify_guidance()
         ordinal = self.state.message_count + 1
@@ -76,7 +119,7 @@ class PromptBuilder:
                        'planning': 'Plan the complete goal first. Request currently executable known-argument steps in one ordered batch, up to the schema limit. Dependent steps run only after prerequisite success; do not guess unknown outputs.',
                        'progress': 'Use actual per-call outcomes and not_executed records. Never claim skipped steps completed.',
                        'recovery': 'After a certain failure, continue within remaining rounds using a materially different safe approach. After uncertain state changes, inspect read-only and wait for explicit reconciliation. Never replay a possibly submitted action.',
-                       'browser': 'Browser navigation uses an isolated profile without Copilot sign-in. JavaScript is enabled; service workers, downloads, WebSockets and unapproved hosts remain blocked. State-changing controls and the complete ordered browser batch require explicit approval.'}}
+                       'browser': 'Use browser.recon once on an unfamiliar approved site, then browser.plan for bounded verified steps. The isolated profile uses manual website sign-in; service workers, WebSockets and unapproved hosts remain blocked. Only exact reviewed document downloads are permitted. Load relevant workflow guidance with guidance.load. Never save website knowledge until separate local consent; all actions retain immutable approval.'}}
         attachments = [self.findings.attachment] if self.findings.attachment_due(ordinal) else []
         if kind in {'correction', 'recovery'}:
             message['required_response_fields'] = json.loads(self.schema.read_text(encoding='utf-8-sig'))['required']
@@ -107,6 +150,11 @@ class PromptBuilder:
         if kind == 'delivery_retry':
             message['response_instruction'] += ' For an actual generated artifact, put its clickable UI link after the END marker outside the JSON fence. Request copilot.download in that same response. After its actual result, inspect ZIPs and request SHA-256-bound archives.extract to verify outputs.'
         if len(json.dumps(message['context'], ensure_ascii=False)) > self.config.max_context_chars:
+            if self.state.data.get('website_private'):
+                message['context'] = self._private_overflow_context()
+                message['private_context_instruction'] = ('No private task context was written to a reference attachment. '
+                    'The current request and results remain live prompt data; omitted older context must be re-observed when needed.')
+                return json.dumps(message, ensure_ascii=False, indent=2), attachments
             # Preserve the entire authoritative state in a reference attachment, not a fabricated model summary.
             snapshot = {'schema_version': '1.0', 'session_id': self.state.session_id,
                         'requirements': self.state.data['requirements'], 'decisions': self.state.data['decisions'],

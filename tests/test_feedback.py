@@ -88,8 +88,14 @@ class FeedbackIntegrationTests(unittest.IsolatedAsyncioTestCase):
         records=[json.loads(line) for line in (state.directory/'events.jsonl').read_text().splitlines()]
         details=[record for record in records if record['event']=='feedback_detail']
         self.assertEqual(2,len(details))
-        self.assertTrue(all(record.get('validated') is False for record in details))
-        self.assertTrue(all(record['fields']['user_response']=='Checking visible evidence.' for record in details))
+        from copilot_agent.web_privacy import audit_evidence
+        expected={'actor':'Copilot','message':'Streaming preview retained for diagnostics.',
+                  'request_id':'stream-r','validated':False,'generation_ended':None,
+                  'fields':public_preview(raw,state.session_id,'stream-r')}
+        self.assertTrue(all(record['evidence']==audit_evidence(expected) for record in details))
+        self.assertTrue(all(record['request_id']=='stream-r' for record in details))
+        self.assertNotIn('Checking visible evidence.',json.dumps(details))
+        self.assertTrue(all('fields' not in record and 'validated' not in record for record in details))
 
     async def test_disabled_created_tools_and_turn_do_not_touch_filesystem(self):
         root,config,state,registry,browser,app=helpers.OrchestratorTests().fixture([helpers.final_response,helpers.final_response])

@@ -25,3 +25,7 @@ A persisted execution intent without a confirmed outcome is not proof of failure
 ## Privacy
 
 Retain only relevant data. Secrets and authentication material must not enter summaries, findings, ordinary logs or diagnostic attachments. Session files may contain user content; treat them as scoped local artifacts, not a public export. Upload only deliberately approved relevant context.
+
+New orchestrator sessions retain live task content in memory and operational hashes on disk. Restart does not restore raw customer conversations or executable customer plans; reconcile uncertain ledgers and request current task/identity evidence. Historical files remain sensitive local artifacts. Private context overflow stays inline and bounded, without a raw context attachment. During website tasks, Useful Findings do not persist page/customer/navigation content; use separately consented `site_knowledge.save` for sanitised reusable knowledge.
+
+Bind website knowledge to the current origin, locally reviewed tenant, user scope and environment. Saving is optional and requires a distinct local consent explaining categories, local storage and excluded data; declining does not block the current task. Downloaded documents stay separate from website knowledge and can be retrieved through scoped catalogues. Load `memory` and `privacy` guidance when needed.

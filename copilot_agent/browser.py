@@ -378,7 +378,7 @@ class BrowserAdapter:
             self.page = await asyncio.wait_for(self.context.new_page(), 10)
             # Website automation needs JavaScript, but stays in a separate
             # unauthenticated context with service workers and network scope blocked.
-            self.tool_context = await asyncio.wait_for(self.browser.new_context(accept_downloads=False, service_workers='block', java_script_enabled=True), 10)
+            self.tool_context = await asyncio.wait_for(self.browser.new_context(accept_downloads=True, service_workers='block', java_script_enabled=True), 10)
             await self._configure_tool_context()
             self.tool_page = await asyncio.wait_for(self.tool_context.new_page(), 10)
             self.page.set_default_timeout(5000)
@@ -442,6 +442,14 @@ class BrowserAdapter:
         })();""" % json.dumps(sorted(self.tool_domains)))
 
         def register(page):
+            # Additional pages require a reservation by a reviewed bounded tool.
+            # The initial page is created before tool_page is assigned.
+            if self.tool_page is not None:
+                reserved = getattr(self, '_navigation_expected_new_pages', 0)
+                if reserved <= 0 or sum(not p.is_closed() for p in self._tool_pages) >= 6:
+                    asyncio.create_task(page.close())
+                    return
+                self._navigation_expected_new_pages = reserved - 1
             self._tool_pages.append(page)
             def error(exc):
                 self.tool_errors.append({'type': 'page_error', 'message': 'JavaScript error observed on owned tool page'})
@@ -449,10 +457,14 @@ class BrowserAdapter:
                 self.tool_errors.append({'type': 'request_failed', 'url': self._safe_url(request.url),
                                          'failure': str(request.failure or '')[:100]})
             async def download(item):
-                # Observation is not permission to export/download third-party content.
+                grants = getattr(self, '_approved_web_downloads', {}).get(page, set())
+                allowed = item.url in grants
+                if allowed:
+                    grants.discard(item.url)
                 self.tool_downloads.append({'url': self._safe_url(item.url), 'suggested_filename': Path(item.suggested_filename).name,
-                                            'saved': False, 'status': 'cancelled_by_policy'})
-                await item.cancel()
+                                            'saved': False, 'status': 'approved_pending_verification' if allowed else 'cancelled_by_policy'})
+                if not allowed:
+                    await item.cancel()
             async def check_navigation(frame):
                 if frame != page.main_frame or frame.url == 'about:blank':
                     return
@@ -925,7 +937,7 @@ class BrowserAdapter:
               editor_present:!!document.querySelector('#m365-chat-editor-target-element'),
               alerts:[...document.querySelectorAll('[role="alert"]')].map(n=>(n.innerText||'').slice(0,200))})"""), 3)
             # Screenshots are local and may contain user content; credentials/account controls masked.
-            if parsed.hostname == 'm365.cloud.microsoft':
+            if parsed.hostname == 'm365.cloud.microsoft' and not getattr(self, 'website_private', False):
                 dimensions = await self._evaluate('() => ({width:innerWidth,height:innerHeight})')
                 x, y = min(360, dimensions['width'] * .35), min(110, dimensions['height'] * .2)
                 await self.page.screenshot(path=str(prefix)+'.png', timeout=3000, full_page=False,
@@ -937,6 +949,9 @@ class BrowserAdapter:
         except Exception:
             report['ui_evidence'] = 'unavailable'
         serialized = json.dumps(report, indent=2, ensure_ascii=False)
+        if getattr(self, 'website_private', False):
+            from .web_privacy import audit_evidence
+            serialized = json.dumps({'reason': reason, 'evidence': audit_evidence(report)}, indent=2)
         serialized = re.sub(r'(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+', r'\1[REDACTED]', serialized)
         serialized = re.sub(r'(?i)(token|password|secret|api[_-]?key)(["\s:=]+)[^\s,"}]+', r'\1\2[REDACTED]', serialized)
         path = Path(str(prefix)+'.json')

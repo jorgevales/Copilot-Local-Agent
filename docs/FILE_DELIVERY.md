@@ -2,6 +2,14 @@
 
 This document defines the current delivery policy and the implemented integration of `copilot.download`, `archives.inspect` and `archives.extract`. Their exact versions, arguments, schemas, limits and availability come from the current generated machine catalogue. A documented flow is not proof that its live UI acceptance has passed; the evidence report must record observed outcomes separately.
 
+## Website documents and bounded return to Copilot
+
+Website document discovery/download is separate from generated Copilot artifact delivery. `browser.documents` returns temporary observed same-origin identities; `browser.download_batch` accepts at most 30 documents per batch, 1–3 concurrent owned tabs, and lowered per-file/aggregate limits within 20 MiB/100 MiB. Every file needs a completed browser event and verified retained bytes. Resume requires the returned manifest path and SHA-256, unchanged same-session provenance and reverified files. Different customer/task/tenant/site namespaces cannot share a batch. Retained-file quotas do not guarantee a cap on browser temporary network bytes.
+
+Copilot accepts a hard **20 attachments in the complete outgoing message**. `files.transfer_to_copilot` can consider up to 1000 reviewed local references but queues at most 10 document slots, reduced by queued images and existing files. It ranks query matches and requested/active workflow paths, omits exact SHA duplicates and confirmed prior transfers, and retains deferred references. An index consumes one available slot when documents defer. Similar filenames with different contents are flagged for review, not discarded.
+
+The retained JSON document index provides searchable metadata and exact original identities. Use `documents.find` and `documents.retrieve` for later evidence; retrieval rechecks authority and SHA-256 and still requires separate transfer approval. A later session explicitly imports the reviewed index with `documents.catalogue(manifest_path, manifest_sha256)` and matching customer/tenant/user/environment namespace. Private task indexes can include authorised file paths and names; reusable website knowledge and generic logs exclude customer evidence. A JSON index is the supported metadata bundle. Downloading or creating a ZIP never makes ZIP upload supported. Queued files become delivered only after attachment and submission verification.
+
 ## Format requested from Copilot
 
 | Requested result | Required request and fallback |

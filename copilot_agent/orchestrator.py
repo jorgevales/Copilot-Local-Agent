@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import uuid
+import threading
 from .approvals import ApprovalManager
 from .browser import BrowserUIError, CaptureTimeoutError, SubmissionAmbiguousError, SubmissionNotSentError
 from .code_runner import CodeRunner
@@ -21,13 +22,16 @@ from .storage import discover_onedrive_accounts
 
 
 class Orchestrator:
-    def __init__(self, config, browser, registry, state, approval_decider=None, display=print, event_sink=None):
+    def __init__(self, config, browser, registry, state, approval_decider=None, display=print, event_sink=None, cancel_event=None):
         self.config, self.browser, self.registry, self.state = config, browser, registry, state
+        state.data['website_private'] = True
+        browser.website_private = True
         self.findings = Findings(state.directory)
         self.prompts = PromptBuilder(config, registry, state, self.findings)
         self.policy = PathPolicy(config.allowed_roots, excluded_roots=[config.profile_dir])
         self.display = display
         self.event_sink = event_sink
+        self.cancel_event = cancel_event if cancel_event is not None else threading.Event()
         self.feedback = Feedback(display, state)
         self.approvals = ApprovalManager(state, approval_decider, self.feedback)
         self.process_registry = ManagedProcessRegistry(state.directory)
@@ -38,6 +42,14 @@ class Orchestrator:
         self.approved_attachment_hashes = {}
         self.base_context = {'config': config, 'session_dir': state.directory, 'browser': browser, 'approved': False,
                              'pending_image_attachments': [], 'created_snapshots': {},
+                             'pending_file_attachments': [],
+                             'approved_attachment_hashes': self.approved_attachment_hashes,
+                             'site_knowledge_bindings': {},
+                             'web_document_tickets': {},
+                             'document_catalogues': {}, 'download_manifest_hashes': {},
+                             'transferred_attachment_hashes': {},
+                             'website_private': True,
+                             'cancel_event': self.cancel_event, 'cancelled': self.cancel_event.is_set,
                              'process_registry': self.process_registry,
                              'approved_domains': self.state.data.setdefault('approved_domains', [])}
         authorize = getattr(browser, 'authorize_tool_domain', None)
@@ -166,7 +178,9 @@ class Orchestrator:
         request_id = uuid.uuid4().hex
         text, attachments = self.prompts.build(kind, redact(content), request_id)
         pending_images = self.base_context['pending_image_attachments']
-        attachments = list(dict.fromkeys([*attachments, *map(Path, extra_attachments), *map(Path, pending_images)]))
+        pending_files = self.base_context['pending_file_attachments']
+        attachments = list(dict.fromkeys([*attachments, *map(Path, extra_attachments),
+                                         *map(Path, pending_images), *map(Path, pending_files)]))
         if len(attachments) > 20:
             raise PolicyError('This message would exceed Copilot\'s 20-attachment limit. Remove queued files or start a new request.')
         if any(path.suffix.casefold() == '.zip' for path in attachments):
@@ -208,7 +222,11 @@ class Orchestrator:
                 self.state.data['attachments'].append(record)
                 if entry['path'] == str(self.findings.attachment):
                     self.state.data['findings_sync'].append(record)
+                if Path(entry['path']) in list(map(Path, pending_files)):
+                    history = self.base_context['transferred_attachment_hashes']
+                    history[entry['sha256']] = history.get(entry['sha256'], 0) + 1
             pending_images.clear()
+            pending_files.clear()
             self.state.save()
         try:
             raw = await self.browser.exchange(text, request_id, attachments=upload_paths,
@@ -235,9 +253,16 @@ class Orchestrator:
             self.state.save()
             raise
         raw_path = self.state.directory / 'responses' / (request_id + '.txt')
+        from .web_privacy import PRIVATE_TOOLS
+        if any('"' + name + '"' in raw for name in PRIVATE_TOOLS):
+            self.state.data['website_private'] = True
         raw_path.parent.mkdir(parents=True, exist_ok=True)
         with raw_path.open('x', encoding='utf-8') as handle:
-            handle.write(redact(raw))
+            if self.state.data.get('website_private'):
+                from .web_privacy import audit_evidence
+                handle.write(json.dumps(audit_evidence(raw)))
+            else:
+                handle.write(redact(raw))
         self.state.message('copilot_raw', raw, request_id=request_id, artifact=str(raw_path))
         self.state.save()
         return raw, request_id
@@ -248,10 +273,17 @@ class Orchestrator:
             try:
                 response = parse_response(raw, self.state.session_id, request_id, self.registry, self.state.data['response_ids'])
                 self._preflight(response)
+                if any(call['name'].startswith(('browser.', 'documents.', 'site_knowledge.'))
+                       or call['name'] == 'files.transfer_to_copilot' for call in response['tool_requests']):
+                    self.state.data['website_task_active'] = True
                 self.state.data['response_ids'].append(response['response_id'])
                 self.state.data['current_plan'] = response['action_plan']
                 self.state.message('copilot', response, request_id=request_id)
-                findings_result = self.findings.accept(response['useful_findings'], request_id)
+                if self.state.data.get('website_task_active'):
+                    findings_result = {'accepted': 0, 'rejected': len(response['useful_findings']),
+                                       'reason': 'Website findings are ephemeral; saving knowledge requires separate consent.'}
+                else:
+                    findings_result = self.findings.accept(response['useful_findings'], request_id)
                 self.state.event('findings_processed', **findings_result)
                 self.feedback.record('Orchestrator', 'Validated response.', request_id=request_id,
                                      response_type=response['response_type'],
@@ -289,7 +321,8 @@ class Orchestrator:
     def _preflight(self, response):
         catalog = {d['name']: d for d in self.registry.definitions()}
         for call in response['tool_requests']:
-            if call['call_id'] in self.state.data['calls']:
+            from .web_privacy import private_id
+            if call['call_id'] in self.state.data['calls'] or private_id(call['call_id']) in self.state.data['calls']:
                 raise PolicyError('Previously processed call ID must not be replayed')
             action_hash = canonical_hash({k: call[k] for k in ('name', 'version', 'arguments')})
             if any(c.get('action_hash') == action_hash and c['status'] == 'uncertain' for c in self.state.data['calls'].values()):
@@ -321,6 +354,7 @@ class Orchestrator:
         return response
 
     async def turn(self, user_input: str, attachments=()):
+        self.cancel_event.clear()
         if not self.initialized:
             raise RuntimeError('Initialize the verified contract first')
         if self.state.data['pending_submission']:
@@ -328,6 +362,9 @@ class Orchestrator:
         if SENSITIVE.search(user_input):
             raise PolicyError('Input contains credential-like material; remove it before sending')
         if attachments:
+            if any(Path(path).suffix.casefold() in {'.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.png', '.jpg', '.jpeg'}
+                   for path in attachments):
+                self.state.data['website_task_active'] = True
             queue = self.attachment_queue()
             records = queue.add(list(attachments))
             paths = queue.paths()
@@ -355,6 +392,11 @@ class Orchestrator:
         catalog = {d['name']: d for d in self.registry.definitions()}
         for round_number in range(self.config.max_tool_rounds + 1):
             response = await self._validated_exchange(kind, content, attachments if round_number == 0 else ())
+            if self.cancel_event.is_set():
+                self.state.data['status'] = 'cancelled'
+                self.state.save()
+                return dict(response, completion_status='blocked',
+                            user_response='Cancellation received; no further tools will execute. Inspect any already submitted effects.')
             if response['response_type'] == 'final':
                 if delivery.get('mode', 'none') != 'none' and delivery_denied:
                     response = dict(response, completion_status='blocked', user_response='File delivery was denied; no complete delivery is claimed. ' + response['user_response'])
@@ -427,11 +469,14 @@ class Orchestrator:
             self._emit_validated_response(response, 'PROPOSED ACTION')
             results = []
             for call in response['tool_requests']:
+                if self.cancel_event.is_set():
+                    break
                 self.feedback.section('Orchestrator', 'TOOL REQUEST', [
                     ('Tool', call['name']),
                     ('Purpose', call.get('arguments', {}).get('purpose'))])
                 definition = catalog[call['name']]
                 context = dict(self.base_context)
+                context['remaining_attachment_capacity'] = max(0, 10 - len(context['pending_image_attachments']))
                 context['source_request_id'] = response['request_id']
                 needs_approval = definition['approval_policy'] not in {'none', 'read_only', 'automatic', 'auto_readonly'}
                 prepared = None
@@ -443,6 +488,9 @@ class Orchestrator:
                     if call['name'] == 'browser.open':
                         self.registry.validate_call(call['name'], call['arguments'], context)
                     prepared = self._browser_preparation(call)
+                if call['name'].startswith('site_knowledge.'):
+                    from .site_knowledge import prepare_knowledge
+                    prepared = prepare_knowledge(call['arguments'], context, name=call['name'])
                 if call['name'] == 'ocr.image':
                     artifact = self._attachment_record(self.policy.resolve(call['arguments']['path'], True))
                     prepared = {'approved_image_attachment': artifact, 'destination': self.config.copilot_url}
@@ -483,6 +531,32 @@ class Orchestrator:
                         break
                     context['approved'] = True
                     context['approval_hash'] = approval_hash
+                    if call['name'].startswith('site_knowledge.'):
+                        context['site_knowledge_reviewed'] = prepared
+                        if call['name'] == 'site_knowledge.save':
+                            context['site_knowledge_consent'] = prepared
+                    if call['name'] == 'browser.plan':
+                        def consequential(steps):
+                            return any(step.get('effect') == 'consequential' or
+                                       any(consequential(step.get(key, [])) for key in ('steps', 'then', 'else'))
+                                       for step in steps)
+                        if consequential(call['arguments']['steps']):
+                            from .web_navigation import plan_hash
+                            digest = plan_hash(call['arguments'])
+                            confirmation = dict(call, call_id=call['call_id'] + '-consequential')
+                            boundary = {'tool_requests': [confirmation],
+                                        'risk_summary': 'Specifically confirm the consequential effects in this exact browser plan.'}
+                            confirmed, _ = await self.approvals.request(
+                                boundary, confirmation, {'consequential_plan_hash': digest,
+                                                         'purpose': 'Confirm irreversible or customer-impacting effects'})
+                            if not confirmed:
+                                denied = {'ok': False, 'error': {'code': 'approval_denied',
+                                                               'message': 'Consequential confirmation was declined.'}}
+                                self.state.begin_call(call)
+                                self.state.finish_call(call['call_id'], denied)
+                                results.append({'call_id': call['call_id'], **denied})
+                                break
+                            context['consequential_approved_plan_hash'] = digest
                     if call['name'] == 'browser.open':
                         domains = [URLPolicy.website_domain(call['arguments']['url']),
                                    *call['arguments'].get('allowed_domains', [])]
@@ -512,6 +586,23 @@ class Orchestrator:
                 except Exception as exc:
                     result = {'ok': False, 'error': {'code': 'tool_error', 'message': str(exc)}}
                 self.state.finish_call(call['call_id'], result)
+                if result.get('ok') and call['name'] == 'browser.open':
+                    for field in ('task_id', 'customer_key', 'tenant_id', 'site_namespace_id'):
+                        self.base_context.pop(field, None)
+                if result.get('ok') and call['name'] == 'site_knowledge.bind':
+                    scope = result.get('result', {}).get('scope', {})
+                    self.base_context['tenant_id'] = scope.get('tenant')
+                    self.base_context['site_namespace_id'] = result.get('result', {}).get('namespace_id')
+                    self.base_context['web_document_tickets'].clear()
+                    self.base_context['document_catalogues'].clear()
+                if (result.get('ok') or call['name'] == 'browser.customer_summary' and result.get('result', {}).get('identity_verified')) and call['name'] in {'browser.plan', 'browser.customer_summary', 'browser.tabs'}:
+                    if call['name'] == 'browser.tabs' and call['arguments'].get('operation') == 'reset':
+                        self.base_context.pop('customer_key', None)
+                        self.base_context['web_document_tickets'].clear()
+                        self.base_context['document_catalogues'].clear()
+                    for field in ('task_id', 'customer_key'):
+                        if field in call['arguments']:
+                            self.base_context[field] = call['arguments'][field]
                 self._emit_tool_result(call['name'], result)
                 results.append({'call_id': call['call_id'], **result})
                 if result.get('ok') and call['name'] in {'copilot.download', 'archives.extract'}:
@@ -520,6 +611,10 @@ class Orchestrator:
                     if call['name'] == 'copilot.download' and result.get('result', {}).get('status') == 'not_started':
                         delivery_link_rejected = True
                     break
+            if self.cancel_event.is_set():
+                self.state.data['status'] = 'cancelled'
+                self.state.save()
+                return dict(response, completion_status='blocked', user_response='Cancelled; verified partial results are retained. Already submitted effects require inspection.')
             completed_ids = {item['call_id'] for item in results}
             turn_call_ids.update(completed_ids)
             not_executed = [{'call_id': call['call_id'], 'name': call['name'],
@@ -538,7 +633,7 @@ class Orchestrator:
         args = call['arguments']
         prepared = {'isolated_profile': True, 'javascript_enabled': True,
                     'managed_tab_only': True, 'dependency_domains': list(args.get('allowed_domains', [])),
-                    'limitations': 'Uses a separate unauthenticated profile; no credential sharing, popups or unrestricted hosts.'}
+                    'limitations': 'Uses a separate profile with manual sign-in only; bounded owned tabs and exact approved downloads; no credential sharing or unrestricted hosts.'}
         if call['name'] == 'browser.open':
             prepared.update(website_domain=URLPolicy.website_domain(args['url']), includes_subdomains=True)
         return prepared

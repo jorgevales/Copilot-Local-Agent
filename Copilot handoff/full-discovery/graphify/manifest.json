@@ -1,458 +1,524 @@
 {
-  "input/Copilot Local Agent/Launcher.ps1": {
+  "Launcher.ps1": {
     "mtime": 1791390894.2131188,
-    "seen": 1791391159.4380205,
+    "seen": 1791394518.6177044,
     "ast_hash": "aa3e40be54d945ec3eee5615ae843d88",
     "semantic_hash": "aa3e40be54d945ec3eee5615ae843d88"
   },
-  "input/Copilot Local Agent/app.py": {
-    "mtime": 1791293650.8712523,
-    "seen": 1791381279.9667346,
-    "ast_hash": "ec444b23c35c03892b540f34aaa1f9b2",
-    "semantic_hash": "ec444b23c35c03892b540f34aaa1f9b2"
-  },
-  "input/Copilot Local Agent/config.example.json": {
-    "mtime": 1791359184.7868109,
-    "seen": 1791381279.9667392,
-    "ast_hash": "9db9a7b8ab2fde263934ef1e1f224696",
-    "semantic_hash": "9db9a7b8ab2fde263934ef1e1f224696"
-  },
-  "input/Copilot Local Agent/copilot_agent/__init__.py": {
-    "mtime": 1791293062.2261856,
-    "seen": 1791381279.966742,
-    "ast_hash": "cfafae6d4f0f7459d080819e6dcc77af",
-    "semantic_hash": "cfafae6d4f0f7459d080819e6dcc77af"
-  },
-  "input/Copilot Local Agent/copilot_agent/app.py": {
-    "mtime": 1791390547.7000804,
-    "seen": 1791391159.4394217,
-    "ast_hash": "529ae65f71dfd30f45bffcec9c76a322",
-    "semantic_hash": "529ae65f71dfd30f45bffcec9c76a322"
-  },
-  "input/Copilot Local Agent/copilot_agent/approvals.py": {
-    "mtime": 1791389486.3547416,
-    "seen": 1791391159.439427,
-    "ast_hash": "0b64c2ecf0ab72e11ac81460e08a45ee",
-    "semantic_hash": "0b64c2ecf0ab72e11ac81460e08a45ee"
-  },
-  "input/Copilot Local Agent/copilot_agent/archives.py": {
-    "mtime": 1791301191.0398602,
-    "seen": 1791381279.9667492,
-    "ast_hash": "300dbc823b042b92463c38ca629ab2b4",
-    "semantic_hash": "300dbc823b042b92463c38ca629ab2b4"
-  },
-  "input/Copilot Local Agent/copilot_agent/attachments.py": {
-    "mtime": 1791302636.0563507,
-    "seen": 1791381279.9667516,
-    "ast_hash": "cffc78cafbfe5af19aa1d1d6d18e8083",
-    "semantic_hash": "cffc78cafbfe5af19aa1d1d6d18e8083"
-  },
-  "input/Copilot Local Agent/copilot_agent/browser.py": {
-    "mtime": 1791389050.2565465,
-    "seen": 1791389435.666109,
-    "ast_hash": "620810de822f21d0ca604079c2fb9005",
-    "semantic_hash": "620810de822f21d0ca604079c2fb9005"
-  },
-  "input/Copilot Local Agent/copilot_agent/bundle.py": {
-    "mtime": 1791302705.0338335,
-    "seen": 1791381279.9667559,
-    "ast_hash": "9e47d8210c3e2d9812fffa1bde655c26",
-    "semantic_hash": "9e47d8210c3e2d9812fffa1bde655c26"
-  },
-  "input/Copilot Local Agent/copilot_agent/code_runner.py": {
-    "mtime": 1791360933.9756112,
-    "seen": 1791381279.9667583,
-    "ast_hash": "78c4140c138060eb8a6cf851a8acb450",
-    "semantic_hash": "78c4140c138060eb8a6cf851a8acb450"
-  },
-  "input/Copilot Local Agent/copilot_agent/config.py": {
-    "mtime": 1791359183.9789305,
-    "seen": 1791381279.966761,
-    "ast_hash": "dd82bc34fb8648e0bf094a01545e09d0",
-    "semantic_hash": "dd82bc34fb8648e0bf094a01545e09d0"
-  },
-  "input/Copilot Local Agent/copilot_agent/delivery.py": {
-    "mtime": 1791305053.9741652,
-    "seen": 1791381279.9667635,
-    "ast_hash": "eddb6df2decd4c0604c841ad4ec0c5e5",
-    "semantic_hash": "eddb6df2decd4c0604c841ad4ec0c5e5"
-  },
-  "input/Copilot Local Agent/copilot_agent/desktop.py": {
-    "mtime": 1791363929.767456,
-    "seen": 1791381279.9667659,
-    "ast_hash": "5b7087693b3501715e84ea419d839abb",
-    "semantic_hash": "5b7087693b3501715e84ea419d839abb"
-  },
-  "input/Copilot Local Agent/copilot_agent/diagnostics.py": {
-    "mtime": 1791379675.1311176,
-    "seen": 1791381279.966768,
-    "ast_hash": "d2c80459865ab1031f9328868e87f06c",
-    "semantic_hash": "d2c80459865ab1031f9328868e87f06c"
-  },
-  "input/Copilot Local Agent/copilot_agent/downloads.py": {
-    "mtime": 1791300996.518745,
-    "seen": 1791381279.9667704,
-    "ast_hash": "7e14e043b4004a14bc3da0e121623c35",
-    "semantic_hash": "7e14e043b4004a14bc3da0e121623c35"
-  },
-  "input/Copilot Local Agent/copilot_agent/feedback.py": {
-    "mtime": 1791378962.3232212,
-    "seen": 1791381279.9667726,
-    "ast_hash": "5cd345c4c712aafb1e05a0ef234c16e1",
-    "semantic_hash": "5cd345c4c712aafb1e05a0ef234c16e1"
-  },
-  "input/Copilot Local Agent/copilot_agent/file_picker.py": {
-    "mtime": 1791302419.9257398,
-    "seen": 1791381279.9667745,
-    "ast_hash": "4bd47278a9dd2d1ab1063cfc711d5f21",
-    "semantic_hash": "4bd47278a9dd2d1ab1063cfc711d5f21"
-  },
-  "input/Copilot Local Agent/copilot_agent/findings.py": {
-    "mtime": 1791293184.6948767,
-    "seen": 1791381279.9667764,
-    "ast_hash": "5ccfdda419919a85b40f2ebd86aced78",
-    "semantic_hash": "5ccfdda419919a85b40f2ebd86aced78"
-  },
-  "input/Copilot Local Agent/copilot_agent/image_viewer.py": {
-    "mtime": 1791320065.9783545,
-    "seen": 1791381279.966779,
-    "ast_hash": "9855f7c6004d93d505e976747740acd2",
-    "semantic_hash": "9855f7c6004d93d505e976747740acd2"
-  },
-  "input/Copilot Local Agent/copilot_agent/local_python_runner.py": {
-    "mtime": 1791363934.1686454,
-    "seen": 1791381279.9667811,
-    "ast_hash": "3242f2e1d01bb224dae9d820b37b3fd5",
-    "semantic_hash": "3242f2e1d01bb224dae9d820b37b3fd5"
-  },
-  "input/Copilot Local Agent/copilot_agent/local_python_worker.py": {
-    "mtime": 1791361041.3666646,
-    "seen": 1791381279.9667833,
-    "ast_hash": "ab62ee3b9b77b94b079e70e989ff73b9",
-    "semantic_hash": "ab62ee3b9b77b94b079e70e989ff73b9"
-  },
-  "input/Copilot Local Agent/copilot_agent/logging_utils.py": {
-    "mtime": 1791299141.9860363,
-    "seen": 1791381279.9668446,
-    "ast_hash": "69e6522b24c7c07c6d8ec80f3917338c",
-    "semantic_hash": "69e6522b24c7c07c6d8ec80f3917338c"
-  },
-  "input/Copilot Local Agent/copilot_agent/orchestrator.py": {
-    "mtime": 1791390354.6645906,
-    "seen": 1791391159.444041,
-    "ast_hash": "ec1e43c4dcabff3738c2bf1a492961cf",
-    "semantic_hash": "ec1e43c4dcabff3738c2bf1a492961cf"
-  },
-  "input/Copilot Local Agent/copilot_agent/persistence.py": {
-    "mtime": 1791293062.990836,
-    "seen": 1791381279.966849,
-    "ast_hash": "10de4bf612c20431d7c9db9cbbea0017",
-    "semantic_hash": "10de4bf612c20431d7c9db9cbbea0017"
-  },
-  "input/Copilot Local Agent/copilot_agent/policy.py": {
-    "mtime": 1791363921.0047073,
-    "seen": 1791381279.966851,
-    "ast_hash": "4a2bdb5190ce0d1cb9f3019f87072e14",
-    "semantic_hash": "4a2bdb5190ce0d1cb9f3019f87072e14"
-  },
-  "input/Copilot Local Agent/copilot_agent/prompts.py": {
-    "mtime": 1791389155.0927875,
-    "seen": 1791389435.6706977,
-    "ast_hash": "d29621498dd4455068f40682d7023cae",
-    "semantic_hash": "d29621498dd4455068f40682d7023cae"
-  },
-  "input/Copilot Local Agent/copilot_agent/protocol.py": {
-    "mtime": 1791295465.5663881,
-    "seen": 1791381279.9668558,
-    "ast_hash": "4134dd0af60b4321d9b7c25c93ad8b9a",
-    "semantic_hash": "4134dd0af60b4321d9b7c25c93ad8b9a"
-  },
-  "input/Copilot Local Agent/copilot_agent/reused_browser.py": {
-    "mtime": 1791318510.9639745,
-    "seen": 1791381279.9668577,
-    "ast_hash": "680d17d657724599e752bc62869de92d",
-    "semantic_hash": "680d17d657724599e752bc62869de92d"
-  },
-  "input/Copilot Local Agent/copilot_agent/setup_resources.py": {
-    "mtime": 1791307255.1117072,
-    "seen": 1791381279.9668598,
-    "ast_hash": "5a2c78c74d110c0c625c9b28a30a6022",
-    "semantic_hash": "5a2c78c74d110c0c625c9b28a30a6022"
-  },
-  "input/Copilot Local Agent/copilot_agent/state.py": {
-    "mtime": 1791363925.362767,
-    "seen": 1791381279.9668624,
-    "ast_hash": "09fde76c58631290b782d93b30122696",
-    "semantic_hash": "09fde76c58631290b782d93b30122696"
-  },
-  "input/Copilot Local Agent/copilot_agent/storage.py": {
-    "mtime": 1791300019.391276,
-    "seen": 1791381279.9668646,
-    "ast_hash": "f73800e22b4a3997be600e3af284cbf8",
-    "semantic_hash": "f73800e22b4a3997be600e3af284cbf8"
-  },
-  "input/Copilot Local Agent/copilot_agent/sync.py": {
-    "mtime": 1791293361.189024,
-    "seen": 1791381279.9668667,
-    "ast_hash": "ff07174ba41d98403099165a3c97b1a8",
-    "semantic_hash": "ff07174ba41d98403099165a3c97b1a8"
-  },
-  "input/Copilot Local Agent/copilot_agent/tools.py": {
-    "mtime": 1791388912.9760168,
-    "seen": 1791389435.671957,
-    "ast_hash": "29e52550a6ed17ad9a6cddbc5768ca07",
-    "semantic_hash": "29e52550a6ed17ad9a6cddbc5768ca07"
-  },
-  "input/Copilot Local Agent/schemas/response-v1.schema.json": {
-    "mtime": 1791293183.0690892,
-    "seen": 1791381279.966871,
-    "ast_hash": "9237d79c76083459e492fef924f8659c",
-    "semantic_hash": "9237d79c76083459e492fef924f8659c"
-  },
-  "input/Copilot Local Agent/schemas/tool-catalogue-v1.json": {
-    "mtime": 1791320953.0588562,
-    "seen": 1791381279.9668732,
-    "ast_hash": "daf822b1d6f9670c500960674584934c",
-    "semantic_hash": "daf822b1d6f9670c500960674584934c"
-  },
-  "input/Copilot Local Agent/tests/inspect_download_settings.py": {
-    "mtime": 1791299141.2175677,
-    "seen": 1791381279.9668753,
-    "ast_hash": "587bccc3abf818ce4f303d4555eeb9f5",
-    "semantic_hash": "587bccc3abf818ce4f303d4555eeb9f5"
-  },
-  "input/Copilot Local Agent/tests/live_acceptance.py": {
-    "mtime": 1791298144.4410112,
-    "seen": 1791381279.9668772,
-    "ast_hash": "49e31ea0f6e0c76f9b2a2f3056a56c40",
-    "semantic_hash": "49e31ea0f6e0c76f9b2a2f3056a56c40"
-  },
-  "input/Copilot Local Agent/tests/live_attachments.py": {
-    "mtime": 1791303012.0854657,
-    "seen": 1791381279.9668791,
-    "ast_hash": "4ac23f7bb90907464043da98a44bd077",
-    "semantic_hash": "4ac23f7bb90907464043da98a44bd077"
-  },
-  "input/Copilot Local Agent/tests/live_delivery.py": {
-    "mtime": 1791301275.680767,
-    "seen": 1791381279.9668813,
-    "ast_hash": "5d52c5b34a09636bc843cfcccf7f5c7e",
-    "semantic_hash": "5d52c5b34a09636bc843cfcccf7f5c7e"
-  },
-  "input/Copilot Local Agent/tests/live_download_run.py": {
-    "mtime": 1791303808.6239052,
-    "seen": 1791381279.9668834,
-    "ast_hash": "39ce267eed3bbf7cc7bcd06c24738500",
-    "semantic_hash": "39ce267eed3bbf7cc7bcd06c24738500"
-  },
-  "input/Copilot Local Agent/tests/live_new_session.py": {
-    "mtime": 1791302814.3126254,
-    "seen": 1791381279.9668853,
-    "ast_hash": "650ea4cab35ed9ec5ec16ca70d9c9c83",
-    "semantic_hash": "650ea4cab35ed9ec5ec16ca70d9c9c83"
-  },
-  "input/Copilot Local Agent/tests/live_probe.py": {
-    "mtime": 1791297081.8793283,
-    "seen": 1791381279.9668875,
-    "ast_hash": "65de997ac2f0a85658540665c582c112",
-    "semantic_hash": "65de997ac2f0a85658540665c582c112"
-  },
-  "input/Copilot Local Agent/tests/live_verify_completed_run.py": {
-    "mtime": 1791304647.6615095,
-    "seen": 1791381279.9668906,
-    "ast_hash": "10af6e70216454d6e817af0756f06bce",
-    "semantic_hash": "10af6e70216454d6e817af0756f06bce"
-  },
-  "input/Copilot Local Agent/tests/test_app_ports.py": {
-    "mtime": 1791300676.360157,
-    "seen": 1791381279.9668925,
-    "ast_hash": "1c9a2da9cc7af8cea78dcb938d8ec90c",
-    "semantic_hash": "1c9a2da9cc7af8cea78dcb938d8ec90c"
-  },
-  "input/Copilot Local Agent/tests/test_app_sessions.py": {
-    "mtime": 1791318257.622595,
-    "seen": 1791381279.9668949,
-    "ast_hash": "1fb67c97aa6d791b58b179f812e1a0a9",
-    "semantic_hash": "1fb67c97aa6d791b58b179f812e1a0a9"
-  },
-  "input/Copilot Local Agent/tests/test_archives.py": {
-    "mtime": 1791301220.8314285,
-    "seen": 1791381279.966897,
-    "ast_hash": "4574def15cbc54c140f4184d6444ce48",
-    "semantic_hash": "4574def15cbc54c140f4184d6444ce48"
-  },
-  "input/Copilot Local Agent/tests/test_attachment_capacity.py": {
-    "mtime": 1791303781.117835,
-    "seen": 1791381279.966899,
-    "ast_hash": "fcc8d128ff8595da11a3c9d3197060da",
-    "semantic_hash": "fcc8d128ff8595da11a3c9d3197060da"
-  },
-  "input/Copilot Local Agent/tests/test_attachments.py": {
-    "mtime": 1791302636.746172,
-    "seen": 1791381279.966901,
-    "ast_hash": "c07ddd4ec62e436f8cd0c44ae06e9d8a",
-    "semantic_hash": "c07ddd4ec62e436f8cd0c44ae06e9d8a"
-  },
-  "input/Copilot Local Agent/tests/test_browser.py": {
-    "mtime": 1791359305.2600727,
-    "seen": 1791381279.966903,
-    "ast_hash": "0ff151515aaa9acc2896575a3bf2bb0b",
-    "semantic_hash": "0ff151515aaa9acc2896575a3bf2bb0b"
-  },
-  "input/Copilot Local Agent/tests/test_bug_handoff.py": {
-    "mtime": 1791381442.494939,
-    "seen": 1791381523.9996643,
-    "ast_hash": "d84bb424cb2242ae20fdb6df9401b944",
-    "semantic_hash": "d84bb424cb2242ae20fdb6df9401b944"
-  },
-  "input/Copilot Local Agent/tests/test_bundle.py": {
-    "mtime": 1791302753.7604012,
-    "seen": 1791381279.9669075,
-    "ast_hash": "d57d9d0f464fe796be27a43898d87152",
-    "semantic_hash": "d57d9d0f464fe796be27a43898d87152"
-  },
-  "input/Copilot Local Agent/tests/test_code_runner.py": {
-    "mtime": 1791364004.3408475,
-    "seen": 1791381279.9669096,
-    "ast_hash": "de0ae8dddd5b247311533751fea3ca8e",
-    "semantic_hash": "de0ae8dddd5b247311533751fea3ca8e"
-  },
-  "input/Copilot Local Agent/tests/test_delivery.py": {
-    "mtime": 1791305054.6913571,
-    "seen": 1791381279.9669118,
-    "ast_hash": "270145e7ed0604a896c18c01afe5d7c4",
-    "semantic_hash": "270145e7ed0604a896c18c01afe5d7c4"
-  },
-  "input/Copilot Local Agent/tests/test_delivery_integration.py": {
-    "mtime": 1791302208.654292,
-    "seen": 1791381279.9669137,
-    "ast_hash": "09bcc4121c895384da652caac133de7d",
-    "semantic_hash": "09bcc4121c895384da652caac133de7d"
-  },
-  "input/Copilot Local Agent/tests/test_diagnostics.py": {
-    "mtime": 1791379478.8070874,
-    "seen": 1791381279.966916,
-    "ast_hash": "4626021165980911427e2222d7c953e1",
-    "semantic_hash": "4626021165980911427e2222d7c953e1"
-  },
-  "input/Copilot Local Agent/tests/test_downloads.py": {
-    "mtime": 1791300731.633369,
-    "seen": 1791381279.9669185,
-    "ast_hash": "80bbde74c5f1dcb78b6ef282e6c2976d",
-    "semantic_hash": "80bbde74c5f1dcb78b6ef282e6c2976d"
-  },
-  "input/Copilot Local Agent/tests/test_edge_startup.py": {
-    "mtime": 1791318559.7507255,
-    "seen": 1791381279.9669206,
-    "ast_hash": "194821b3dbd8e1e285676c0fa57fbdb1",
-    "semantic_hash": "194821b3dbd8e1e285676c0fa57fbdb1"
-  },
-  "input/Copilot Local Agent/tests/test_feedback.py": {
-    "mtime": 1791322201.3190129,
-    "seen": 1791381279.9669228,
-    "ast_hash": "bf6af8b933ed1453daa07da2ddee5e32",
-    "semantic_hash": "bf6af8b933ed1453daa07da2ddee5e32"
-  },
-  "input/Copilot Local Agent/tests/test_file_picker.py": {
-    "mtime": 1791302420.6871083,
-    "seen": 1791381279.9669251,
-    "ast_hash": "2f6c2c43d2783f6183bce0aae463316d",
-    "semantic_hash": "2f6c2c43d2783f6183bce0aae463316d"
-  },
-  "input/Copilot Local Agent/tests/test_launcher.py": {
-    "mtime": 1791390999.076549,
-    "seen": 1791391159.4537108,
-    "ast_hash": "5dd3cd84660f508ec06c7ef9360118f0",
-    "semantic_hash": "5dd3cd84660f508ec06c7ef9360118f0"
-  },
-  "input/Copilot Local Agent/tests/test_orchestrator.py": {
-    "mtime": 1791364008.7615495,
-    "seen": 1791381279.9669297,
-    "ast_hash": "f8eca95523966d37ddbb002909999a33",
-    "semantic_hash": "f8eca95523966d37ddbb002909999a33"
-  },
-  "input/Copilot Local Agent/tests/test_protocol_state.py": {
-    "mtime": 1791363999.4687395,
-    "seen": 1791381279.9669318,
-    "ast_hash": "faa85f6514e74c7556e5fcb826cf2dac",
-    "semantic_hash": "faa85f6514e74c7556e5fcb826cf2dac"
-  },
-  "input/Copilot Local Agent/tests/test_setup_resources.py": {
-    "mtime": 1791307639.4687068,
-    "seen": 1791381279.9669337,
-    "ast_hash": "51ff211c8d480cb9b05e4f9b43cfaaee",
-    "semantic_hash": "51ff211c8d480cb9b05e4f9b43cfaaee"
-  },
-  "input/Copilot Local Agent/tests/test_storage.py": {
-    "mtime": 1791300217.5952773,
-    "seen": 1791381279.9669359,
-    "ast_hash": "7630cc3b696c6173c433b9831c788c15",
-    "semantic_hash": "7630cc3b696c6173c433b9831c788c15"
-  },
-  "input/Copilot Local Agent/tests/test_sync.py": {
-    "mtime": 1791293363.5098138,
-    "seen": 1791381279.9669378,
-    "ast_hash": "0b57440f2d8fe25f53b637eb265dcf3e",
-    "semantic_hash": "0b57440f2d8fe25f53b637eb265dcf3e"
-  },
-  "input/Copilot Local Agent/tests/test_tools.py": {
-    "mtime": 1791363995.1097078,
-    "seen": 1791381279.9669402,
-    "ast_hash": "f60679008ffc161ed05f12435eca3595",
-    "semantic_hash": "f60679008ffc161ed05f12435eca3595"
-  },
-  "input/Copilot Local Agent/tests/test_version_launcher.py": {
-    "mtime": 1791391007.6049097,
-    "seen": 1791391159.4549394,
-    "ast_hash": "810d5fa5fe91d1840e6ba95aa968618f",
-    "semantic_hash": "810d5fa5fe91d1840e6ba95aa968618f"
-  },
-  "input/Copilot Local Agent/version_launcher.py": {
-    "mtime": 1791390886.347549,
-    "seen": 1791391159.4549422,
-    "ast_hash": "d5b8f2ead0032cf4922b10e9f0465315",
-    "semantic_hash": "d5b8f2ead0032cf4922b10e9f0465315"
-  },
-  "input/Copilot Local Agent/tests/test_browser_plan_extensions.py": {
-    "mtime": 1791389600.2303646,
-    "seen": 1791391159.4505987,
-    "ast_hash": "a9e8fbc43d25233b970582ee337ed0bf",
-    "semantic_hash": "a9e8fbc43d25233b970582ee337ed0bf"
-  },
-  "input/Copilot Local Agent/agent_ui/Launch-Workspace.ps1": {
-    "mtime": 1791383550.0,
-    "seen": 1791391159.43803,
-    "ast_hash": "b244ebdd578b75514d72e2e558eb029a",
-    "semantic_hash": "b244ebdd578b75514d72e2e558eb029a"
-  },
-  "input/Copilot Local Agent/agent_ui/runtime.py": {
-    "mtime": 1791390701.547107,
-    "seen": 1791391159.4380338,
-    "ast_hash": "3b958c089e7d54c9fed641a397ce202b",
-    "semantic_hash": "3b958c089e7d54c9fed641a397ce202b"
-  },
-  "input/Copilot Local Agent/agent_ui/tests/test_runtime.py": {
-    "mtime": 1791390598.0653338,
-    "seen": 1791391159.4380367,
-    "ast_hash": "15af275fb6babf0d9eb1606fb9faf51b",
-    "semantic_hash": "15af275fb6babf0d9eb1606fb9faf51b"
-  },
-  "input/Copilot Local Agent/agent_ui/tests/test_workspace.py": {
+  "agent_ui/runtime.py": {
+    "mtime": 1791393961.7150314,
+    "seen": 1791394518.617713,
+    "ast_hash": "917a152e9c85df4d282ddc994466a7bd",
+    "semantic_hash": "917a152e9c85df4d282ddc994466a7bd"
+  },
+  "agent_ui/tests/test_runtime.py": {
+    "mtime": 1791394370.2739897,
+    "seen": 1791394518.6177166,
+    "ast_hash": "14f4e1ba66a43a7b18c8a3dce6cb8aac",
+    "semantic_hash": "14f4e1ba66a43a7b18c8a3dce6cb8aac"
+  },
+  "agent_ui/tests/test_workspace.py": {
     "mtime": 1791390393.5481846,
-    "seen": 1791391159.4380393,
+    "seen": 1791394518.6177182,
     "ast_hash": "9d18c7d69fdbd0d0f75843b994d162bd",
     "semantic_hash": "9d18c7d69fdbd0d0f75843b994d162bd"
   },
-  "input/Copilot Local Agent/agent_ui/web/app.js": {
+  "agent_ui/web/app.js": {
     "mtime": 1791390490.0033813,
-    "seen": 1791391159.4380414,
+    "seen": 1791394518.61772,
     "ast_hash": "7090a85432a744e6e5f0c855acdbc60f",
     "semantic_hash": "7090a85432a744e6e5f0c855acdbc60f"
   },
-  "input/Copilot Local Agent/agent_ui/workspace.py": {
+  "agent_ui/workspace.py": {
     "mtime": 1791390173.7713325,
-    "seen": 1791391159.4380436,
+    "seen": 1791394518.617721,
     "ast_hash": "afaf123ef27c327301f6801ece39a32a",
     "semantic_hash": "afaf123ef27c327301f6801ece39a32a"
+  },
+  "app.py": {
+    "mtime": 1791293650.8712523,
+    "seen": 1791394518.617723,
+    "ast_hash": "ec444b23c35c03892b540f34aaa1f9b2",
+    "semantic_hash": "ec444b23c35c03892b540f34aaa1f9b2"
+  },
+  "config.example.json": {
+    "mtime": 1791359184.7868109,
+    "seen": 1791394518.6177244,
+    "ast_hash": "9db9a7b8ab2fde263934ef1e1f224696",
+    "semantic_hash": "9db9a7b8ab2fde263934ef1e1f224696"
+  },
+  "copilot_agent/__init__.py": {
+    "mtime": 1791293062.2261856,
+    "seen": 1791394518.6177258,
+    "ast_hash": "cfafae6d4f0f7459d080819e6dcc77af",
+    "semantic_hash": "cfafae6d4f0f7459d080819e6dcc77af"
+  },
+  "copilot_agent/app.py": {
+    "mtime": 1791393758.4242134,
+    "seen": 1791394518.6177273,
+    "ast_hash": "8788dca9f29676d417ec609e118fa12e",
+    "semantic_hash": "8788dca9f29676d417ec609e118fa12e"
+  },
+  "copilot_agent/approvals.py": {
+    "mtime": 1791393585.2055225,
+    "seen": 1791394518.6177287,
+    "ast_hash": "17fc0a9b400d4e9c55d524b2537f726d",
+    "semantic_hash": "17fc0a9b400d4e9c55d524b2537f726d"
+  },
+  "copilot_agent/archives.py": {
+    "mtime": 1791301191.0398602,
+    "seen": 1791394518.6177309,
+    "ast_hash": "300dbc823b042b92463c38ca629ab2b4",
+    "semantic_hash": "300dbc823b042b92463c38ca629ab2b4"
+  },
+  "copilot_agent/attachments.py": {
+    "mtime": 1791302636.0563507,
+    "seen": 1791394518.6177323,
+    "ast_hash": "cffc78cafbfe5af19aa1d1d6d18e8083",
+    "semantic_hash": "cffc78cafbfe5af19aa1d1d6d18e8083"
+  },
+  "copilot_agent/browser.py": {
+    "mtime": 1791393589.8164835,
+    "seen": 1791394518.6177335,
+    "ast_hash": "544d15e4318c3b3429b28e2a103cd003",
+    "semantic_hash": "544d15e4318c3b3429b28e2a103cd003"
+  },
+  "copilot_agent/bundle.py": {
+    "mtime": 1791302705.0338335,
+    "seen": 1791394518.617735,
+    "ast_hash": "9e47d8210c3e2d9812fffa1bde655c26",
+    "semantic_hash": "9e47d8210c3e2d9812fffa1bde655c26"
+  },
+  "copilot_agent/code_runner.py": {
+    "mtime": 1791360933.9756112,
+    "seen": 1791394518.6177363,
+    "ast_hash": "78c4140c138060eb8a6cf851a8acb450",
+    "semantic_hash": "78c4140c138060eb8a6cf851a8acb450"
+  },
+  "copilot_agent/config.py": {
+    "mtime": 1791359183.9789305,
+    "seen": 1791394518.6177378,
+    "ast_hash": "dd82bc34fb8648e0bf094a01545e09d0",
+    "semantic_hash": "dd82bc34fb8648e0bf094a01545e09d0"
+  },
+  "copilot_agent/delivery.py": {
+    "mtime": 1791305053.9741652,
+    "seen": 1791394518.617739,
+    "ast_hash": "eddb6df2decd4c0604c841ad4ec0c5e5",
+    "semantic_hash": "eddb6df2decd4c0604c841ad4ec0c5e5"
+  },
+  "copilot_agent/desktop.py": {
+    "mtime": 1791363929.767456,
+    "seen": 1791394518.6177404,
+    "ast_hash": "5b7087693b3501715e84ea419d839abb",
+    "semantic_hash": "5b7087693b3501715e84ea419d839abb"
+  },
+  "copilot_agent/diagnostics.py": {
+    "mtime": 1791379675.1311176,
+    "seen": 1791394518.6177418,
+    "ast_hash": "d2c80459865ab1031f9328868e87f06c",
+    "semantic_hash": "d2c80459865ab1031f9328868e87f06c"
+  },
+  "copilot_agent/document_catalogue.py": {
+    "mtime": 1791394449.159955,
+    "seen": 1791394518.617743,
+    "ast_hash": "e5f63e24433f7d5db05ebe600db3f984",
+    "semantic_hash": "e5f63e24433f7d5db05ebe600db3f984"
+  },
+  "copilot_agent/downloads.py": {
+    "mtime": 1791300996.518745,
+    "seen": 1791394518.6177447,
+    "ast_hash": "7e14e043b4004a14bc3da0e121623c35",
+    "semantic_hash": "7e14e043b4004a14bc3da0e121623c35"
+  },
+  "copilot_agent/feedback.py": {
+    "mtime": 1791378962.3232212,
+    "seen": 1791394518.6177466,
+    "ast_hash": "5cd345c4c712aafb1e05a0ef234c16e1",
+    "semantic_hash": "5cd345c4c712aafb1e05a0ef234c16e1"
+  },
+  "copilot_agent/file_picker.py": {
+    "mtime": 1791302419.9257398,
+    "seen": 1791394518.6177483,
+    "ast_hash": "4bd47278a9dd2d1ab1063cfc711d5f21",
+    "semantic_hash": "4bd47278a9dd2d1ab1063cfc711d5f21"
+  },
+  "copilot_agent/findings.py": {
+    "mtime": 1791293184.6948767,
+    "seen": 1791394518.6177495,
+    "ast_hash": "5ccfdda419919a85b40f2ebd86aced78",
+    "semantic_hash": "5ccfdda419919a85b40f2ebd86aced78"
+  },
+  "copilot_agent/image_viewer.py": {
+    "mtime": 1791320065.9783545,
+    "seen": 1791394518.617751,
+    "ast_hash": "9855f7c6004d93d505e976747740acd2",
+    "semantic_hash": "9855f7c6004d93d505e976747740acd2"
+  },
+  "copilot_agent/local_python_runner.py": {
+    "mtime": 1791363934.1686454,
+    "seen": 1791394518.6177523,
+    "ast_hash": "3242f2e1d01bb224dae9d820b37b3fd5",
+    "semantic_hash": "3242f2e1d01bb224dae9d820b37b3fd5"
+  },
+  "copilot_agent/local_python_worker.py": {
+    "mtime": 1791361041.3666646,
+    "seen": 1791394518.6177535,
+    "ast_hash": "ab62ee3b9b77b94b079e70e989ff73b9",
+    "semantic_hash": "ab62ee3b9b77b94b079e70e989ff73b9"
+  },
+  "copilot_agent/logging_utils.py": {
+    "mtime": 1791299141.9860363,
+    "seen": 1791394518.6177547,
+    "ast_hash": "69e6522b24c7c07c6d8ec80f3917338c",
+    "semantic_hash": "69e6522b24c7c07c6d8ec80f3917338c"
+  },
+  "copilot_agent/orchestrator.py": {
+    "mtime": 1791394389.7559612,
+    "seen": 1791394518.617756,
+    "ast_hash": "2ee16295559a5000525997df08bc671a",
+    "semantic_hash": "2ee16295559a5000525997df08bc671a"
+  },
+  "copilot_agent/persistence.py": {
+    "mtime": 1791293062.990836,
+    "seen": 1791394518.617757,
+    "ast_hash": "10de4bf612c20431d7c9db9cbbea0017",
+    "semantic_hash": "10de4bf612c20431d7c9db9cbbea0017"
+  },
+  "copilot_agent/policy.py": {
+    "mtime": 1791363921.0047073,
+    "seen": 1791394518.6177585,
+    "ast_hash": "4a2bdb5190ce0d1cb9f3019f87072e14",
+    "semantic_hash": "4a2bdb5190ce0d1cb9f3019f87072e14"
+  },
+  "copilot_agent/prompts.py": {
+    "mtime": 1791393609.0754254,
+    "seen": 1791394518.6177597,
+    "ast_hash": "4291913d4c94ed8fac6b5e840e7ab031",
+    "semantic_hash": "4291913d4c94ed8fac6b5e840e7ab031"
+  },
+  "copilot_agent/protocol.py": {
+    "mtime": 1791394269.286413,
+    "seen": 1791394518.6177611,
+    "ast_hash": "c073bbab7865062808e74623a805dccb",
+    "semantic_hash": "c073bbab7865062808e74623a805dccb"
+  },
+  "copilot_agent/reused_browser.py": {
+    "mtime": 1791318510.9639745,
+    "seen": 1791394518.6177623,
+    "ast_hash": "680d17d657724599e752bc62869de92d",
+    "semantic_hash": "680d17d657724599e752bc62869de92d"
+  },
+  "copilot_agent/setup_resources.py": {
+    "mtime": 1791307255.1117072,
+    "seen": 1791394518.6177635,
+    "ast_hash": "5a2c78c74d110c0c625c9b28a30a6022",
+    "semantic_hash": "5a2c78c74d110c0c625c9b28a30a6022"
+  },
+  "copilot_agent/site_knowledge.py": {
+    "mtime": 1791393636.8840222,
+    "seen": 1791394518.6177647,
+    "ast_hash": "0b675d048031712a2c1d50876058e122",
+    "semantic_hash": "0b675d048031712a2c1d50876058e122"
+  },
+  "copilot_agent/state.py": {
+    "mtime": 1791394208.968589,
+    "seen": 1791394518.6177661,
+    "ast_hash": "5f423e4ccccf4eb25f4ed53b5941f6a6",
+    "semantic_hash": "5f423e4ccccf4eb25f4ed53b5941f6a6"
+  },
+  "copilot_agent/storage.py": {
+    "mtime": 1791300019.391276,
+    "seen": 1791394518.6177676,
+    "ast_hash": "f73800e22b4a3997be600e3af284cbf8",
+    "semantic_hash": "f73800e22b4a3997be600e3af284cbf8"
+  },
+  "copilot_agent/sync.py": {
+    "mtime": 1791293361.189024,
+    "seen": 1791394518.617769,
+    "ast_hash": "ff07174ba41d98403099165a3c97b1a8",
+    "semantic_hash": "ff07174ba41d98403099165a3c97b1a8"
+  },
+  "copilot_agent/tools.py": {
+    "mtime": 1791394506.196859,
+    "seen": 1791394518.6177704,
+    "ast_hash": "a4fbfb909d813e30570f947c0a557b6c",
+    "semantic_hash": "a4fbfb909d813e30570f947c0a557b6c"
+  },
+  "copilot_agent/web_documents.py": {
+    "mtime": 1791394453.8744712,
+    "seen": 1791394518.6177719,
+    "ast_hash": "7da03f6f554e77c42aca45de0296c320",
+    "semantic_hash": "7da03f6f554e77c42aca45de0296c320"
+  },
+  "copilot_agent/web_navigation.py": {
+    "mtime": 1791394470.921321,
+    "seen": 1791394518.6177733,
+    "ast_hash": "29e4b70302f888bb47a6a7a420dbd3ec",
+    "semantic_hash": "29e4b70302f888bb47a6a7a420dbd3ec"
+  },
+  "copilot_agent/web_privacy.py": {
+    "mtime": 1791394393.4432547,
+    "seen": 1791394518.6177757,
+    "ast_hash": "d91f64a1480e46f925ae88a4906a760c",
+    "semantic_hash": "d91f64a1480e46f925ae88a4906a760c"
+  },
+  "schemas/response-v1.schema.json": {
+    "mtime": 1791293183.0690892,
+    "seen": 1791394518.6177769,
+    "ast_hash": "9237d79c76083459e492fef924f8659c",
+    "semantic_hash": "9237d79c76083459e492fef924f8659c"
+  },
+  "schemas/tool-catalogue-v1.json": {
+    "mtime": 1791394507.920408,
+    "seen": 1791394518.6177778,
+    "ast_hash": "9453302f308f2df9c3b5a3d7851b5c3d",
+    "semantic_hash": "9453302f308f2df9c3b5a3d7851b5c3d"
+  },
+  "tests/inspect_download_settings.py": {
+    "mtime": 1791299141.2175677,
+    "seen": 1791394518.6177795,
+    "ast_hash": "587bccc3abf818ce4f303d4555eeb9f5",
+    "semantic_hash": "587bccc3abf818ce4f303d4555eeb9f5"
+  },
+  "tests/live_acceptance.py": {
+    "mtime": 1791298144.4410112,
+    "seen": 1791394518.6177807,
+    "ast_hash": "49e31ea0f6e0c76f9b2a2f3056a56c40",
+    "semantic_hash": "49e31ea0f6e0c76f9b2a2f3056a56c40"
+  },
+  "tests/live_attachments.py": {
+    "mtime": 1791303012.0854657,
+    "seen": 1791394518.617782,
+    "ast_hash": "4ac23f7bb90907464043da98a44bd077",
+    "semantic_hash": "4ac23f7bb90907464043da98a44bd077"
+  },
+  "tests/live_delivery.py": {
+    "mtime": 1791301275.680767,
+    "seen": 1791394518.6177833,
+    "ast_hash": "5d52c5b34a09636bc843cfcccf7f5c7e",
+    "semantic_hash": "5d52c5b34a09636bc843cfcccf7f5c7e"
+  },
+  "tests/live_download_run.py": {
+    "mtime": 1791303808.6239052,
+    "seen": 1791394518.6177843,
+    "ast_hash": "39ce267eed3bbf7cc7bcd06c24738500",
+    "semantic_hash": "39ce267eed3bbf7cc7bcd06c24738500"
+  },
+  "tests/live_new_session.py": {
+    "mtime": 1791302814.3126254,
+    "seen": 1791394518.617786,
+    "ast_hash": "650ea4cab35ed9ec5ec16ca70d9c9c83",
+    "semantic_hash": "650ea4cab35ed9ec5ec16ca70d9c9c83"
+  },
+  "tests/live_probe.py": {
+    "mtime": 1791297081.8793283,
+    "seen": 1791394518.6177874,
+    "ast_hash": "65de997ac2f0a85658540665c582c112",
+    "semantic_hash": "65de997ac2f0a85658540665c582c112"
+  },
+  "tests/live_verify_completed_run.py": {
+    "mtime": 1791304647.6615095,
+    "seen": 1791394518.617789,
+    "ast_hash": "10af6e70216454d6e817af0756f06bce",
+    "semantic_hash": "10af6e70216454d6e817af0756f06bce"
+  },
+  "tests/test_app_ports.py": {
+    "mtime": 1791300676.360157,
+    "seen": 1791394518.6177902,
+    "ast_hash": "1c9a2da9cc7af8cea78dcb938d8ec90c",
+    "semantic_hash": "1c9a2da9cc7af8cea78dcb938d8ec90c"
+  },
+  "tests/test_app_sessions.py": {
+    "mtime": 1791318257.622595,
+    "seen": 1791394518.6177914,
+    "ast_hash": "1fb67c97aa6d791b58b179f812e1a0a9",
+    "semantic_hash": "1fb67c97aa6d791b58b179f812e1a0a9"
+  },
+  "tests/test_archives.py": {
+    "mtime": 1791301220.8314285,
+    "seen": 1791394518.6177926,
+    "ast_hash": "4574def15cbc54c140f4184d6444ce48",
+    "semantic_hash": "4574def15cbc54c140f4184d6444ce48"
+  },
+  "tests/test_attachment_capacity.py": {
+    "mtime": 1791393730.9419796,
+    "seen": 1791394518.617794,
+    "ast_hash": "ca46a044fecc9ed26dd6c0150de9af25",
+    "semantic_hash": "ca46a044fecc9ed26dd6c0150de9af25"
+  },
+  "tests/test_attachments.py": {
+    "mtime": 1791302636.746172,
+    "seen": 1791394518.6177952,
+    "ast_hash": "c07ddd4ec62e436f8cd0c44ae06e9d8a",
+    "semantic_hash": "c07ddd4ec62e436f8cd0c44ae06e9d8a"
+  },
+  "tests/test_browser.py": {
+    "mtime": 1791359305.2600727,
+    "seen": 1791394518.6177967,
+    "ast_hash": "0ff151515aaa9acc2896575a3bf2bb0b",
+    "semantic_hash": "0ff151515aaa9acc2896575a3bf2bb0b"
+  },
+  "tests/test_browser_plan_extensions.py": {
+    "mtime": 1791389600.2303646,
+    "seen": 1791394518.617798,
+    "ast_hash": "a9e8fbc43d25233b970582ee337ed0bf",
+    "semantic_hash": "a9e8fbc43d25233b970582ee337ed0bf"
+  },
+  "tests/test_bug_handoff.py": {
+    "mtime": 1791381442.494939,
+    "seen": 1791394518.6177995,
+    "ast_hash": "d84bb424cb2242ae20fdb6df9401b944",
+    "semantic_hash": "d84bb424cb2242ae20fdb6df9401b944"
+  },
+  "tests/test_bundle.py": {
+    "mtime": 1791302753.7604012,
+    "seen": 1791394518.6178012,
+    "ast_hash": "d57d9d0f464fe796be27a43898d87152",
+    "semantic_hash": "d57d9d0f464fe796be27a43898d87152"
+  },
+  "tests/test_code_runner.py": {
+    "mtime": 1791364004.3408475,
+    "seen": 1791394518.6178024,
+    "ast_hash": "de0ae8dddd5b247311533751fea3ca8e",
+    "semantic_hash": "de0ae8dddd5b247311533751fea3ca8e"
+  },
+  "tests/test_delivery.py": {
+    "mtime": 1791305054.6913571,
+    "seen": 1791394518.6178036,
+    "ast_hash": "270145e7ed0604a896c18c01afe5d7c4",
+    "semantic_hash": "270145e7ed0604a896c18c01afe5d7c4"
+  },
+  "tests/test_delivery_integration.py": {
+    "mtime": 1791302208.654292,
+    "seen": 1791394518.6178048,
+    "ast_hash": "09bcc4121c895384da652caac133de7d",
+    "semantic_hash": "09bcc4121c895384da652caac133de7d"
+  },
+  "tests/test_diagnostics.py": {
+    "mtime": 1791379478.8070874,
+    "seen": 1791394518.6178064,
+    "ast_hash": "4626021165980911427e2222d7c953e1",
+    "semantic_hash": "4626021165980911427e2222d7c953e1"
+  },
+  "tests/test_document_catalogue.py": {
+    "mtime": 1791393792.3268073,
+    "seen": 1791394518.6178076,
+    "ast_hash": "8cad9ce2e6b3875857b9ea51fb3c4ec1",
+    "semantic_hash": "8cad9ce2e6b3875857b9ea51fb3c4ec1"
+  },
+  "tests/test_downloads.py": {
+    "mtime": 1791300731.633369,
+    "seen": 1791394518.6178086,
+    "ast_hash": "80bbde74c5f1dcb78b6ef282e6c2976d",
+    "semantic_hash": "80bbde74c5f1dcb78b6ef282e6c2976d"
+  },
+  "tests/test_edge_startup.py": {
+    "mtime": 1791318559.7507255,
+    "seen": 1791394518.61781,
+    "ast_hash": "194821b3dbd8e1e285676c0fa57fbdb1",
+    "semantic_hash": "194821b3dbd8e1e285676c0fa57fbdb1"
+  },
+  "tests/test_feedback.py": {
+    "mtime": 1791394149.4287353,
+    "seen": 1791394518.6178112,
+    "ast_hash": "796e2f7ed20d0cddbe310471336bb7e0",
+    "semantic_hash": "796e2f7ed20d0cddbe310471336bb7e0"
+  },
+  "tests/test_file_picker.py": {
+    "mtime": 1791302420.6871083,
+    "seen": 1791394518.6178126,
+    "ast_hash": "2f6c2c43d2783f6183bce0aae463316d",
+    "semantic_hash": "2f6c2c43d2783f6183bce0aae463316d"
+  },
+  "tests/test_launcher.py": {
+    "mtime": 1791390999.076549,
+    "seen": 1791394518.617814,
+    "ast_hash": "5dd3cd84660f508ec06c7ef9360118f0",
+    "semantic_hash": "5dd3cd84660f508ec06c7ef9360118f0"
+  },
+  "tests/test_orchestrator.py": {
+    "mtime": 1791394032.41575,
+    "seen": 1791394518.6178153,
+    "ast_hash": "13eef2400e646a2cf1ae68c089d708c1",
+    "semantic_hash": "13eef2400e646a2cf1ae68c089d708c1"
+  },
+  "tests/test_protocol_state.py": {
+    "mtime": 1791363999.4687395,
+    "seen": 1791394518.6178167,
+    "ast_hash": "faa85f6514e74c7556e5fcb826cf2dac",
+    "semantic_hash": "faa85f6514e74c7556e5fcb826cf2dac"
+  },
+  "tests/test_setup_resources.py": {
+    "mtime": 1791307639.4687068,
+    "seen": 1791394518.617818,
+    "ast_hash": "51ff211c8d480cb9b05e4f9b43cfaaee",
+    "semantic_hash": "51ff211c8d480cb9b05e4f9b43cfaaee"
+  },
+  "tests/test_site_knowledge.py": {
+    "mtime": 1791393641.4239097,
+    "seen": 1791394518.6178193,
+    "ast_hash": "f7c941be026f2d64760436baaa2a955b",
+    "semantic_hash": "f7c941be026f2d64760436baaa2a955b"
+  },
+  "tests/test_storage.py": {
+    "mtime": 1791300217.5952773,
+    "seen": 1791394518.6178212,
+    "ast_hash": "7630cc3b696c6173c433b9831c788c15",
+    "semantic_hash": "7630cc3b696c6173c433b9831c788c15"
+  },
+  "tests/test_sync.py": {
+    "mtime": 1791293363.5098138,
+    "seen": 1791394518.6178243,
+    "ast_hash": "0b57440f2d8fe25f53b637eb265dcf3e",
+    "semantic_hash": "0b57440f2d8fe25f53b637eb265dcf3e"
+  },
+  "tests/test_tools.py": {
+    "mtime": 1791363995.1097078,
+    "seen": 1791394518.6178262,
+    "ast_hash": "f60679008ffc161ed05f12435eca3595",
+    "semantic_hash": "f60679008ffc161ed05f12435eca3595"
+  },
+  "tests/test_version_launcher.py": {
+    "mtime": 1791391007.6049097,
+    "seen": 1791394518.6178286,
+    "ast_hash": "810d5fa5fe91d1840e6ba95aa968618f",
+    "semantic_hash": "810d5fa5fe91d1840e6ba95aa968618f"
+  },
+  "tests/test_web_documents.py": {
+    "mtime": 1791393897.2217126,
+    "seen": 1791394518.6178308,
+    "ast_hash": "5e5962180024e10b88b0d8568b9dedb5",
+    "semantic_hash": "5e5962180024e10b88b0d8568b9dedb5"
+  },
+  "tests/test_web_navigation.py": {
+    "mtime": 1791394506.7632656,
+    "seen": 1791394518.617836,
+    "ast_hash": "3f2a14d00a56208132d7c8179512dbf0",
+    "semantic_hash": "3f2a14d00a56208132d7c8179512dbf0"
+  },
+  "tests/test_web_privacy.py": {
+    "mtime": 1791394398.071664,
+    "seen": 1791394518.6178405,
+    "ast_hash": "0808057b4fd95776d532c96e34701072",
+    "semantic_hash": "0808057b4fd95776d532c96e34701072"
+  },
+  "tests/test_web_transport.py": {
+    "mtime": 1791394182.9579978,
+    "seen": 1791394518.6178434,
+    "ast_hash": "3271117b9ce47ef9518422936bcd74fc",
+    "semantic_hash": "3271117b9ce47ef9518422936bcd74fc"
+  },
+  "tests/test_website_integration.py": {
+    "mtime": 1791393599.0705485,
+    "seen": 1791394518.6178455,
+    "ast_hash": "16a3d20d8d35aa6932c9ed0d7fd89b8f",
+    "semantic_hash": "16a3d20d8d35aa6932c9ed0d7fd89b8f"
+  },
+  "version_launcher.py": {
+    "mtime": 1791390886.347549,
+    "seen": 1791394518.6178498,
+    "ast_hash": "d5b8f2ead0032cf4922b10e9f0465315",
+    "semantic_hash": "d5b8f2ead0032cf4922b10e9f0465315"
   }
 }

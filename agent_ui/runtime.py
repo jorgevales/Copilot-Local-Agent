@@ -73,11 +73,12 @@ class AgentRuntime:
         self.request_approval = request_approval
         self.thread = None
         self.closed = False
+        self.cancel_event = threading.Event()
         self.action_lock = threading.Lock()
         self.action_queue = Queue()
         self.action_thread = threading.Thread(target=self._dispatch_actions, daemon=True)
         self.action_thread.start()
-        self.capabilities = {'stop': False, 'new_session': True, 'attach': True,
+        self.capabilities = {'stop': True, 'new_session': True, 'attach': True,
                              'set_model': False, 'resume': False}
         self._start_agent()
 
@@ -91,6 +92,7 @@ class AgentRuntime:
 
         old_terminal, old_ask = app._TERMINAL, app._UI_ASK
         old_approval, old_events = app._UI_APPROVAL_DECIDER, app._UI_EVENT_SINK
+        old_cancel = app._UI_CANCEL_EVENT
 
         def terminal_sink(message):
             text = str(message)
@@ -112,6 +114,7 @@ class AgentRuntime:
         app._UI_ASK = ask
         app._UI_APPROVAL_DECIDER = approve
         app._UI_EVENT_SINK = self.emit
+        app._UI_CANCEL_EVENT = self.cancel_event
         args = SimpleNamespace(config=None, resume=None, attach_existing=False, port=None,
                                profile=None, model=None, yes_setup=False, setup_only=False)
         try:
@@ -123,12 +126,17 @@ class AgentRuntime:
             self.broker.close()
             app._TERMINAL, app._UI_ASK = old_terminal, old_ask
             app._UI_APPROVAL_DECIDER, app._UI_EVENT_SINK = old_approval, old_events
+            app._UI_CANCEL_EVENT = old_cancel
             self.emit('connection', {'state': 'disconnected', 'summary': 'Agent session ended.'})
 
     def submit(self, text):
         self.broker.submit(text)
 
     def action(self, name, value=None):
+        if name == 'stop':
+            self.cancel_event.set()
+            self.emit('status', {'state': 'cancelling', 'summary': 'Cancellation requested; already submitted effects are preserved.'})
+            return
         if name not in {'new_session', 'attach'}:
             raise ValueError('This action is not supported by the connected runtime')
         command = ':new' if name == 'new_session' else ':attach'
@@ -160,6 +168,7 @@ class AgentRuntime:
         if self.closed:
             return
         self.closed = True
+        self.cancel_event.set()
         self.action_queue.put(None)
         self.broker.close()
         if self.thread is not None:

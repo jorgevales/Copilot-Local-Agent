@@ -21,8 +21,8 @@ class AssembledCapacityTests(unittest.IsolatedAsyncioTestCase):
         config.max_context_chars = 300
         browser = MockBrowser([final_response])
         engine = Orchestrator(config,browser,registry,state,display=lambda message:None)
-        # Force a due findings attachment and an independently needed context
-        # attachment alongside all eight real startup reference attachments.
+        # Force due findings plus private context overflow alongside all eight
+        # startup references. Private context stays inline, adding no file.
         state.data['message_count'] = 9
         state.data['requirements'] = ['Synthetic durable capacity context. ' * 40]
         state.save()
@@ -36,8 +36,8 @@ class AssembledCapacityTests(unittest.IsolatedAsyncioTestCase):
             engine.approved_attachment_hashes[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
         return root,state,browser,engine,extras
 
-    async def test_twenty_includes_eight_guidance_ten_user_findings_and_context(self):
-        root,state,browser,engine,extras = self.fixture(10)
+    async def test_twenty_includes_eight_guidance_eleven_reviewed_files_and_findings(self):
+        root,state,browser,engine,extras = self.fixture(11)
         with patch('builtins.print'):
             response = await engine._validated_exchange('initialize','Synthetic assembled capacity boundary.',extras)
         self.assertEqual(response['completion_status'],'complete')
@@ -49,12 +49,14 @@ class AssembledCapacityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(expected_guidance),8)
         self.assertTrue(expected_guidance.issubset({path.name for path in attachments}))
         self.assertIn(engine.findings.attachment,attachments)
-        self.assertIn(engine.prompts.context_file,attachments)
+        self.assertNotIn(engine.prompts.context_file,attachments)
+        self.assertFalse(engine.prompts.context_file.exists())
         self.assertEqual(sent['message']['copilot_message_number'],10)
         self.assertTrue(sent['message']['useful_findings_file_attached'])
-        self.assertEqual(len(sent['message']['user_attachment_manifest']),10)
-        self.assertEqual(sent['message']['context']['reference_attachment'],'session-context.md')
-        # Actual send staging preserves exactly the ten reviewed user files.
+        self.assertEqual(len(sent['message']['user_attachment_manifest']),11)
+        self.assertTrue(sent['message']['context']['private_context_omitted'])
+        self.assertNotIn('reference_attachment',sent['message']['context'])
+        # Actual send staging preserves exactly all reviewed input files.
         for source in extras:
             uploaded = next(path for path in attachments if path.name==source.name)
             self.assertNotEqual(uploaded,source)
@@ -69,7 +71,7 @@ class AssembledCapacityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved['message_count'],10)
 
     async def test_twenty_first_file_blocks_before_transport_intent_or_count(self):
-        root,state,browser,engine,extras = self.fixture(11)
+        root,state,browser,engine,extras = self.fixture(12)
         with patch('builtins.print'),self.assertRaisesRegex(PolicyError,'20-attachment limit'):
             await engine._send('initialize','Synthetic oversized assembled boundary.',extras)
         self.assertEqual(browser.sent,[])

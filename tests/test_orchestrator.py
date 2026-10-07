@@ -579,7 +579,12 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         events = [json.loads(line) for line in state.log.path.read_text(encoding='utf-8').splitlines()]
         evidence = [item for item in events if item['event'] == 'protocol_ui_evidence']
         self.assertEqual(2, len(evidence))
-        self.assertEqual([str(item[1]) for item in captured], [item['artifact'] for item in evidence])
+        from copilot_agent.web_privacy import audit_evidence
+        for event, (_, artifact), index in zip(evidence, captured, (1, 2)):
+            self.assertTrue(artifact.is_file())
+            details = {'request_id': browser.sent[index]['message']['request_id'], 'artifact': str(artifact)}
+            self.assertEqual(event['evidence'], audit_evidence(details))
+            self.assertNotIn('artifact', event)
         self.assertEqual([browser.sent[index]['message']['request_id'] for index in (1, 2)],
                          [item['request_id'] for item in evidence])
         self.assertEqual(['initialize', 'user_turn', 'correction', 'correction'],
@@ -605,5 +610,10 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         unavailable = [item for item in events if item['event'] == 'protocol_ui_evidence_unavailable']
         self.assertEqual(1, len(unavailable))
         self.assertEqual(browser.sent[1]['message']['request_id'], unavailable[0]['request_id'])
-        self.assertIn('Synthetic diagnostic capture unavailable', unavailable[0]['error'])
+        from copilot_agent.web_privacy import audit_evidence
+        details = {'request_id': browser.sent[1]['message']['request_id'],
+                   'error': 'Synthetic diagnostic capture unavailable.'}
+        self.assertEqual(unavailable[0]['evidence'], audit_evidence(details))
+        self.assertNotIn('error', unavailable[0])
+        self.assertNotIn('Synthetic diagnostic capture unavailable', json.dumps(unavailable[0]))
         self.assertEqual([], registry.calls)

@@ -2,7 +2,7 @@ import threading
 import time
 import unittest
 
-from agent_ui.runtime import PromptBroker
+from agent_ui.runtime import AgentRuntime, PromptBroker
 
 
 class PromptBrokerTests(unittest.TestCase):
@@ -35,6 +35,20 @@ class PromptBrokerTests(unittest.TestCase):
         while not broker.active_reply and time.monotonic()<deadline: time.sleep(.01)
         broker.close();agent.join(2)
         self.assertEqual([':exit'],answers)
+
+
+class RuntimeCancellationTests(unittest.TestCase):
+    def test_stop_sets_shared_event_without_launching_or_queuing_another_command(self):
+        runtime = AgentRuntime.__new__(AgentRuntime)
+        runtime.cancel_event = threading.Event()
+        events = []
+        runtime.emit = lambda kind, payload: events.append((kind, payload))
+        runtime.action('stop')
+        self.assertTrue(runtime.cancel_event.is_set())
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0][0], 'status')
+        self.assertEqual(events[0][1]['state'], 'cancelling')
+        self.assertIn('already submitted effects', events[0][1]['summary'])
 
 
 if __name__=='__main__': unittest.main()

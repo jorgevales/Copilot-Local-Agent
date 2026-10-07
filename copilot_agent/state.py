@@ -50,9 +50,21 @@ class SessionState:
 
     def save(self):
         self.data['updated_at'] = now()
-        write_json(self.path, redact(self.data))
+        data = self.data
+        if data.get('website_private'):
+            from .web_privacy import private_session_snapshot
+            data = private_session_snapshot(data)
+        write_json(self.path, redact(data))
 
     def event(self, event_type: str, **details):
+        if self.data.get('website_private'):
+            from .web_privacy import audit_evidence, private_id
+            # Correlation IDs and outcomes suffice for ordinary diagnostics.
+            metadata = {key: details[key] for key in ('call_id', 'request_id', 'ordinal', 'attempt')
+                        if key in details}
+            if 'call_id' in metadata:
+                metadata['call_id'] = private_id(metadata['call_id'])
+            details = dict(metadata, evidence=audit_evidence(details))
         self.log.write(event_type, **details)
 
     def message(self, role: str, content, **metadata):
@@ -87,7 +99,8 @@ class SessionState:
 
     def begin_call(self, request: dict, state_changing: bool = True):
         call_id = request['call_id']
-        if call_id in self.data['calls']:
+        from .web_privacy import private_id
+        if call_id in self.data['calls'] or private_id(call_id) in self.data['calls']:
             raise RuntimeError('Duplicate call ID cannot execute again')
         if state_changing and any(c['status'] == 'uncertain' and c.get('state_changing', True) for c in self.data['calls'].values()):
             raise RuntimeError('A previous state-changing operation remains uncertain; inspect and reconcile before another change')

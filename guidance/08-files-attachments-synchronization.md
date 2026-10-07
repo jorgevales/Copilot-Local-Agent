@@ -2,6 +2,12 @@
 
 Guidance version: 1.0.
 
+## Hard attachment limit and large collections
+
+Copilot accepts at most **20 files in one message**, including startup guidance, findings and context. The orchestrator checks the complete assembled message before upload. Large collections use `documents.catalogue`, `documents.find` and `documents.retrieve` for searchable hash-bound local references, then `files.transfer_to_copilot` for relevant files on demand. Transfers reserve platform slots, deduplicate exact content, rank requested/active files and retain deferred originals. A generated index/manifest occupies one attachment slot; inspect its omitted references and retrieve specific files later. Near-duplicate names do not justify discarding different content.
+
+Prefer metadata-only results and a manifest when many documents are available. Send actual files when the task needs their contents. Logical metadata bundles preserve individual identities and hashes; ZIP uploads remain unsupported. Do not ask the user to sort hundreds of files manually. Knowledge reuse sends navigation context rather than complete document collections. Load `documents` guidance for supported inputs, failure recovery and verification.
+
 ## File scope and preservation
 
 Use configured allowed roots and exact resolved paths. Reject traversal, ambiguous targets and escapes through links/reparse points. Never delete files. Never silently overwrite existing content; use a new versioned name, preserved backup and atomic replacement when appropriate, or explicit authorization. Existing CDD workflow files are outside this project's modification scope.

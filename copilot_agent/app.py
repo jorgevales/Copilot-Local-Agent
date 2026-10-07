@@ -29,6 +29,7 @@ _TERMINAL = Feedback()
 _UI_ASK = None
 _UI_APPROVAL_DECIDER = None
 _UI_EVENT_SINK = None
+_UI_CANCEL_EVENT = None
 
 def system(message):
     _TERMINAL.emit('System', message)
@@ -187,7 +188,7 @@ async def start_new_session(config, previous, model_label, registry=None):
         state.event('model_selected', label=model_label, visible=True)
         engine = Orchestrator(fresh_config, browser, registry or ToolRegistry(), state,
                               approval_decider=_UI_APPROVAL_DECIDER, display=_TERMINAL.sink,
-                              event_sink=_UI_EVENT_SINK)
+                              event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT)
         await engine.initialize()
         if _UI_EVENT_SINK is not None:
             _UI_EVENT_SINK('session', {'title': 'Copilot session ' + state.session_id[:8]})
@@ -315,7 +316,7 @@ async def run(args):
         state.event('model_selected', label=chosen['label'], visible=True)
         orchestrator = Orchestrator(config, browser, ToolRegistry(), state,
                                     approval_decider=_UI_APPROVAL_DECIDER, display=_TERMINAL.sink,
-                                    event_sink=_UI_EVENT_SINK)
+                                    event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT)
         if _UI_EVENT_SINK is not None:
             _UI_EVENT_SINK('model', {'name': chosen['label'], 'verified': True})
             _UI_EVENT_SINK('session', {'title': 'Copilot session ' + state.session_id[:8]})

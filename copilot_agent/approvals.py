@@ -43,6 +43,12 @@ class ApprovalManager:
         ])
         self.feedback.record('Approval', 'Full immutable approval record retained.',
                              plan_hash=preview['plan_hash'], path=str(path))
+        consent = preview.get('prepared_code') or {}
+        if str(current_call.get('name', '')).startswith('site_knowledge.'):
+            self.feedback.emit('Approval', 'WEBSITE KNOWLEDGE CONSENT\n' +
+                               json.dumps(consent, ensure_ascii=False, indent=2) +
+                               '\nChoose Deny to continue the current task without saving knowledge.',
+                               preserve_markup=True)
         if current and all(str(item.get('name', '')).startswith('browser.') for item in current):
             self.feedback.emit('Approval', 'EXACT ORDERED BROWSER PLAN\n' +
                                json.dumps(current, ensure_ascii=False, indent=2), preserve_markup=True)
@@ -88,7 +94,14 @@ class ApprovalManager:
         if prepared_plan is not None:
             preview['prepared_pending_plan'] = prepared_plan
         path = self.state.directory / 'approvals' / (call_hash + '.json')
-        write_json(path, preview)
+        from .web_privacy import PRIVATE_TOOLS, audit_evidence
+        if self.state.data.get('website_private') or any(item.get('name') in PRIVATE_TOOLS for item in plan.get('tool_requests', [])):
+            # Show exact content for review; retain hashes rather than customer data.
+            stored = {key: preview[key] for key in ('approval_scope', 'plan_hash', 'call_hash', 'current_call_id', 'choices')}
+            stored['exact_plan_evidence'] = audit_evidence(plan)
+            write_json(path, stored)
+        else:
+            write_json(path, preview)
         self._show(preview, path)
         if call['name'] == 'local_attachment':
             self.feedback.emit('Approval', 'Files proposed for Copilot: ' + ', '.join(file.get('name', Path(file['path']).name) for file in plan['files']))
