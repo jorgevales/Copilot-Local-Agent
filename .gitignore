@@ -8,3 +8,5 @@ workspace/
 config.local.json
 .history/
 python-launcher.txt
+Copilot proposals/
+Copilot testing environment/

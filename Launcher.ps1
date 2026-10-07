@@ -226,6 +226,12 @@ function Get-OneDriveRoots {
 }
 
 try {
+    $projectVersion = $null
+    if ($Mode -eq 'Start') {
+        Write-Host 'Which version do you want to run? 1. Live repository  2. Copilot testing environment'
+        $projectVersion = (Read-Host 'Choose 1 or 2').Trim()
+        if ($projectVersion -notin @('1','2')) { throw 'Enter 1 or 2; no version was started.' }
+    }
     $savedInterpreters = [System.Collections.Generic.List[string]]::new()
     foreach ($account in @(Get-OneDriveRoots)) {
         $settingsPath = Join-Path $account 'Copilot Agent\settings.json'
@@ -457,7 +463,7 @@ print('Python runtime and Playwright verified.')
         if ($Mode -eq 'Setup') {
             & $python @pythonArgs (Join-Path $repoRoot 'app.py') --setup-only
         } elseif ($Mode -eq 'Start') {
-            & $python @pythonArgs (Join-Path $repoRoot 'app.py')
+            & $python @pythonArgs (Join-Path $repoRoot 'version_launcher.py') $projectVersion
         } else {
             & $python @pythonArgs (Join-Path $repoRoot 'app.py') --setup-only
             if ($LASTEXITCODE -ne 0) { throw 'Personal storage setup must complete before running tests.' }
