@@ -132,6 +132,10 @@ async def run(args):
         allowed_keys = {'allowed_domains', 'allowed_roots', 'model', 'response_timeout', 'max_corrections', 'max_tool_rounds', 'sync_timeout', 'max_delivery_retries', 'download_timeout', 'copilot_download_hosts'}
         for key in allowed_keys & personal.keys():
             setattr(config, key, personal[key])
+        # Migrate the former two-attempt personal default to the production
+        # response-recovery contract. Explicit operator config files may still
+        # choose a lower value when deliberately required.
+        config.max_corrections = 12
     if args.attach_existing:
         config.attach_existing = True
     if args.port:

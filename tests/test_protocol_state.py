@@ -279,6 +279,9 @@ class StateAndPromptTests(unittest.TestCase):
         self.assertEqual(7, runner['input_schema']['properties']['timeout_seconds']['maximum'])
         self.assertEqual(7, runner['limits']['timeout_seconds'])
         self.assertIn('configured limit of 7 seconds', runner['description'])
+        self.assertTrue(runner['execution_modes']['local_python']['available'])
+        self.assertEqual(['copilot_agent.desktop'],
+                         runner['execution_modes']['local_python']['exposed_application_imports'])
 
     def test_plan_grant_covers_exact_plan_and_once_is_not_persistent(self):
         async def exercise():

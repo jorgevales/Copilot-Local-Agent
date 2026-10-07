@@ -3,7 +3,9 @@ import copy
 import asyncio
 import hashlib
 import json
+import os
 from pathlib import Path
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -11,6 +13,7 @@ from copilot_agent.browser import CaptureTimeoutError, SubmissionAmbiguousError
 from copilot_agent.orchestrator import Orchestrator
 from copilot_agent.policy import PolicyError
 from copilot_agent.protocol import BEGIN, END, ProtocolError
+from copilot_agent.tools import ToolRegistry
 from tests.test_protocol_state import encoded, envelope, make_fixture
 
 
@@ -49,6 +52,48 @@ def tool_response(message, call_id='read-one', name='synthetic.read', arguments=
 
 
 class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Windows desktop capability')
+    async def test_planner_approval_worker_import_display_and_artifact_progress_end_to_end(self):
+        root, config, state, _ = make_fixture('desktop-e2e-')
+        registry = ToolRegistry()
+        output = root / 'workspace' / 'display-evidence.json'
+        script = ("import json\nfrom pathlib import Path\n"
+                  "from copilot_agent.desktop import enumerate_displays\n"
+                  "displays=enumerate_displays()\n"
+                  "Path('display-evidence.json').write_text(json.dumps(displays),encoding='utf-8')\n"
+                  "print(json.dumps({'display_count':len(displays)}))\n")
+        arguments = {'script':script, 'purpose':'Validate the approved desktop capability chain.',
+                     'language':'local_python', 'working_directory':str(output.parent),
+                     'read_paths':[], 'create_paths':['display-evidence.json'], 'modify_paths':[],
+                     'expected_outputs':['display-evidence.json'], 'commands':[], 'subprocesses':[],
+                     'network_destinations':[], 'permissions':['create_files','desktop_capture'],
+                     'risk_summary':'Enumerate display metadata and create one evidence file.',
+                     'recovery_notes':'No dependent action runs if capability validation fails.',
+                     'interpreter':sys.executable, 'arguments':[],
+                     'imports':['json','pathlib','copilot_agent.desktop'], 'timeout_seconds':10,
+                     'max_output_chars':4000,
+                     'expected_effects':['Enumerate displays','Create verified display evidence'],
+                     'viewer_windows':[]}
+        def planned(message):
+            return tool_response(message, 'desktop-capability-e2e', 'code_runner', arguments)
+        def finished(message):
+            self.assertEqual('tool_results', message['kind'])
+            outcome = message['content']['results'][0]
+            self.assertTrue(outcome['ok'], outcome)
+            self.assertTrue(outcome['result']['outputs'][0]['readable'])
+            return final_response(message, user_response='Desktop capability chain verified.')
+        browser = MockBrowser([final_response, planned, finished])
+        approvals = []
+        app = Orchestrator(config, browser, registry, state,
+                           approval_decider=lambda preview: approvals.append(preview) or 'once',
+                           display=lambda text: None)
+        await app.initialize()
+        result = await app.turn('Validate the available desktop capability and continue from its actual result.')
+        self.assertEqual('Desktop capability chain verified.', result['user_response'])
+        self.assertEqual(1, len(approvals))
+        self.assertEqual('completed', state.data['calls']['desktop-capability-e2e']['result']['result']['status'])
+        self.assertGreaterEqual(len(json.loads(output.read_text(encoding='utf-8'))), 1)
+
     async def test_complete_prepared_code_plan_asks_once_for_two_scripts(self):
         previews = []
         def approve_plan(preview):

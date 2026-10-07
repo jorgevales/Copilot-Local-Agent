@@ -194,7 +194,10 @@ class ToolRegistry:
                 if resolved[key].exists(): raise PolicyError("Create destination already exists")
                 if not resolved[key].parent.is_dir(): raise PolicyError("Create destination parent must exist")
         if name=="browser.open": URLPolicy(config_value(config,"allowed_domains",[])).resolve(args["url"])
-        if name=="code_runner": CodeRunner(policy,context["session_dir"]).validate(args)
+        if name=="code_runner":
+            CodeRunner(policy, context["session_dir"],
+                       {"tool_timeout":config_value(config,"tool_timeout",10),
+                        "max_output_chars":config_value(config,"max_output_chars",12000)}).validate(args)
         if name=="copilot.download":
             from .downloads import validate_download_args
             try: validate_download_args(args)

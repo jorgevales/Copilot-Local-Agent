@@ -19,6 +19,9 @@ import traceback
 from urllib.parse import urlsplit
 
 
+EXPOSED_APPLICATION_IMPORTS = frozenset({"copilot_agent.desktop"})
+
+
 def _within(path: Path, scopes: list[Path]) -> bool:
     return any(path == scope or scope.is_dir() and scope in path.parents for scope in scopes)
 
@@ -48,9 +51,13 @@ def main() -> int:
         return 2
     source = script_bytes.decode("utf-8", errors="strict")
     code = compile(source, str(script_path), "exec")
-    package_parent = str(Path(__file__).resolve().parents[1])
-    if package_parent not in sys.path:
-        sys.path.insert(0, package_parent)
+    package_parent = Path(__file__).resolve().parents[1]
+    approved_root = Path(plan["application_root"]).resolve()
+    if approved_root != package_parent:
+        print("Approved application import root differs from the bound worker runtime.", file=sys.stderr)
+        return 2
+    if str(approved_root) not in sys.path:
+        sys.path.insert(0, str(approved_root))
     working = Path(plan["working_directory"]).resolve()
     os.chdir(working)
     read_scopes = [Path(item).resolve() for item in plan["read_paths"]]
@@ -58,6 +65,7 @@ def main() -> int:
     modify_scopes = [Path(item).resolve() for item in plan["modify_paths"]]
     runtime_roots = [Path(sys.prefix).resolve(), Path(sys.base_prefix).resolve(), Path(__file__).resolve().parent]
     permissions = set(plan["permissions"])
+    declared_imports = set(plan["imports"])
     destinations = set()
     for item in plan["network_destinations"]:
         parsed = urlsplit(item)
@@ -68,6 +76,8 @@ def main() -> int:
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
     with ledger_path.open("a", encoding="utf-8", newline="\n") as ledger:
         _write_event(ledger, "worker_started", pid=os.getpid())
+        _write_event(ledger, "capabilities_validated", imports=sorted(declared_imports),
+                     application_imports=sorted(declared_imports & EXPOSED_APPLICATION_IMPORTS))
 
         def audit(event, args):
             if event == "open" and args and isinstance(args[0], (str, bytes)):
@@ -90,7 +100,11 @@ def main() -> int:
             if event in {"os.listdir", "os.scandir"}:
                 candidate = Path(args[0] if args and args[0] is not None else working)
                 candidate = (working / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
-                if not (_within(candidate, read_scopes) or _within(candidate, runtime_roots)):
+                # Import discovery needs to inspect the single bound parent that
+                # contains copilot_agent. This does not authorize reading files or
+                # enumerating any other project directory.
+                if not (candidate == approved_root or _within(candidate, read_scopes)
+                        or _within(candidate, runtime_roots)):
                     raise PermissionError("Directory inspection is outside the approved read scope: " + str(candidate))
             if event in {"os.system", "os.spawn", "os.posix_spawn", "os.exec", "pty.spawn"}:
                 raise PermissionError("Unmanaged process or shell execution is unavailable")
@@ -148,6 +162,8 @@ def main() -> int:
         def approved_import(name, globals=None, locals=None, fromlist=(), level=0):
             if level == 0 and name.split(".", 1)[0] in {"keyring", "winreg"}:
                 raise PermissionError("Credential and registry modules are unavailable")
+            if level == 0 and name.split(".", 1)[0] == "copilot_agent" and name not in EXPOSED_APPLICATION_IMPORTS:
+                raise PermissionError("Application module is not part of the approved Code Runner API: " + name)
             return original_import(name, globals, locals, fromlist, level)
 
         builtins.__import__ = approved_import

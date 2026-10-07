@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -11,6 +12,7 @@ from unittest.mock import patch
 from copilot_agent.code_runner import CodeRunner, FIELDS, OPTIONAL, REQUIRED
 from copilot_agent.local_python_runner import ManagedProcessRegistry
 from copilot_agent.policy import PathPolicy, PolicyError
+from copilot_agent.tools import ToolRegistry
 
 
 class CodeRunnerTests(unittest.TestCase):
@@ -245,6 +247,45 @@ class LocalPythonRunnerTests(unittest.TestCase):
         self.assertEqual("failed", result["status"])
         self.assertIn("outside the approved", result["stderr"])
         self.assertFalse((self.root / "undeclared.txt").exists())
+        with self.assertRaisesRegex(PolicyError, "not exposed"):
+            self.runner.prepare(self.plan("import copilot_agent.orchestrator\n",
+                                          imports=["copilot_agent.orchestrator"]))
+        with self.assertRaisesRegex(PolicyError, "preflight failed before approval"):
+            self.runner.prepare(self.plan("import unavailable_synthetic_dependency\n",
+                                          imports=["unavailable_synthetic_dependency"]))
+
+    def test_registry_preflight_uses_the_active_timeout_limit(self):
+        plan = self.plan("print('validated only')\n", timeout_seconds=20)
+        context = {"config":{"allowed_roots":[str(self.root)], "allowed_domains":[],
+                             "tool_timeout":30, "max_output_chars":4000},
+                   "session_dir":str(self.root)}
+        ToolRegistry().validate_call("code_runner", plan, context)
+        context["config"]["tool_timeout"] = 10
+        with self.assertRaisesRegex(PolicyError, "limit of 10"):
+            ToolRegistry().validate_call("code_runner", plan, context)
+
+    @unittest.skipUnless(os.name == "nt", "Windows desktop capability")
+    def test_exposed_desktop_api_preflights_and_runs_in_isolated_worker(self):
+        script = ("import json\nfrom pathlib import Path\n"
+                  "from copilot_agent.desktop import enumerate_displays\n"
+                  "displays=enumerate_displays()\n"
+                  "Path('display-evidence.json').write_text(json.dumps(displays),encoding='utf-8')\n"
+                  "print(json.dumps({'display_count':len(displays)}))\n")
+        plan = self.plan(script, imports=["json", "pathlib", "copilot_agent.desktop"],
+                         create_paths=["display-evidence.json"], expected_outputs=["display-evidence.json"],
+                         permissions=["create_files", "desktop_capture"],
+                         expected_effects=["Enumerate displays", "Create verified display evidence"])
+        prepared = self.runner.prepare(plan)
+        self.assertTrue(prepared["runtime_binding"]["import_preflight"]["ok"])
+        self.assertIn("copilot_agent.desktop", prepared["runtime_binding"]["import_preflight"]["imports"])
+        result = self.run_plan(plan)
+        self.assertEqual("completed", result["status"], result)
+        displays = json.loads((self.root / "display-evidence.json").read_text(encoding="utf-8"))
+        self.assertGreaterEqual(len(displays), 1)
+        self.assertTrue(result["outputs"][0]["readable"])
+        audit = json.loads(Path(result["audit_path"]).read_text(encoding="utf-8"))
+        capability = next(item for item in audit["worker_events"] if item["event"] == "capabilities_validated")
+        self.assertEqual(["copilot_agent.desktop"], capability["application_imports"])
 
     def test_interpreter_arguments_permissions_and_runtime_binding_change_hash(self):
         plan = self.plan("print('one')\n")

@@ -17,6 +17,7 @@ from .policy import PolicyError
 
 
 MAX_EVIDENCE_BYTES = 50 * 1024 * 1024
+EXPOSED_APPLICATION_IMPORTS = frozenset({"copilot_agent.desktop"})
 
 
 def _hash_file(path: Path, maximum: int = MAX_EVIDENCE_BYTES) -> tuple[str, int]:
@@ -33,14 +34,47 @@ def _hash_file(path: Path, maximum: int = MAX_EVIDENCE_BYTES) -> tuple[str, int]
 def runtime_binding(plan: dict) -> dict:
     """Bind the reviewed interpreter and fixed runtime implementation."""
     package = Path(__file__).resolve().parent
+    application_root = package.parent
     interpreter = Path(plan["interpreter"]).resolve()
     interpreter_hash, interpreter_size = _hash_file(interpreter, 200 * 1024 * 1024)
-    files = [package / "local_python_worker.py"]
+    files = [package / "local_python_worker.py", package / "__init__.py"]
+    if "copilot_agent.desktop" in plan.get("imports", []) or plan.get("viewer_windows"):
+        files.append(package / "desktop.py")
     if plan.get("viewer_windows"):
-        files.extend((package / "desktop.py", package / "image_viewer.py"))
+        files.append(package / "image_viewer.py")
+    preflight = _preflight_imports(interpreter, application_root, plan.get("imports", []))
     return {"interpreter": str(interpreter), "interpreter_sha256": interpreter_hash,
             "interpreter_size": interpreter_size,
+            "application_root": str(application_root), "import_preflight": preflight,
             "runtime_files": [{"path": str(path), "sha256": _hash_file(path)[0]} for path in files]}
+
+
+def _preflight_imports(interpreter: Path, application_root: Path, imports: list[str]) -> dict:
+    """Check declared modules in the exact isolated runtime before approval."""
+    probe = (
+        "import importlib.util,json,sys\n"
+        "sys.path.insert(0,sys.argv[1])\n"
+        "names=json.loads(sys.argv[2])\n"
+        "missing=[name for name in names if importlib.util.find_spec(name) is None]\n"
+        "if missing: raise ModuleNotFoundError(', '.join(missing))\n"
+        "if 'copilot_agent.desktop' in names:\n"
+        " from copilot_agent.desktop import enumerate_displays,capture_display\n"
+        "print(json.dumps({'available':names}))\n")
+    environment = _safe_environment(application_root)
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        completed = subprocess.run(
+            [str(interpreter), "-I", "-c", probe, str(application_root), json.dumps(imports)],
+            cwd=str(application_root), env=environment, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=8, check=False,
+            creationflags=flags)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise PolicyError("Declared import preflight could not start in the approved runtime: " + type(exc).__name__) from exc
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", errors="replace").strip().splitlines()
+        summary = detail[-1][:500] if detail else "module unavailable"
+        raise PolicyError("Declared import preflight failed before approval: " + summary)
+    return {"ok": True, "imports": list(imports), "isolated_runtime": True}
 
 
 def _pid_running(pid: int) -> bool:
@@ -217,8 +251,9 @@ async def execute_local_python(plan: dict, prepared: dict, session_dir: Path,
     run_dir.mkdir(parents=True, exist_ok=False)
     plan_path, ledger_path, audit_path = run_dir / "worker-plan.json", run_dir / "children.jsonl", run_dir / "audit.json"
     worker_plan = {key: plan[key] for key in ("working_directory", "read_paths", "create_paths", "modify_paths",
-                                               "network_destinations", "permissions", "subprocesses", "arguments")}
+                                               "network_destinations", "permissions", "subprocesses", "arguments", "imports")}
     worker_plan["script_sha256"] = prepared["script_sha256"]
+    worker_plan["application_root"] = prepared["runtime_binding"]["application_root"]
     plan_path.write_text(json.dumps(worker_plan, ensure_ascii=False, indent=2), encoding="utf-8")
     worker = Path(__file__).with_name("local_python_worker.py").resolve()
     command = [plan["interpreter"], "-I", str(worker), str(plan_path), prepared["script_path"], str(ledger_path), *plan["arguments"]]

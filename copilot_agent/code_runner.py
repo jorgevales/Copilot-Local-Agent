@@ -264,6 +264,11 @@ class CodeRunner:
                 raise PolicyError("Script contains an undeclared import: " + ", ".join(sorted(imported - set(plan["imports"]))))
             if imported.intersection({"keyring", "winreg", "builtins", "importlib", "runpy", "marshal"}):
                 raise PolicyError("Credential, registry and dynamic-loader imports are unavailable")
+            from .local_python_runner import EXPOSED_APPLICATION_IMPORTS
+            application_imports = {name for name in imported if name.split(".", 1)[0] == "copilot_agent"}
+            if not application_imports.issubset(EXPOSED_APPLICATION_IMPORTS):
+                raise PolicyError("Application import is not exposed to Code Runner: " +
+                                  ", ".join(sorted(application_imports - EXPOSED_APPLICATION_IMPORTS)))
             if "subprocess" in imported and "subprocesses" not in plan["permissions"]:
                 raise PolicyError("subprocess import requires managed subprocess permission")
             native = {name for name in imported if name.split(".", 1)[0] in {"ctypes", "win32api", "win32con", "win32gui", "win32ui", "win32process", "mss", "PIL"}}

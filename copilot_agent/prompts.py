@@ -3,6 +3,7 @@ import copy
 import hashlib
 import json
 from pathlib import Path
+import sys
 from .persistence import write_json, write_preserving
 from .bundle import build_startup_attachments
 
@@ -27,6 +28,12 @@ class PromptBuilder:
             definition['description'] = (definition.get('description', '') +
                 ' Proposed local_python timeout_seconds must not exceed the configured limit of ' +
                 str(runner_limit) + ' seconds.').strip()
+            definition['execution_modes'] = {
+                'python_subset': {'available': True, 'approval': 'required'},
+                'local_python': {'available': True, 'approval': 'exact immutable plan',
+                                 'interpreter': str(Path(sys.executable).resolve()),
+                                 'exposed_application_imports': ['copilot_agent.desktop'],
+                                 'desktop_permissions': ['desktop_capture', 'window_management']}}
         write_json(self.catalogue, {'schema_version': '1.0', 'tools': definitions})
         paths = [*self.guidance, self.schema, self.catalogue]
         self.manifest = [{'name': p.name, 'version': '1.0', 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()} for p in paths]
