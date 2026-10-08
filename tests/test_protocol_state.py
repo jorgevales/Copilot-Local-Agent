@@ -260,9 +260,10 @@ class StateAndPromptTests(unittest.TestCase):
         inspection = {'call_id': 'inspect', 'name': 'synthetic.read', 'version': '1.0', 'arguments': {'path': 'evidence.txt'}}
         state.begin_call(inspection, state_changing=False)
         state.finish_call('inspect', {'ok': True, 'result': {'evidence': 'Synthetic read-only observation.'}})
-        state.reconcile_call('original', 'not_executed')
-        state.begin_call(dict(original, call_id='reviewed-next-write'))
-        self.assertEqual('executing', state.data['calls']['reviewed-next-write']['status'])
+        with self.assertRaises(ValueError):
+            state.reconcile_call('original', 'not_executed')
+        with self.assertRaises(RuntimeError):
+            state.begin_call(dict(original, call_id='reviewed-next-write'))
 
     def test_verified_failed_call_does_not_remain_uncertain_and_domain_grant_persists(self):
         state = SessionState(retained_root('verified-failure-recovery-'))

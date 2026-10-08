@@ -1,6 +1,7 @@
 from __future__ import annotations
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 import uuid
 from .logging_utils import EventLog, now, redact
@@ -97,7 +98,7 @@ class SessionState:
             self.data['pending_submission'] = None
             self.save()
 
-    def begin_call(self, request: dict, state_changing: bool = True):
+    def begin_call(self, request: dict, state_changing: bool = True, reconciliation_baseline=None):
         call_id = request['call_id']
         from .web_privacy import private_id
         if call_id in self.data['calls'] or private_id(call_id) in self.data['calls']:
@@ -108,6 +109,8 @@ class SessionState:
         if any(c.get('action_hash') == action_hash and c['status'] == 'uncertain' for c in self.data['calls'].values()):
             raise RuntimeError('An identical action has uncertain effects; reconcile before requesting it again')
         self.data['calls'][call_id] = {'status': 'executing', 'request_hash': canonical_hash(request), 'action_hash': action_hash, 'state_changing': state_changing, 'request': request, 'started_at': now()}
+        if reconciliation_baseline is not None:
+            self.data['calls'][call_id]['reconciliation_baseline'] = deepcopy(reconciliation_baseline)
         self.event('tool_intent', call_id=call_id, name=request['name'], request_hash=canonical_hash(request))
         self.save()
 
@@ -160,12 +163,34 @@ class SessionState:
             self.event('browser_domain_approved', domain=domain)
             self.save()
 
-    def reconcile_call(self, call_id: str, outcome: str):
-        if outcome not in {'completed', 'not_executed'} or self.data['calls'][call_id]['status'] != 'uncertain':
-            raise ValueError('Only an uncertain call may be reconciled with completed/not_executed')
-        self.data['calls'][call_id]['status'] = outcome
-        self.event('call_reconciled_by_user', call_id=call_id, outcome=outcome)
-        self.save()
+    def reconcile_call(self, call_id: str, outcome: str, *, proof=None):
+        call = self.data['calls'].get(call_id)
+        if call is None or outcome not in {'completed', 'not_executed'}:
+            raise ValueError('An uncertain call ID and completed/not_executed outcome are required')
+        if call.get('reconciliation'):
+            if call['reconciliation']['outcome'] == outcome:
+                return False
+            raise ValueError('The call was already reconciled with a different outcome')
+        if call['status'] != 'uncertain':
+            raise ValueError('Only an uncertain call may be reconciled')
+        if (type(proof) is not dict or proof.get('kind') != 'fresh_browser_observation'
+                or proof.get('outcome') != outcome or proof.get('session_id') != self.session_id
+                or proof.get('call_id_sha256') != hashlib.sha256(call_id.encode()).hexdigest()
+                or proof.get('observed_url_sha256') != proof.get('proposed_url_sha256')
+                or proof.get('baseline_url_sha256') != call.get('reconciliation_baseline', {}).get('url_sha256')):
+            raise ValueError('Fresh matching browser reconciliation evidence is required')
+        previous, prior_status = deepcopy(call), self.data['status']
+        call.update(status=outcome, reconciliation=deepcopy(proof), reconciled_at=now())
+        if not any(item['status'] == 'uncertain' for item in self.data['calls'].values()):
+            self.data['status'] = 'ready'
+        try:
+            self.save()  # Atomic state replacement precedes the informational event.
+        except Exception:
+            self.data['calls'][call_id] = previous
+            self.data['status'] = prior_status
+            raise
+        self.event('call_reconciled_from_fresh_browser_evidence', call_id=call_id, outcome=outcome)
+        return True
 
     def grant(self, plan_hash: str, decision: str):
         self.data['approvals'][plan_hash] = {'decision': decision, 'timestamp': now()}

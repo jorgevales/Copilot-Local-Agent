@@ -22,7 +22,7 @@ When a tool call fails with certain effects, use the bounded recovery turn to co
 
 ## Ambiguous side effects
 
-If submission may have succeeded, reconcile the chat before another send. If a write/click/script outcome is uncertain, inspect safe evidence or request user review; never blindly repeat. Existing call IDs and immutable request hashes identify prior operations. Denial is a user decision, not a transient error.
+If submission may have succeeded, reconcile the chat before another send. For an uncertain navigation-only browser call, request `browser.info` and then `browser.reconcile` with the original call ID, exact observed URL, and `completed` or `not_executed`. The local tool checks the same owned tab against its pre-action fingerprint and resolves the ledger automatically when the evidence agrees. Send further navigation in a later tool request. Other uncertain writes and consequential effects remain blocked; never blindly repeat. Existing call IDs and immutable request hashes identify prior operations. Denial is a user decision, not a transient error.
 
 ## Authentication and diagnostics
 

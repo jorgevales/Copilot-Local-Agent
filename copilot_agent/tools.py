@@ -21,6 +21,7 @@ from .web_navigation import NAVIGATION_SPECS, validate_navigation, execute_navig
 from .web_documents import DOCUMENT_SPECS, DOCUMENT_EXAMPLES, validate_documents, execute_documents
 from .site_knowledge import KNOWLEDGE_SPECS, KNOWLEDGE_EXAMPLES, validate_knowledge, execute_knowledge
 from .discovery_engine import DISCOVERY_SPECS, validate_discovery, execute_discovery
+from .reconciliation import reconcile_browser_call, ReconciliationRequired
 from .discovery_knowledge import (KNOWLEDGE_SPECS as DISCOVERY_KNOWLEDGE_SPECS,
                                   validate_knowledge_tool, execute_knowledge_tool)
 from .discovery_contracts import DiscoveryError, DISCOVERY_ERROR_CODES
@@ -132,6 +133,7 @@ SPECS = {
     "browser.back": (obj({}), "user_approval", "Navigate backward only if the target history URL passes policy."),
     "browser.forward": (obj({}), "user_approval", "Navigate forward only if the target history URL passes policy."),
     "browser.info": (obj({}), "read_only", "Read tool-tab URL and title."),
+    "browser.reconcile": (obj({"call_id":S,"outcome":{"type":"string","enum":["completed","not_executed"]},"observed_url":S,"observed_title":{"type":"string","maxLength":300}},["call_id","outcome","observed_url"]), "read_only", "Resolve an uncertain navigation-only browser call automatically after fresh local inspection confirms the exact observed URL and pre-action fingerprint. No click or navigation; never use for forms or writes."),
     "browser.read": (obj({"frame_selector":S},[]), "read_only", "Read bounded visible body text from the managed tab or one explicit iframe."),
     "browser.structure": (obj({"frame_selector":S},[]), "read_only", "Read visible controls without input values from the managed tab or one explicit iframe."),
     "browser.click": (obj({"selector":S,"frame_selector":S},["selector"]), "user_approval", "Click one unique selector in the managed tab or explicit iframe. May change third-party state."),
@@ -187,6 +189,7 @@ class ToolRegistry:
         if name == "code_runner":
             examples = [{"arguments":{"script":"print('reviewed computation')","purpose":"Compute a bounded result","language":"python_subset","working_directory":".","read_paths":[],"create_paths":[],"expected_outputs":[],"commands":[],"network_destinations":[],"permissions":[],"risk_summary":"No external side effects","recovery_notes":"Review failure output before retry"}}]
         if name == "browser.open": examples = [{"arguments":{"url":"https://example.com/"}}]
+        if name == "browser.reconcile": examples = [{"arguments":{"call_id":"prior-navigation-call-id","outcome":"completed","observed_url":"https://example.com/actual-page"}}]
         if name == "copilot.download": examples = [{"arguments":{"expected_name":"package.zip"}}]
         if name == "archives.extract": examples = [{"arguments":{"path":"package.zip","destination":"delivered-project","expected_sha256":"0"*64,"expected_files":["README.md"]}}]
         if name in KNOWLEDGE_EXAMPLES: examples = [{'arguments': KNOWLEDGE_EXAMPLES[name]}]
@@ -412,6 +415,7 @@ class ToolRegistry:
                                               context.get('discovery_effects_started') is True),
                     'error': {'code': error.code, 'message': error.message}}
         except PolicyError as error: return redact({"ok":False,"tool":name,"error":{"code":"policy_denied","message":str(error)}})
+        except ReconciliationRequired as error: return {"ok":False,"tool":name,"error":{"code":"reconciliation_conflict","message":str(error)}}
         except (ValueError,TypeError) as error: return redact({"ok":False,"tool":name,"error":{"code":"invalid_arguments","message":str(error)}})
         except asyncio.TimeoutError: return {"ok":False,"tool":name,"error":{"code":"timeout","message":"Local operation timed out; inspect partial effects before retrying"}}
         except Exception as error:
@@ -422,6 +426,8 @@ class ToolRegistry:
 
     async def _execute(self,name,args,context,policy):
         config=context.get("config",{})
+        if name == 'browser.reconcile':
+            return await reconcile_browser_call(context['session_state'], context['browser'], **args)
         if name in NAVIGATION_SPECS: return await execute_navigation(name, args, context, policy)
         if name in DOCUMENT_SPECS: return await execute_documents(name, args, context, policy)
         if name in KNOWLEDGE_SPECS: return execute_knowledge(name, args, context, policy)

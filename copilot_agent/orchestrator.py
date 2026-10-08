@@ -14,6 +14,7 @@ from .findings import Findings
 from .feedback import Feedback, public_preview
 from .logging_utils import redact, SENSITIVE
 from .policy import PathPolicy, PolicyError, URLPolicy
+from .reconciliation import capture_baseline
 from .prompts import PromptBuilder
 from .protocol import ProtocolError, parse_response, correction_message
 from .state import canonical_hash
@@ -44,7 +45,7 @@ class Orchestrator:
         self.initialized = False
         self._prepared_initialization = None
         self.approved_attachment_hashes = {}
-        self.base_context = {'config': config, 'session_dir': state.directory, 'browser': browser, 'approved': False,
+        self.base_context = {'config': config, 'session_dir': state.directory, 'browser': browser, 'session_state': state, 'approved': False,
                              'pending_image_attachments': [], 'created_snapshots': {},
                              'pending_file_attachments': [],
                              'approved_attachment_hashes': self.approved_attachment_hashes,
@@ -457,12 +458,12 @@ class Orchestrator:
                 raise PolicyError('Previously processed call ID must not be replayed')
             action_hash = canonical_hash({k: call[k] for k in ('name', 'version', 'arguments')})
             if any(c.get('action_hash') == action_hash and c['status'] == 'uncertain' for c in self.state.data['calls'].values()):
-                raise PolicyError('An identical action has uncertain effects; user reconciliation is required')
+                raise PolicyError('An identical action may have changed the page; only inspection is allowed. Request browser.info, then browser.reconcile with the pending call ID and observed final URL before any new navigation.')
             if any(c.get('action_hash') == action_hash and c['status'] == 'completed'
                    and not c.get('result', {}).get('ok') for c in self.state.data['calls'].values()):
                 raise PolicyError('This method already failed; propose a materially different safe recovery approach')
             if catalog[call['name']]['approval_policy'] != 'read_only' and any(c['status'] == 'uncertain' and c.get('state_changing', True) for c in self.state.data['calls'].values()):
-                raise PolicyError('An earlier state-changing effect is uncertain; only inspection is allowed until user reconciliation')
+                raise PolicyError('A prior action has uncertain effects; only inspection is allowed. For navigation-only calls, inspect with browser.info and request browser.reconcile with its call ID and observed final URL. Other effects remain blocked.')
             # Validate argument shape before execution; page/filesystem state may
             # depend on an earlier successful step in this same ordered batch.
             if hasattr(self.registry, 'validate_input'):
@@ -738,7 +739,11 @@ class Orchestrator:
                             context['approved_hash'] = prepared['proposal_hash']
                     if artifact:
                         self.approved_attachment_hashes[artifact['path']] = artifact['sha256']
-                self.state.begin_call(call, state_changing=needs_approval)
+                baseline = (await capture_baseline(self.browser, call)
+                            if call['name'] in {'browser.open', 'browser.back', 'browser.forward', 'browser.plan'}
+                            and not context.get('consequential_approved_plan_hash')
+                            and hasattr(self.browser, 'tool_page') else None)
+                self.state.begin_call(call, state_changing=needs_approval, reconciliation_baseline=baseline)
                 self.feedback.section('Tool/' + call['name'], 'STARTING', [
                     ('Authority', 'exact explicit approval' if needs_approval else 'read-only policy'),
                     ('Language', call.get('arguments', {}).get('language')),
@@ -807,6 +812,8 @@ class Orchestrator:
                 'When a method fails with verified certain effects, continue within the bounded tool rounds using '
                 'a materially different safe approach available through registered tools or a newly proposed exact '
                 'Code Runner script. Every materially changed local execution requires its normal fresh approval. '
+                'If a navigation-only browser call is uncertain, request browser.info, then browser.reconcile '
+                'with the prior call ID, observed URL and outcome in a separate request before further actions. '
                 'Stop only at success, exhausted bounded rounds, denial, or a genuine safety/permission boundary.')}
             if self.base_context.get('discovery_synthesis_pending'):
                 content['instruction'] = ('This consolidated discovery/navigation run is terminal. Produce final evidence-ID-grounded synthesis or a blocked error with material gaps. '

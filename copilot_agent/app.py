@@ -353,7 +353,7 @@ async def run(args):
         await orchestrator.initialize()
         await browser.verify_interaction_ready(chosen['label'])
         system('Type your request and press Enter. For files, type :attach to open Choose files, then type your request.')
-        system('Commands: :new [first message], :attach, :files, :remove <number>, :clear, :status, :exit. Advanced: :attach <path>, :resolve <call_id> completed|not_executed')
+        system('Commands: :new [first message], :attach, :files, :remove <number>, :clear, :status, :exit. Advanced: :attach <path>')
         pending_files = orchestrator.attachment_queue()
         def show_files():
             records = pending_files.records()
@@ -408,10 +408,7 @@ async def run(args):
                     system('Pending attachment queue cleared. Original files are preserved.')
                     continue
                 if text.startswith(':resolve '):
-                    _, call_id, outcome = text.split()
-                    system(json.dumps(state.data['calls'][call_id], ensure_ascii=False, indent=2))
-                    if (await ask('Confirm the observed outcome by typing CONFIRM: ')) == 'CONFIRM':
-                        state.reconcile_call(call_id, outcome)
+                    system('Manual resolution is disabled. Ask Copilot to inspect the current page and request browser.reconcile for an uncertain navigation-only call.')
                     continue
                 pending_files.verify()
                 before_send = state.message_count
