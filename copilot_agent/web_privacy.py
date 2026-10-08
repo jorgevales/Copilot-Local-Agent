@@ -10,6 +10,8 @@ PRIVATE_TOOLS = {
     'browser.route', 'browser.documents', 'browser.download_batch',
     'files.transfer_to_copilot',
     'documents.catalogue', 'documents.find', 'documents.retrieve',
+    'discovery.manifest', 'discovery.shadow', 'discovery.knowledge_save',
+    'discovery.knowledge_lookup', 'discovery.knowledge_invalidate', 'navigation.intent',
 }
 ERROR_CODES = frozenset({
     'invalid_arguments', 'policy_denied', 'approval_denied', 'unavailable', 'operation_failed',

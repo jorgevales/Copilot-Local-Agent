@@ -24,7 +24,7 @@ def validate_schema(value, schema: dict, root=None, path='$') -> list[str]:
         for part in schema['$ref'].removeprefix('#/').split('/'):
             target = target[part.replace('~1', '/').replace('~0', '~')]
         return validate_schema(value, target, root, path)
-    supported = {'$schema', '$id', '$defs', 'title', 'description', 'type', 'const', 'enum', 'properties', 'required', 'additionalProperties', 'items', 'minItems', 'maxItems', 'uniqueItems', 'minLength', 'maxLength', 'minimum', 'maximum', 'pattern', 'anyOf', 'oneOf', 'default', 'examples'}
+    supported = {'$schema', '$id', '$defs', 'title', 'description', 'type', 'const', 'enum', 'properties', 'required', 'additionalProperties', 'items', 'minItems', 'maxItems', 'uniqueItems', 'minLength', 'maxLength', 'minimum', 'maximum', 'pattern', 'format', 'anyOf', 'oneOf', 'default', 'examples'}
     unknown = set(schema) - supported
     if unknown:
         return [path + ': unsupported schema keywords ' + ', '.join(sorted(unknown))]
@@ -70,6 +70,10 @@ def validate_schema(value, schema: dict, root=None, path='$') -> list[str]:
             errors.append(path + ': invalid string length')
         if 'pattern' in schema and not re.search(schema['pattern'], value):
             errors.append(path + ': invalid string pattern')
+        if 'format' in schema:
+            from .discovery_contracts import format_valid
+            if schema['format'] not in {'uri', 'date-time'} or not format_valid(value, schema['format']):
+                errors.append(path + ': invalid or unsupported string format')
     if type(value) in (int, float):
         if not math.isfinite(value) or value < schema.get('minimum', -float('inf')) or value > schema.get('maximum', float('inf')):
             errors.append(path + ': number outside allowed range')
@@ -145,13 +149,20 @@ def parse_response(raw: str, session_id: str, request_id: str, registry=None, se
             definition = catalog.get(call['name'])
             if not definition or call['version'] != definition['version']:
                 raise ProtocolError('unsupported_tool', ['Unsupported tool/version: ' + call['name']])
-            errors = validate_schema(call['arguments'], definition['input_schema'])
-            if errors:
-                raise ProtocolError('unsafe_tool_arguments', errors[:20])
+            if call['name'].startswith(('discovery.', 'navigation.')):
+                from .discovery_contracts import DiscoveryError
+                try:
+                    registry.validate_input(call['name'], call['arguments'])
+                except DiscoveryError as error:
+                    raise ProtocolError('discovery_' + error.code, [error.code + ': ' + error.message]) from error
+            else:
+                errors = validate_schema(call['arguments'], definition['input_schema'])
+                if errors:
+                    raise ProtocolError('unsafe_tool_arguments', errors[:20])
     return obj
 
 
 def correction_message(exc: ProtocolError) -> str:
     return json.dumps({'kind': 'protocol_correction', 'failure': exc.code, 'validation_errors': exc.errors,
-                       'instruction': 'Reissue the same decision for the CURRENT request_id, without executing or changing scope. Use the attached exact response schema, required fields and one marker pair. Put valid JSON in a fenced json code block BETWEEN the markers; escape backslashes in Windows paths or use forward slashes. Preserve script quotes and exact arguments. Findings may be proposed on any turn.',
+                       'instruction': 'Reissue the same decision for the CURRENT request_id, without executing or changing scope. Use the attached exact response schema, required fields and one marker pair. Put valid JSON as plain chat text BETWEEN the markers, without a Markdown code fence; escape backslashes in Windows paths or use forward slashes. Preserve script quotes and exact arguments. Findings may be proposed on any turn.',
                        'required_fields': SCHEMA['required'], 'markers': [BEGIN, END]}, ensure_ascii=False)

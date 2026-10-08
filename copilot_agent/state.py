@@ -124,6 +124,34 @@ class SessionState:
         self.event('tool_outcome', call_id=call_id, result=result)
         self.save()
 
+    def fail_active_turn(self, reason: str = 'unexpected_error'):
+        """Close interrupted call intents without asserting that effects did not occur."""
+        interrupted = []
+        for call_id, call in self.data['calls'].items():
+            if call['status'] != 'executing':
+                continue
+            uncertain = call.get('state_changing', True)
+            call.update(
+                status='uncertain' if uncertain else 'completed',
+                result={'ok': False, 'error': {'code': 'interrupted',
+                                                'message': 'The turn stopped before a verified tool outcome was recorded.'},
+                        'result': {'side_effects_uncertain': uncertain}},
+                finished_at=now(),
+            )
+            interrupted.append((call_id, uncertain))
+        self.data['status'] = 'submission_uncertain' if self.data.get('pending_submission') else 'blocked'
+        self.data['last_turn_outcome'] = {'status': 'failed', 'reason': reason, 'at': now()}
+        self.save()
+        for call_id, uncertain in interrupted:
+            try:
+                self.event('tool_interrupted', call_id=call_id, uncertain=uncertain)
+            except OSError:
+                pass
+        try:
+            self.event('turn_failed', reason=reason)
+        except OSError:
+            pass
+
     def approve_domain(self, domain: str):
         domain = str(domain).lower().rstrip('.')
         domains = self.data.setdefault('approved_domains', [])

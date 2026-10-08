@@ -139,7 +139,7 @@ class DeliveryRequirementTests(unittest.TestCase):
     def test_instruction_requires_outside_envelope_actual_link_and_zip_fallback(self):
         text = delivery_instruction('Create script.py.')
         self.assertIn('AFTER <<<COPILOT_AGENT_V1_END>>>', text)
-        self.assertIn('outside the fenced JSON', text)
+        self.assertIn('outside the JSON object', text)
         self.assertIn('downloadable ZIP', text)
         self.assertIn('sandbox', text)
         self.assertIn('script.py', text)

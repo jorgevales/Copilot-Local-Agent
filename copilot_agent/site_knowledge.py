@@ -94,7 +94,7 @@ KNOWLEDGE_SPECS = {
     "site_knowledge.bind": (BIND, "user_approval", "Select the current HTTPS site's exact tenant, user/sharing scope and environment through local approval. Scope labels are user-declared; never infer an authenticated identity. No website knowledge is saved."),
     "site_knowledge.retrieve": (_object({"origin": ORIGIN}), "read_only", "Retrieve unexpired approved navigation knowledge for the current locally selected site namespace; a namespace must first be bound by the user."),
     "site_knowledge.query": (QUERY, "read_only", "Filter approved fresh navigation knowledge by category and/or exact generic route template inside the selected namespace."),
-    "site_knowledge.save": (SAVE, "user_approval", "Ask the local user whether to save the exact approved categories of sanitized navigation knowledge on this Windows user/device. Declining leaves the current task usable. Customer data and secrets are rejected. Replaces the namespace's prior knowledge after approval."),
+    "site_knowledge.save": (SAVE, "user_approval", "Ask the local user whether to merge exact sanitized navigation knowledge into this Windows user's approved site namespace. Existing fresh entries are retained unless a new entry updates the same generic key. Customer data and secrets are rejected."),
     "site_knowledge.invalidate": (_object({"origin": ORIGIN}), "user_approval", "After local approval, mark the selected namespace's knowledge unusable. It remains on disk as an invalidated record; never automatically re-use it."),
     "site_knowledge.export": (_object({"origin": ORIGIN}), "read_only", "Return a bounded structured summary of fresh knowledge for the approved namespace through the tool result; no arbitrary file export."),
 }
@@ -133,11 +133,15 @@ SAFE_WORDS = frozenset("""
     link button textbox searchbox combobox tab tabs menuitem heading label role test testid
     data field fields form forms input inputs content section sections area areas record records
     retail business finance financial service services organisation tenant environment production
-    staging development test account-search customer-search client-search search-customer search-client
+    staging development test inicio clinical forms appointments calendar patients menus
+    formularios clinicos consultas agendadas agendar consulta pacientes calendario
+    ajustes avisos reportes porciones menu personalizado
+    account-search customer-search client-search search-customer search-client
 """.split())
-SAFE_SEGMENTS = SAFE_WORDS | frozenset({"customer-search", "client-search", "account-search",
+SAFE_SEGMENTS = SAFE_WORDS | frozenset({"inicio", "customer-search", "client-search", "account-search",
                                       "document-search", "sign-in", "sign-out", "help-center",
-                                      "customer-service", "case-management"})
+                                      "customer-service", "case-management", "formularios-clinicos",
+                                      "consultas", "agendar-consulta"})
 PLACEHOLDERS = frozenset({"{customer}", "{account}", "{case}", "{document}", "{item}"})
 ENTITY_SEGMENTS = frozenset("customer customers client clients investor investors user users member members account accounts profile profiles case cases transaction transactions policy policies contact contacts person people employee employees document documents file files record records".split())
 STATIC_CHILDREN = frozenset("search lookup find list overview details summary status documents files history activity transactions accounts cases settings new create edit download downloads reports statements products contacts profile profiles landing index".split())
@@ -172,10 +176,11 @@ def _current_origin(context):
     value = getattr(page, "url", None)
     if not isinstance(value, str):
         raise PolicyError("An active owned website tab is required for website memory")
-    isolated = getattr(browser, "tool_context", None)
-    if (isolated is None or getattr(page, "context", None) is not isolated
+    owned_context = getattr(browser, "tool_context", None)
+    if (owned_context is None or getattr(page, "context", None) is not owned_context
+            or page not in getattr(browser, "_tool_pages", [page])
             or page is getattr(browser, "page", None) or page is getattr(browser, "chat_page", None)):
-        raise PolicyError("Website memory requires a tab owned by the isolated website context")
+        raise PolicyError("Website memory requires an owned website tab")
     if hasattr(page, "is_closed") and page.is_closed():
         raise PolicyError("The owned website tab is closed")
     try:
@@ -309,7 +314,7 @@ def validate_knowledge(name, args, context, policy=None):
 
 
 def prepare_knowledge(args, context, name=None):
-    """Pure approval contract: validates/normalizes; no writes or content reads.
+    """Approval contract: validate and merge the current namespace without writes.
 
     Call with ``name=`` for bind/save/invalidate. Save consent is bound to the
     exact safe payload, categories, namespace, device directory and TTL.
@@ -323,8 +328,27 @@ def prepare_knowledge(args, context, name=None):
                 "directory": str(knowledge_directory(context)), "excluded_data": list(EXCLUDED_DATA),
                 "decline": "Decline this grant; the current task and ephemeral website map can continue."}
     if name == "site_knowledge.save":
-        knowledge = _sanitize_knowledge(args)
-        prepared.update(categories=sorted(args["categories"]), payload_sha256=_hash(knowledge),
+        incoming = _sanitize_knowledge(args)
+        existing = _retrieve(context, scope)
+        prior = existing['knowledge'] if existing['status'] == 'fresh' else {}
+        knowledge = {key: deepcopy(items) for key, items in prior.items()}
+        for category, items in incoming.items():
+            current = knowledge.setdefault(category, [])
+            for item in items:
+                identity = ((item['path'], item.get('failure')) if category == 'recovery'
+                            else (item['path'], item.get('strategy'), item.get('role'), item.get('value')) if category == 'locators'
+                            else (item['path'], item.get('purpose')) if category == 'forms'
+                            else (item['path'],))
+                current[:] = [old for old in current if
+                              (((old['path'], old.get('failure')) if category == 'recovery'
+                                else (old['path'], old.get('strategy'), old.get('role'), old.get('value')) if category == 'locators'
+                                else (old['path'], old.get('purpose')) if category == 'forms'
+                                else (old['path'],)) != identity)]
+                current.append(deepcopy(item))
+        _sanitize_knowledge({'categories': list(knowledge), 'knowledge': knowledge})
+        prepared.update(categories=sorted(knowledge), knowledge=knowledge,
+                        prior_payload_sha256=_hash(prior) if prior else None,
+                        payload_sha256=_hash(knowledge),
                         item_counts={key: len(knowledge[key]) for key in sorted(knowledge)},
                         ttl_days=args.get("ttl_days", 30),
                         consent_question="Save these exact categories of sanitized website navigation knowledge locally for later sessions?",
@@ -505,7 +529,7 @@ def execute_knowledge(name, args, context, policy=None):
                 "knowledge_saved": False, "binding_lifetime": "current local session only"}
     if name == "site_knowledge.save":
         prepared = _approval(name, args, context)
-        knowledge = _sanitize_knowledge(args)
+        knowledge = deepcopy(prepared['knowledge'])
         now = _now(context)
         value = {"schema_version": SCHEMA_VERSION, "namespace_id": _hash(scope),
                  "scope_fingerprint": _fingerprint(scope), "knowledge": knowledge,

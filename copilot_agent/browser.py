@@ -304,6 +304,7 @@ class BrowserAdapter:
         self.last_capture_observation = None
         self.feedback_callback = None
         self._preloaded_exchange = None
+        self.startup_stage = 'not_started'
 
     def set_feedback(self, callback):
         self.feedback_callback = callback
@@ -341,14 +342,28 @@ class BrowserAdapter:
             raise BrowserUIError('Another local agent already controls this profile and port.')
         self._mutex = (kernel, handle)
 
+    async def _navigate_copilot(self):
+        from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+        try:
+            await self.page.goto(self.config.copilot_url, wait_until='domcontentloaded',
+                                 timeout=int(self.config.startup_timeout * 1000))
+        except PlaywrightTimeoutError:
+            if self.page.is_closed():
+                raise
+            # A first profile launch can still be loading or awaiting sign-in.
+            # Continue the separate bounded UI readiness check on this same page.
+            print('[System] Copilot navigation is still loading; checking the visible UI before stopping startup.')
+
     async def start(self):
         if not self.config.visible:
             raise BrowserUIError('This adapter supports visible Edge only; hidden/headless operation is unsupported.')
         parsed = urlparse(self.config.copilot_url)
         if parsed.scheme != 'https' or parsed.hostname != 'm365.cloud.microsoft':
             raise BrowserUIError('Copilot control URL must use https://m365.cloud.microsoft/.')
-        self._acquire_controller()
+        self.startup_stage = 'controller'
         try:
+            self._acquire_controller()
+            self.startup_stage = 'endpoint_probe'
             profile = Path(self.config.profile_dir).expanduser().resolve()
             payload = await asyncio.to_thread(edge.get_cdp_version, self.endpoint)
             if payload is not None:
@@ -365,10 +380,13 @@ class BrowserAdapter:
                     raise BrowserUIError('No existing dedicated Edge debugging session was found on this port.')
                 executable = edge.find_edge_executable(self.config.edge_executable)
                 print('[System] Starting a visible Edge window with the dedicated agent profile.')
+                self.startup_stage = 'edge_launch'
                 self._launched_process = edge.launch_edge(executable, self.config.debug_port, profile)
             from playwright.async_api import async_playwright
+            self.startup_stage = 'playwright_start'
             self._manager = async_playwright()
             self._playwright = await self._manager.start()
+            self.startup_stage = 'cdp_connection'
             self.browser = await edge.connect_bounded(self._playwright, self.endpoint, self.config.startup_timeout,
                                                       process=self._launched_process,
                                                       initial_payload=payload)
@@ -377,6 +395,7 @@ class BrowserAdapter:
             if __import__('os').name == 'nt':
                 await asyncio.to_thread(edge.validate_launched_endpoint, self.config.debug_port, profile,
                                         self._launched_process)
+            self.startup_stage = 'page_setup'
             self.context = self.browser.contexts[0]
             # Grant this before opening Copilot so Edge never interrupts an
             # exchange with its clipboard permission confirmation dialog.
@@ -386,22 +405,26 @@ class BrowserAdapter:
                     origin='https://m365.cloud.microsoft'),
                 10)
             self.page = await asyncio.wait_for(self.context.new_page(), 10)
-            # Website automation needs JavaScript, but stays in a separate
-            # unauthenticated context with service workers and network scope blocked.
-            self.tool_context = await asyncio.wait_for(self.browser.new_context(accept_downloads=True, service_workers='block', java_script_enabled=True), 10)
-            await self._configure_tool_context()
-            self.tool_page = await asyncio.wait_for(self.tool_context.new_page(), 10)
+            # Tool tabs share this verified profile's cookies and CDP port. Guard
+            # only owned tool pages; never intercept the Copilot or user tabs.
+            self.tool_context = self.context
+            self.tool_page = await asyncio.wait_for(self.context.new_page(), 10)
+            await self._configure_tool_context(self.tool_page)
             self.page.set_default_timeout(5000)
             self.tool_page.set_default_timeout(5000)
-            await self.page.goto(self.config.copilot_url, wait_until='domcontentloaded', timeout=int(self.config.startup_timeout*1000))
+            self.startup_stage = 'copilot_navigation'
+            await self._navigate_copilot()
             await self.page.bring_to_front()
             print('[System] Edge is open. Complete Microsoft 365 sign-in there if prompted.')
+            self.startup_stage = 'copilot_ui_readiness'
             deadline = time.monotonic() + self.config.startup_timeout
             while time.monotonic() < deadline:
                 editor = await self._editor(required=False)
-                if editor is not None and await self._visible(edge.PICKER_SELECTOR) is not None:
+                if (urlparse(self.page.url).hostname == 'm365.cloud.microsoft' and editor is not None
+                        and await self._visible(edge.PICKER_SELECTOR) is not None):
                     if any(item['role'] == 'user' for item in await self._evaluate(_MESSAGE_SNAPSHOT)):
                         raise BrowserUIError('Copilot opened an existing conversation. A fresh independent chat is required before initialization.')
+                    self.startup_stage = 'ready'
                     return self
                 await asyncio.sleep(self.config.poll_interval)
             raise BrowserUIError('Copilot editor/model picker was not ready before startup_timeout. Complete sign-in and restart setup.')
@@ -418,8 +441,14 @@ class BrowserAdapter:
                 if type(exc).__name__ != 'TimeoutError' or attempt == 1: raise
                 await asyncio.sleep(min(.25, self.config.poll_interval))
 
-    async def _configure_tool_context(self):
+    async def _configure_tool_context(self, page):
         from .policy import URLPolicy, PolicyError
+
+        if page is self.page or page.context is not self.context:
+            raise BrowserUIError('Only a newly owned tool tab may receive website guards.')
+        if page in self._tool_pages:
+            return
+        self._tool_pages.append(page)
 
         async def guard(route):
             try:
@@ -430,37 +459,17 @@ class BrowserAdapter:
             else:
                 await route.continue_()
 
-        # All pages/popups in this separate context are owned; no existing tab is intercepted.
-        await self.tool_context.route('**/*', guard)
-        if hasattr(self.tool_context, 'route_web_socket'):
+        await page.route('**/*', guard)
+        if hasattr(page, 'route_web_socket'):
             async def websocket_guard(route):
                 self.tool_errors.append({'type': 'blocked_websocket', 'url': self._safe_url(route.url)})
                 await route.close()
-            await self.tool_context.route_web_socket('**/*', websocket_guard)
-        await self.tool_context.add_init_script("""(() => {
-          // Bound script-created non-network navigation as well as routed requests.
-          const allowed = new Set(%s);
-          const original = window.open;
-          window.open = function(url, ...args) {
-            if (!url) return null;
-            try { const u = new URL(url, location.href);
-              const host=u.hostname.toLowerCase();
-              if (u.protocol !== 'https:' || ![...allowed].some(domain=>host===domain || host.endsWith('.'+domain)) || (u.port && u.port !== '443') || u.username || u.password) return null;
-            } catch (_) { return null; }
-            return original.call(window, url, ...args);
-          };
-        })();""" % json.dumps(sorted(self.tool_domains)))
+            await page.route_web_socket('**/*', websocket_guard)
+        # Popup creation is not a reviewed tool operation. Explicit browser
+        # tabs are opened by the orchestrator after its URL/approval checks.
+        await page.add_init_script('window.open = () => null;')
 
-        def register(page):
-            # Additional pages require a reservation by a reviewed bounded tool.
-            # The initial page is created before tool_page is assigned.
-            if self.tool_page is not None:
-                reserved = getattr(self, '_navigation_expected_new_pages', 0)
-                if reserved <= 0 or sum(not p.is_closed() for p in self._tool_pages) >= 6:
-                    asyncio.create_task(page.close())
-                    return
-                self._navigation_expected_new_pages = reserved - 1
-            self._tool_pages.append(page)
+        def register():
             def error(exc):
                 self.tool_errors.append({'type': 'page_error', 'message': 'JavaScript error observed on owned tool page'})
             def failed(request):
@@ -488,7 +497,25 @@ class BrowserAdapter:
             page.on('requestfailed', failed)
             page.on('download', download)
             page.on('framenavigated', check_navigation)
-        self.tool_context.on('page', register)
+        register()
+
+    async def new_tool_page(self):
+        if self.context is None:
+            raise BrowserUIError('The verified Edge context is unavailable.')
+        if sum(not p.is_closed() for p in self._tool_pages) >= 6:
+            raise BrowserUIError('Owned tool-tab limit reached.')
+        page = await asyncio.wait_for(self.context.new_page(), 10)
+        try:
+            await self._configure_tool_context(page)
+            page.set_default_timeout(5000)
+            return page
+        except Exception:
+            await page.close()
+            raise
+
+    async def focus_chat(self):
+        if self.page is not None and not self.page.is_closed():
+            await self.page.bring_to_front()
 
     def authorize_tool_domain(self, domain):
         """Extend only the owned tool browser after an explicit domain approval."""
@@ -1002,13 +1029,11 @@ class BrowserAdapter:
             deadline = time.monotonic() + self.config.response_timeout
             previous = ''
             stable = 0
-            expansions = 0
             await self._feedback({'type':'generation', 'request_id':request_id, 'message':'Waiting for Copilot to render its reply.'})
             streamed_candidate = ''
             generation_observed = False
-            capture_method = None
-            clipboard_status = 'not_attempted'
-            fallback_reported = False
+            invalid_stable = 0
+            scrolled_for_tail = False
             try:
                 while time.monotonic() < deadline:
                     if any(host in self.page.url for host in ('login.microsoftonline.com', 'login.live.com')):
@@ -1028,48 +1053,45 @@ class BrowserAdapter:
                         await self._feedback({'type':'candidate','request_id':request_id,'raw':candidate,
                                               'generation_ended':not stop_present and (generation_observed or send_ready)})
                     generation_ended = not stop_present and (generation_observed or send_ready)
-                    captured = ''
-                    if generation_ended:
-                        copied = await self._copy_response_code(request_id)
-                        clipboard_status = copied.get('status', 'clipboard_failed')
-                        captured = copied_code_response(copied.get('text', ''), request_id)
-                        if captured:
-                            capture_method = 'copy_code'
-                        else:
-                            if clipboard_status == 'copied':
-                                clipboard_status = 'stale_or_incomplete'
-                            if expansions < 4:
-                                expansions += int(await self._expand_response_code(request_id) or 0)
-                            fallback = await self._safe_dom_code_response(request_id)
-                            captured = copied_code_response(fallback, request_id)
-                            if captured:
-                                capture_method = 'dom_pre_fallback'
-                                if not fallback_reported:
-                                    fallback_reported = True
-                                    await self._feedback({'type':'generation','request_id':request_id,
-                                        'message':'Copy capture was unavailable; using the complete standard code block instead.'})
-                    if captured and len(captured) > self.config.max_capture_chars:
-                        raise CaptureTimeoutError('The copied response exceeded max_capture_chars; no partial response was accepted.')
+                    if candidate and len(candidate) > self.config.max_capture_chars:
+                        raise CaptureTimeoutError('The rendered response exceeded max_capture_chars; no partial response was accepted.')
+                    # Never invent markers around chat text. A finished malformed reply
+                    # goes to the protocol validator so it can request a correction.
+                    complete = bool(generation_ended and response_envelope_closed(candidate)
+                                    and copied_code_response(candidate, request_id))
                     self.last_capture_observation = {
                         'request_id': request_id, 'committed_user_key':user_key, 'candidate_length':len(candidate),
                         'stop_present':stop_present, 'send_ready':send_ready,
                         'generation_observed':generation_observed, 'generation_ended':generation_ended,
-                        'capture_method':capture_method, 'clipboard_status':clipboard_status,
-                        'complete_current_code':bool(captured),
+                        'capture_method':'chat_text', 'complete_current_text':complete,
                         'nodes':[{'key':item['key'],'order':item['order'],'role':item['role'],
                                   'length':len(item['text']),'contains_request':request_id in item['text']}
                                  for item in messages[-30:]]}
-                    settled = bool(captured) and generation_ended
-                    stable = (stable + 1 if captured == previous else 1) if settled else 0
-                    previous = captured
-                    # Parsing belongs after capture. Only a complete, ended, briefly stable
-                    # current-turn envelope may reach protocol validation.
-                    if stable >= max(2, self.config.capture_stable_samples):
-                        return captured
+                    settled = bool(candidate) and generation_ended
+                    stable = (stable + 1 if candidate == previous else 1) if settled else 0
+                    invalid_stable = (invalid_stable + 1 if settled and not complete and candidate == previous
+                                      else 1 if settled and not complete else 0)
+                    previous = candidate
+                    if invalid_stable >= 2 and not scrolled_for_tail:
+                        # Long chat replies can render their tail only after the
+                        # assistant message is scrolled into view. Inspect the
+                        # full DOM again before classifying a finished reply.
+                        scrolled_for_tail = True
+                        if hasattr(self.page, 'evaluate'):
+                            try:
+                                await self.page.evaluate("""() => {
+                                  const nodes=[...document.querySelectorAll('[data-testid="markdown-reply"],.fai-CopilotMessage__content,[data-author="assistant"],[data-message-author-role="assistant"]')];
+                                  nodes.at(-1)?.scrollIntoView({block:'end'});
+                                }""")
+                            except Exception:
+                                pass
+                    if complete and stable >= max(2, self.config.capture_stable_samples):
+                        return candidate
+                    if invalid_stable >= max(4, self.config.capture_stable_samples + 2):
+                        return candidate
                     await asyncio.sleep(self.config.poll_interval)
                 raise CaptureTimeoutError(
-                    'Copilot did not provide a complete current-turn Copy code result before the capture limit '
-                    '(last clipboard status: ' + clipboard_status + '). '
+                    'Copilot did not provide a current-turn chat response before the capture limit. '
                     'No local action ran for this reply; the committed message was not resent.')
             except Exception as exc:
                 await self.diagnostics('capture')
@@ -1079,17 +1101,22 @@ class BrowserAdapter:
 
     async def diagnostics(self, reason='failure'):
         """Retain local UI evidence; no cookies, credentials, DOM dump or query strings."""
-        if self.page is None or self.page.is_closed():
-            return None
         directory = self.config.runtime_dir / 'diagnostics'
         directory.mkdir(parents=True, exist_ok=True)
         token = time.strftime('%Y%m%d-%H%M%S', time.gmtime()) + '-' + uuid.uuid4().hex[:8]
         prefix = directory / token
+        if self.page is None or self.page.is_closed():
+            path = Path(str(prefix) + '.json')
+            path.write_text(json.dumps({'reason': reason, 'startup_stage': self.startup_stage,
+                                        'page_available': False}, indent=2), encoding='utf-8')
+            self.last_diagnostics = str(path)
+            return path
         parsed = urlparse(self.page.url)
         report = {'reason': reason, 'url': f'{parsed.scheme}://{parsed.netloc}{parsed.path}',
                   'model': self.model_label, 'submission': self.last_submission,
                   'composer_comparison': self.last_composer_comparison,
-                  'preparation_stage': getattr(self, 'preparation_stage', None)}
+                   'preparation_stage': getattr(self, 'preparation_stage', None),
+                   'startup_stage': self.startup_stage}
         report['capture_observation'] = self.last_capture_observation
         try:
             report['ui'] = await asyncio.wait_for(self.page.evaluate(r"""() => ({
@@ -1121,30 +1148,17 @@ class BrowserAdapter:
         self.last_diagnostics = str(path)
         return path
 
-    async def close(self, *, preserve_browser_process=False):
-        # Never Browser.close(): CDP disconnect must not shut down an existing browser.
-        for page in (self.tool_page, self.page):
-            if page is not None:
-                try:
-                    if not page.is_closed():
-                        await asyncio.wait_for(page.close(), timeout=3)
-                except Exception:
-                    pass
+    async def close(self, *, preserve_browser_process=True):
+        # Keep the signed-in Edge process and its tabs for the next normal run.
+        # Playwright.stop disconnects CDP without closing this browser.
         self.page = self.tool_page = None
-        if self.tool_context is not None:
-            try:
-                await asyncio.wait_for(self.tool_context.close(), timeout=5)
-            except Exception:
-                pass
-            self.tool_context = None
+        self.tool_context = None
         if self._playwright is not None:
             try:
                 await self._playwright.stop()
             except Exception:
                 pass
         self._playwright = self.browser = self.context = None
-        if not preserve_browser_process and self._launched_process is not None:
-            await asyncio.to_thread(edge.stop_launched_edge, self._launched_process)
         self._launched_process = None
         if self._mutex:
             self._mutex[0].CloseHandle(self._mutex[1])

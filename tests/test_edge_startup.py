@@ -179,13 +179,12 @@ class EdgeHandshakeTests(unittest.IsolatedAsyncioTestCase):
         handshake.assert_awaited_once_with(
             PAYLOAD['webSocketDebuggerUrl'], timeout=ANY)
 
-    async def test_close_stops_owned_process_but_not_attached_browser(self):
+    async def test_close_preserves_owned_and_attached_browser(self):
         with patch.object(edge, 'stop_launched_edge') as stop:
             launched = BrowserAdapter(SimpleNamespace())
             launched._launched_process = Mock()
             await launched.close()
-            stop.assert_called_once()
-            stop.reset_mock()
+            stop.assert_not_called()
             attached = BrowserAdapter(SimpleNamespace())
             await attached.close()
             stop.assert_not_called()

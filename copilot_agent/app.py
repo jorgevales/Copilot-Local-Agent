@@ -77,6 +77,10 @@ def _record_bug_fix(state, config, exc, operation, stage, report_index=None):
 
 def _record_turn_error(state, exc):
     try:
+        state.fail_active_turn(type(exc).__name__)
+    except Exception:
+        pass
+    try:
         state.event('turn_error', error=str(exc))
     except Exception:
         pass
@@ -206,13 +210,25 @@ async def start_new_session(config, previous, model_label, registry=None):
         raise RuntimeError('New session setup stopped; previous records and new diagnostics are retained in your selected OneDrive storage.') from exc
 
 
+def read_runtime_settings(config):
+    if os.environ.get('COPILOT_AGENT_EXECUTION_MODE') == 'testing':
+        return read_user_settings(config.storage_dir, testing=True)
+    return read_user_settings(config.storage_dir)
+
+
+def persist_runtime_settings(config, settings):
+    if os.environ.get('COPILOT_AGENT_EXECUTION_MODE') == 'testing':
+        return save_user_settings(config.storage_dir, settings, testing=True)
+    return save_user_settings(config.storage_dir, settings)
+
+
 async def run(args):
     config = Config.load(args.config)
     if config.storage_dir is None:
         accounts = getattr(config, '_storage_candidates', None) or discover_onedrive_accounts()
         selected = await choose_account(accounts, ask, system)
         config.select_storage(default_storage(selected))
-    settings = read_user_settings(config.storage_dir)
+    settings = read_runtime_settings(config)
     if args.config is None and isinstance(settings.get('config'), dict):
         personal = settings['config']
         allowed_keys = {'allowed_domains', 'allowed_roots', 'model', 'response_timeout', 'max_corrections', 'max_tool_rounds', 'sync_timeout', 'max_delivery_retries', 'download_timeout', 'copilot_download_hosts'}
@@ -253,13 +269,13 @@ async def run(args):
     settings['config']['allowed_roots'] = [str(Path(path).relative_to(config.storage_dir))
                                           if Path(path).is_relative_to(config.storage_dir) else path
                                           for path in config.allowed_roots]
-    save_user_settings(config.storage_dir, settings)
+    persist_runtime_settings(config, settings)
     if getattr(args, 'setup_only', False):
         system('Setup verified. Personal storage: ' + str(config.storage_dir))
         system('Python resource setup verified. Setup.cmd creates the project virtual environment and installs pinned dependencies before this storage step.')
         return
     await choose_browser_endpoint(config, args, settings)
-    save_user_settings(config.storage_dir, settings)
+    persist_runtime_settings(config, settings)
     for root in config.allowed_roots:
         Path(root).mkdir(parents=True, exist_ok=True)
     directory = args.resume or config.runtime_dir / 'sessions' / uuid.uuid4().hex
@@ -329,7 +345,7 @@ async def run(args):
         if chosen['label'] != preferred['label']:
             await browser.select_model(chosen['label'])
         settings['config']['model'] = chosen['label']
-        save_user_settings(config.storage_dir, settings)
+        persist_runtime_settings(config, settings)
         state.event('model_selected', label=chosen['label'], visible=True)
         if _UI_EVENT_SINK is not None:
             _UI_EVENT_SINK('model', {'name': chosen['label'], 'verified': True})

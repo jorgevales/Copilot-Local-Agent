@@ -1,6 +1,6 @@
 # Multiple tabs
 
-browser.tabs manages explicitly owned stable tab IDs with purpose, task and customer context. Preserve the primary workflow tab. The isolated browser has at most six pages including temporary download pages; unexpected popups close.
+browser.tabs manages explicitly owned stable tab IDs with purpose, task and customer context. Preserve the primary workflow tab. At most six owned website tabs, including temporary download tabs, may be open; unrelated Edge tabs do not count. Unexpected script popups are blocked.
 
 Use the intended tab and context for each operation. Closed/replaced IDs fail rather than selecting another page. Parallelise independent reads/downloads only; keep customer lookup, identity verification and consequential actions ordered. Consolidate results deterministically and close surplus owned tabs after verification.
 

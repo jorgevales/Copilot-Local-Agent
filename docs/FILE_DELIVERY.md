@@ -24,7 +24,7 @@ Setup discovers known OneDrive account roots and remembers the user's choice. Do
 
 ## Clickable-link presentation
 
-The strict response JSON remains in one fenced code block between its marker lines. One useful actual Markdown artifact download link may follow the END marker outside that code block. This is the sole delivery exception to envelope-only presentation. A Markdown URL inside the JSON `user_response` is inert code rather than a clickable anchor. A link after the marker must represent the actual generated artifact, not a guessed URL, sandbox reference or second response envelope.
+The strict response JSON remains in plain chat text between its marker lines. One useful actual Markdown artifact download link may follow the END marker outside the JSON object. This is the sole delivery exception to envelope-only presentation. A Markdown URL inside the JSON `user_response` is plain text rather than a clickable anchor. A link after the marker must represent the actual generated artifact, not a guessed URL, sandbox reference or second response envelope.
 
 The browser binds a unique actual artifact anchor: allowlisted HTTPS or an observed native same-origin Microsoft 365 UUID blob with an exact `download` filename in the current correlated assistant container, checks configured download hosts and records a source-response hash and safe link identity for approval. The `copilot.download` request uses `expected_name` (plain basename), optional `link_text` and optional independently supported `expected_sha256`. It accepts no raw URL argument. Signed URLs remain transient browser data; their authentication-bearing query tokens must be excluded from logs, persisted response/context content and approval metadata.
 

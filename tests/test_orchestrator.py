@@ -625,7 +625,7 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual('uncertain', state.data['calls']['uncertain-effect']['status'])
         self.assertNotEqual('ready', state.data['status'])
 
-    async def test_invalid_responses_each_capture_one_correlated_diagnostic(self):
+    async def test_recovered_invalid_responses_skip_slow_ui_diagnostics(self):
         root, config, state, registry, browser, app = self.fixture(
             [final_response, 'first malformed response', 'second malformed response', final_response])
         config.max_corrections = 2
@@ -639,18 +639,10 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         await app.initialize()
         result = await app.turn('Recover safely with correlated local UI diagnostics.')
         self.assertEqual('final', result['response_type'])
-        self.assertEqual(['protocol_missing_envelope', 'protocol_missing_envelope'], [item[0] for item in captured])
+        self.assertEqual([], captured)
         events = [json.loads(line) for line in state.log.path.read_text(encoding='utf-8').splitlines()]
         evidence = [item for item in events if item['event'] == 'protocol_ui_evidence']
-        self.assertEqual(2, len(evidence))
-        from copilot_agent.web_privacy import audit_evidence
-        for event, (_, artifact), index in zip(evidence, captured, (1, 2)):
-            self.assertTrue(artifact.is_file())
-            details = {'request_id': browser.sent[index]['message']['request_id'], 'artifact': str(artifact)}
-            self.assertEqual(event['evidence'], audit_evidence(details))
-            self.assertNotIn('artifact', event)
-        self.assertEqual([browser.sent[index]['message']['request_id'] for index in (1, 2)],
-                         [item['request_id'] for item in evidence])
+        self.assertEqual([], evidence)
         self.assertEqual(['initialize', 'user_turn', 'correction', 'correction'],
                          [item['message']['kind'] for item in browser.sent])
         self.assertEqual([], registry.calls)
@@ -665,19 +657,12 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         await app.initialize()
         result = await app.turn('Continue bounded correction if diagnostic capture fails.')
         self.assertEqual('final', result['response_type'])
-        self.assertEqual(['protocol_missing_envelope'], captured)
+        self.assertEqual([], captured)
         self.assertEqual('correction', browser.sent[-1]['message']['kind'])
         self.assertEqual(3, state.message_count)
         self.assertEqual(1, len(state.data['retry_records']))
         self.assertEqual('ready', state.data['status'])
         events = [json.loads(line) for line in state.log.path.read_text(encoding='utf-8').splitlines()]
         unavailable = [item for item in events if item['event'] == 'protocol_ui_evidence_unavailable']
-        self.assertEqual(1, len(unavailable))
-        self.assertEqual(browser.sent[1]['message']['request_id'], unavailable[0]['request_id'])
-        from copilot_agent.web_privacy import audit_evidence
-        details = {'request_id': browser.sent[1]['message']['request_id'],
-                   'error': 'Synthetic diagnostic capture unavailable.'}
-        self.assertEqual(unavailable[0]['evidence'], audit_evidence(details))
-        self.assertNotIn('error', unavailable[0])
-        self.assertNotIn('Synthetic diagnostic capture unavailable', json.dumps(unavailable[0]))
+        self.assertEqual([], unavailable)
         self.assertEqual([], registry.calls)

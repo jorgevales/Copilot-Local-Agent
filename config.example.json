@@ -21,5 +21,12 @@
   "copilot_download_hosts": [
     "eu-prod.asyncgw.teams.microsoft.com",
     "m365.cloud.microsoft"
-  ]
+  ],
+  "manifest_path": true,
+  "persistent_graph": true,
+  "bounded_parallelism": true,
+  "local_recovery": true,
+  "knowledge_write": true,
+  "knowledge_reuse": true,
+  "targeted_repair": false
 }

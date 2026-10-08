@@ -86,7 +86,7 @@ class ProtocolTests(unittest.TestCase):
     def test_documented_no_tool_example(self):
         import re
         text = (PROJECT_ROOT / 'guidance' / '02-response-protocol.md').read_text(encoding='utf-8')
-        value = json.loads(re.search(r'```json\n(.*?)\n```', text, re.S).group(1))
+        value = json.loads(re.search(r'<<<COPILOT_AGENT_V1_BEGIN>>>\n(\{.*?\})\n<<<COPILOT_AGENT_V1_END>>>', text, re.S).group(1))
         self.assertEqual('final', parse_response(encoded(value), value['session_id'], value['request_id'])['response_type'])
 
     def test_unique_envelope_and_duplicate_json_keys(self):
@@ -144,6 +144,26 @@ class StateAndPromptTests(unittest.TestCase):
         output = patch('builtins.print')
         output.start()
         self.addCleanup(output.stop)
+
+    def test_interrupted_tool_intents_become_terminal_and_unsafe_replay_stays_blocked(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = SessionState(Path(temporary) / 'session')
+            write = {'call_id': 'write', 'name': 'synthetic.write', 'version': '1.0',
+                     'arguments': {'path': 'new.txt'}}
+            read = {'call_id': 'read', 'name': 'synthetic.read', 'version': '1.0',
+                    'arguments': {'path': 'old.txt'}}
+            state.begin_call(write)
+            state.begin_call(read, state_changing=False)
+            from copilot_agent.app import _record_turn_error
+            _record_turn_error(state, RuntimeError('synthetic interruption'))
+            self.assertEqual('blocked', state.data['status'])
+            self.assertEqual('failed', state.data['last_turn_outcome']['status'])
+            self.assertEqual('uncertain', state.data['calls']['write']['status'])
+            self.assertEqual('completed', state.data['calls']['read']['status'])
+            self.assertFalse(state.data['calls']['read']['result']['result']['side_effects_uncertain'])
+            self.assertEqual('uncertain', SessionState(state.directory, resume=True).data['calls']['write']['status'])
+            with self.assertRaises(RuntimeError):
+                state.begin_call(dict(write, call_id='retry'))
 
     def test_submission_only_counts_after_identity_confirmation(self):
         state = SessionState(retained_root('count-'))

@@ -6,7 +6,7 @@ This project preserves the CDD workflow and uses Microsoft Copilot Chat through 
 
 - `app.py`, `copilot_agent/app.py`: interactive visible setup, console conversation, approval previews, clean exit and live-test entry points.
 - `config.py`: shared source paths and per-user OneDrive runtime paths, explicit OneDrive Created configuration, allowed roots/domains, browser settings and limits. Defaults restrict file tools to the workspace and disable all Created monitoring until the live run is configured.
-- `browser.py`, `reused_browser.py`: dedicated Edge lifecycle, bounded CDP attachment, owned chat and separate tool tab, isolated selectors, discovered model names/modes and checked selection, exact file upload, correlated assistant capture, diagnostics. Reuse selected source helpers with provenance; do not invoke CDD run/cleanup.
+- `browser.py`, `reused_browser.py`: dedicated Edge lifecycle, bounded CDP attachment, owned chat and guarded website tabs in the same verified profile, discovered model names/modes and checked selection, exact file upload, correlated plain-text assistant capture, diagnostics. Reuse selected source helpers with provenance; do not invoke CDD run/cleanup.
 - `protocol.py`, `schemas/response-v1.schema.json`: one unique marker-delimited JSON envelope, strict schema and logical invariants, duplicate-key/stale-ID rejection, safe extraction and compact correction.
 - `state.py`: atomic snapshots with retained versions, append-only events, intent/outcome ledger, counters, pending actions and restart uncertainty.
 - `findings.py`: immediate validated/deduplicated findings and a readable Markdown attachment, versioning/timestamps/provenance, secret filtering.

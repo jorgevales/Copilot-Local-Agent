@@ -157,7 +157,7 @@ def delivery_instruction(user_text: str) -> str:
     else:
         packaging = 'Generate the requested non-Office file as an actual downloadable UI artifact. If only plaintext, a code block or a sandbox reference is available, provide a downloadable ZIP containing that same file instead.'
     return (packaging + names + ' Keep one strict JSON response envelope. Put one actual clickable Markdown artifact download link AFTER '
-            '<<<COPILOT_AGENT_V1_END>>>, outside the fenced JSON; a URL inside user_response is inert code. '
+            '<<<COPILOT_AGENT_V1_END>>>, outside the JSON object; a URL inside user_response is not a clickable anchor. '
             'Use only an actual available artifact link; do not invent a URL/hash or claim a sandbox path is delivery. '
             'Local download, inspection and extraction remain policy-controlled; do not execute delivered code. '
             'If artifact creation is unavailable, report it honestly without expanding the task.')
@@ -183,5 +183,5 @@ def retry_message(reason: str, attempt: int, max_attempts: int = 3, office: bool
     return (f'Delivery correction {attempt}/{max_attempts}: observed problem: {reason.strip()[:1200]}. '
             'Reissue the same requested artifact without changing user intent or expanding scope. ' + format_rule +
             ' Keep one strict envelope and put one actual clickable Markdown download link AFTER <<<COPILOT_AGENT_V1_END>>>, '
-            'outside fenced JSON. Do not invent URLs or claim local delivery; report unavailable capability honestly. '
+            'outside the JSON object. Do not invent URLs or claim local delivery; report unavailable capability honestly. '
             'This is an ordinary conversation submission; findings keep their normal counting/attachment rules.')

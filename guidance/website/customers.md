@@ -4,4 +4,4 @@ Reconnoitre search forms and use only user-authorised identifiers. Assert the re
 
 Bind task_id and opaque customer_key to the intended tab. browser.customer_summary requires exact observed identity assertions and a small explicit list of named field locators. Identity mismatch blocks extraction. Output gives observed values, source provenance, missing facts and conflicts. Limit sensitive fields to the task and distinguish facts from inference.
 
-Verify identity after profile navigation and customer-context changes. Customer details remain ephemeral and never enter Useful Findings or reusable website knowledge. Sign in manually in the isolated website context; no Copilot cookies are shared.
+Verify identity after profile navigation and customer-context changes. Customer details remain ephemeral and never enter Useful Findings or reusable website knowledge. Website tabs share the verified Edge profile; complete any missing site sign-in manually there.

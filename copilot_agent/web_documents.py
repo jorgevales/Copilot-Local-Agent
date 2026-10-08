@@ -184,7 +184,8 @@ def _page(context, tab_id=None):
         page=record['page']
     else: page=context.get('web_page') or getattr(browser,'tool_page',None)
     if page is None or callable(getattr(page,'is_closed',None)) and page.is_closed(): raise PolicyError('Owned document page is unavailable')
-    if getattr(page,'context',None) is not getattr(browser,'tool_context',None): raise PolicyError('Document tools require the isolated website context')
+    if (getattr(page,'context',None) is not getattr(browser,'tool_context',None)
+            or page not in getattr(browser,'_tool_pages',[page])): raise PolicyError('Document tools require an owned website tab')
     return browser,page
 
 
@@ -377,12 +378,9 @@ async def _download_batch(args, context, policy):
             async with slots:
                 async with page_lock:
                     cap=config_value(config,'max_tool_tabs',6)
-                    existing=sum(not p.is_closed() for p in getattr(browser.tool_context,'pages',[]) if callable(getattr(p,'is_closed',None)))
+                    existing=sum(not p.is_closed() for p in getattr(browser,'_tool_pages',[]) if callable(getattr(p,'is_closed',None)))
                     if existing>=cap: raise PolicyError('Owned tab limit reached; close an independent tab first')
-                    browser._navigation_expected_new_pages=getattr(browser,'_navigation_expected_new_pages',0)+1
-                    try: page=await browser.tool_context.new_page()
-                    except BaseException:
-                        browser._navigation_expected_new_pages=max(0,getattr(browser,'_navigation_expected_new_pages',1)-1); raise
+                    page=await browser.new_tool_page()
                 responses={}; metadata_tasks=[]
                 async def response_metadata(response):
                     if response.url!=raw: return

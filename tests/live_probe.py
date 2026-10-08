@@ -180,13 +180,13 @@ async def run(args):
         if args.wire_probe:
             request_id = uuid.uuid4().hex
             session_id = uuid.uuid4().hex
-            report['test'] = 'one_authorized_synthetic_fenced_wire_probe'
+            report['test'] = 'one_authorized_synthetic_plain_text_wire_probe'
             report['no_messages_or_uploads'] = False
             report['uploads'] = 0
             report['request_id'], report['session_id'] = request_id, session_id
             payload = {'protocol_version':'1.0','session_id':session_id,'request_id':request_id,
                        'path':r'C:\synthetic\workspace','literal':'Show more lines','label':'JSON'}
-            instruction = {'request_id':request_id, 'instruction':'Synthetic read-only UI transport test. Return exactly <<<COPILOT_AGENT_V1_BEGIN>>> on its own line, one fenced json code block containing the exact payload below, then <<<COPILOT_AGENT_V1_END>>> on its own line. Do not call tools, request execution, or change any files. Preserve literal strings and JSON backslashes.', 'payload':payload}
+            instruction = {'request_id':request_id, 'instruction':'Synthetic read-only UI transport test. Return exactly <<<COPILOT_AGENT_V1_BEGIN>>> on its own line, the exact JSON payload below as plain chat text without Markdown fences or Code Preview, then <<<COPILOT_AGENT_V1_END>>> on its own line. Do not call tools, request execution, or change any files. Preserve literal strings and JSON backslashes.', 'payload':payload}
             def commit():
                 report['copilot_message_count'] = 1
             text = await adapter.exchange(json.dumps(instruction), request_id, on_submitted=commit)
@@ -252,7 +252,7 @@ def main():
     parser.add_argument('--request-id')
     parser.add_argument('--code-dom', action='store_true', help='Verify literal fenced-code DOM extraction on an owned local tool page, with no requests/sends.')
     parser.add_argument('--latest-initialization', action='store_true', help='Identify only an initialization-title history link verified by the supplied synthetic request ID.')
-    parser.add_argument('--wire-probe', action='store_true', help='Explicitly authorized one-message synthetic fenced-wire test, no uploads or tools/code execution.')
+    parser.add_argument('--wire-probe', action='store_true', help='Explicitly authorized one-message synthetic plain-text wire test, no uploads or tools/code execution.')
     parser.add_argument('--startup-timeout', type=float, default=45)
     return asyncio.run(run(parser.parse_args()))
 

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import uuid
 import threading
+import time
 from .approvals import ApprovalManager
 from .browser import BrowserUIError, CaptureTimeoutError, SubmissionAmbiguousError, SubmissionNotSentError
 from .code_runner import CodeRunner
@@ -48,6 +49,7 @@ class Orchestrator:
                              'pending_file_attachments': [],
                              'approved_attachment_hashes': self.approved_attachment_hashes,
                              'site_knowledge_bindings': {},
+                             'discovery_runs': {},
                              'web_document_tickets': {},
                              'document_catalogues': {}, 'download_manifest_hashes': {},
                              'transferred_attachment_hashes': {},
@@ -382,7 +384,7 @@ class Orchestrator:
             try:
                 response = parse_response(raw, self.state.session_id, request_id, self.registry, self.state.data['response_ids'])
                 self._preflight(response)
-                if any(call['name'].startswith(('browser.', 'documents.', 'site_knowledge.'))
+                if any(call['name'].startswith(('browser.', 'documents.', 'site_knowledge.', 'discovery.', 'navigation.'))
                        or call['name'] == 'files.transfer_to_copilot' for call in response['tool_requests']):
                     self.state.data['website_task_active'] = True
                 self.state.data['response_ids'].append(response['response_id'])
@@ -399,8 +401,22 @@ class Orchestrator:
                                      findings_accepted=findings_result['accepted'])
                 return response
             except (ProtocolError, PolicyError, ValueError) as exc:
+                from .discovery_contracts import DiscoveryError
+                from .web_privacy import PRIVATE_TOOLS
+                new_raw_hint = any(name in raw for name in PRIVATE_TOOLS
+                                   if name.startswith(('discovery.', 'navigation.')))
+                new_rejection = (isinstance(exc, DiscoveryError) or new_raw_hint
+                                 or isinstance(exc, ProtocolError) and exc.code.startswith('discovery_'))
+                if new_raw_hint and isinstance(exc, ProtocolError) and not exc.code.startswith('discovery_'):
+                    exc = ProtocolError('discovery_rejected', ['The current discovery/navigation envelope is malformed or uncorrelated; zero execution and no automatic repair/fallback.'])
                 if not isinstance(exc, ProtocolError):
-                    exc = ProtocolError('unsafe_tool_arguments', [str(exc)])
+                    exc = ProtocolError('discovery_rejected' if new_rejection else 'unsafe_tool_arguments', [str(exc)])
+                if new_rejection:
+                    self.state.data['status'] = 'blocked'
+                    self.state.event('discovery_contract_rejected', code=exc.code, zero_execution=True)
+                    self.state.save()
+                    self.feedback.emit('Error', 'Discovery/navigation contract rejected locally; zero execution. ' + '; '.join(exc.errors))
+                    raise exc
                 self.state.data['retry_records'].append({'request_id': request_id, 'attempt': attempt, 'reason': exc.code, 'errors': exc.errors})
                 self.state.event('response_invalid', request_id=request_id, attempt=attempt, code=exc.code, errors=exc.errors)
                 if attempt == self.config.max_corrections:
@@ -413,7 +429,10 @@ class Orchestrator:
                 self.feedback.emit('Error', message, request_id=request_id)
                 self.feedback.record('Error', 'Completed response rejected: ' + str(exc),
                                      request_id=request_id, protocol_code=exc.code, errors=exc.errors)
-                if hasattr(self.browser, 'diagnostics'):
+                # A finished malformed reply is already captured and recorded.
+                # Send the correction promptly; collect heavier UI evidence only
+                # when the correction budget is exhausted.
+                if attempt == self.config.max_corrections and hasattr(self.browser, 'diagnostics'):
                     try:
                         evidence = await self.browser.diagnostics('protocol_' + exc.code)
                         self.state.event('protocol_ui_evidence', request_id=request_id, artifact=str(evidence) if evidence else None)
@@ -428,6 +447,9 @@ class Orchestrator:
         raise RuntimeError('Unreachable retry state')
 
     def _preflight(self, response):
+        if self.base_context.get('discovery_synthesis_pending') and response['tool_requests']:
+            from .discovery_contracts import DiscoveryError
+            raise DiscoveryError('synthesis_only', '$', 'The consolidated discovery/navigation run has ended. Synthesize actual evidence and gaps; new execution requires a new user request.')
         catalog = {d['name']: d for d in self.registry.definitions()}
         for call in response['tool_requests']:
             from .web_privacy import private_id
@@ -447,6 +469,14 @@ class Orchestrator:
                 self.registry.validate_input(call['name'], call['arguments'])
             if call['name'] == 'browser.open' and hasattr(self.registry, 'validate_call'):
                 self.registry.validate_call(call['name'], call['arguments'], self.base_context)
+            if call['name'].startswith(('discovery.', 'navigation.')) and hasattr(self.registry, 'validate_call'):
+                if len(response['tool_requests']) != 1:
+                    raise PolicyError('A discovery/navigation contract is one independent call; do not mix it with legacy side-effect tools')
+                context = dict(self.base_context, source_request_id=response['request_id'])
+                self.registry.validate_call(call['name'], call['arguments'], context)
+                if call['name'] in {'discovery.manifest', 'navigation.intent'}:
+                    self.base_context['discovery_accepted_at'] = time.time()
+                    self.base_context['discovery_accepted_monotonic'] = time.monotonic()
             if call['name'] == 'code_runner':
                 self._code_runner().validate(call['arguments'])
                 if response['code_runner_proposal'] is not None and response['code_runner_proposal'] != call['arguments']:
@@ -464,6 +494,9 @@ class Orchestrator:
 
     async def turn(self, user_input: str, attachments=()):
         self.cancel_event.clear()
+        self.base_context.pop('discovery_synthesis_pending', None)
+        self.base_context.pop('discovery_accepted_at', None)
+        self.base_context.pop('discovery_accepted_monotonic', None)
         if not self.initialized:
             raise RuntimeError('Initialize the verified contract first')
         if self.state.data['pending_submission']:
@@ -486,6 +519,8 @@ class Orchestrator:
                 return {'response_type': 'clarification', 'user_response': 'Attachment denied.'}
             self.approved_attachment_hashes.update(file_hashes)
             attachments = paths
+        self.state.data['status'] = 'running'
+        self.state.save()
         self.state.message('user', user_input)
         self.state.data['requirements'].append(user_input)
         from .delivery import delivery_requirements, retry_message
@@ -538,6 +573,7 @@ class Orchestrator:
                                 if key in turn_call_ids and not item.get('result', {}).get('ok')]
                 if (response['response_type'] == 'error' and failed_calls
                         and not delivery_denied and round_number < self.config.max_tool_rounds
+                        and not self.base_context.get('discovery_synthesis_pending')
                         and not any(item.get('result', {}).get('error', {}).get('code') == 'approval_denied'
                                     for item in failed_calls)):
                     kind, content = 'recovery', {
@@ -601,7 +637,23 @@ class Orchestrator:
                     prepared = self._browser_preparation(call)
                 if call['name'].startswith('site_knowledge.'):
                     from .site_knowledge import prepare_knowledge
-                    prepared = prepare_knowledge(call['arguments'], context, name=call['name'])
+                    try:
+                        prepared = prepare_knowledge(call['arguments'], context, name=call['name'])
+                    except (ValueError, PolicyError) as exc:
+                        failure = {'ok': False, 'tool': call['name'],
+                                   'error': {'code': 'invalid_knowledge_proposal', 'message': str(exc)},
+                                   'result': {'status': 'not_started', 'side_effects_uncertain': False}}
+                        self.state.begin_call(call, state_changing=False)
+                        self.state.finish_call(call['call_id'], failure)
+                        results.append({'call_id': call['call_id'], **failure})
+                        self.feedback.emit('Tool/' + call['name'], 'Proposal rejected before approval or storage: ' + str(exc))
+                        break
+                if call['name'] == 'discovery.manifest':
+                    from .discovery_engine import prepare_discovery
+                    prepared = prepare_discovery(call['arguments'], context)
+                if call['name'] in {'discovery.knowledge_save', 'discovery.knowledge_invalidate', 'navigation.intent'}:
+                    from .discovery_knowledge import prepare_knowledge_tool
+                    prepared = prepare_knowledge_tool(call['name'], call['arguments'], context)
                 if call['name'] == 'ocr.image':
                     artifact = self._attachment_record(self.policy.resolve(call['arguments']['path'], True))
                     prepared = {'approved_image_attachment': artifact, 'destination': self.config.copilot_url}
@@ -642,6 +694,10 @@ class Orchestrator:
                         break
                     context['approved'] = True
                     context['approval_hash'] = approval_hash
+                    if call['name'] in {'discovery.manifest', 'discovery.knowledge_save', 'discovery.knowledge_invalidate', 'navigation.intent'}:
+                        context['discovery_reviewed'] = prepared
+                        if call['name'] == 'discovery.knowledge_save':
+                            context['discovery_save_consent'] = prepared
                     if call['name'].startswith('site_knowledge.'):
                         context['site_knowledge_reviewed'] = prepared
                         if call['name'] == 'site_knowledge.save':
@@ -696,10 +752,25 @@ class Orchestrator:
                     result = {'ok': False, 'error': {'code': 'timeout', 'message': 'Tool timed out; inspect partial effects before any retry.'}}
                 except Exception as exc:
                     result = {'ok': False, 'error': {'code': 'tool_error', 'message': str(exc)}}
+                finally:
+                    if call['name'].startswith(('browser.', 'documents.')):
+                        focus = getattr(self.browser, 'focus_chat', None)
+                        if callable(focus):
+                            try:
+                                await asyncio.wait_for(focus(), timeout=3)
+                            except Exception:
+                                pass  # The tool outcome remains authoritative.
                 self.state.finish_call(call['call_id'], result)
+                if call['name'] in {'discovery.manifest', 'navigation.intent'}:
+                    self.base_context['discovery_synthesis_pending'] = True
                 if result.get('ok') and call['name'] == 'browser.open':
-                    for field in ('task_id', 'customer_key', 'tenant_id', 'site_namespace_id'):
+                    for field in ('task_id', 'customer_key'):
                         self.base_context.pop(field, None)
+                    from urllib.parse import urlsplit
+                    origin = 'https://' + urlsplit(result.get('result', {}).get('url', '')).hostname.lower() if urlsplit(result.get('result', {}).get('url', '')).hostname else None
+                    if origin not in self.base_context.get('site_knowledge_bindings', {}):
+                        for field in ('tenant_id', 'site_namespace_id'):
+                            self.base_context.pop(field, None)
                 if result.get('ok') and call['name'] == 'site_knowledge.bind':
                     scope = result.get('result', {}).get('scope', {})
                     self.base_context['tenant_id'] = scope.get('tenant')
@@ -737,14 +808,17 @@ class Orchestrator:
                 'a materially different safe approach available through registered tools or a newly proposed exact '
                 'Code Runner script. Every materially changed local execution requires its normal fresh approval. '
                 'Stop only at success, exhausted bounded rounds, denial, or a genuine safety/permission boundary.')}
+            if self.base_context.get('discovery_synthesis_pending'):
+                content['instruction'] = ('This consolidated discovery/navigation run is terminal. Produce final evidence-ID-grounded synthesis or a blocked error with material gaps. '
+                                          'No further tool, Code Runner, fallback, routine retry or replan call is accepted in this turn; a new execution needs a new explicit user request.')
         raise RuntimeError('Conversation turn exhausted')
 
     @staticmethod
     def _browser_preparation(call):
         args = call['arguments']
-        prepared = {'isolated_profile': True, 'javascript_enabled': True,
+        prepared = {'shared_verified_profile': True, 'javascript_enabled': True,
                     'managed_tab_only': True, 'dependency_domains': list(args.get('allowed_domains', [])),
-                    'limitations': 'Uses a separate profile with manual sign-in only; bounded owned tabs and exact approved downloads; no credential sharing or unrestricted hosts.'}
+                    'limitations': 'Uses an owned tab in the verified Copilot Edge profile; existing site sign-ins are shared. Bounded tabs and exact approved downloads; no unrestricted hosts.'}
         if call['name'] == 'browser.open':
             prepared.update(website_domain=URLPolicy.website_domain(args['url']), includes_subdomains=True)
         return prepared

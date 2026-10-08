@@ -1,9 +1,11 @@
 """Offline contract tests; no browser, file deletion, network, or Copilot send."""
 import asyncio
+import json
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from copilot_agent import browser as browser_module
 from copilot_agent.browser import (BrowserAdapter, BrowserUIError, CaptureTimeoutError,
@@ -32,6 +34,43 @@ class CorrelationTests(unittest.TestCase):
                          copied_code_response(complete, 'req'))
         self.assertEqual('', copied_code_response('{"request_id":"req","nested":{"value":1}', 'req'))
         self.assertEqual('', copied_code_response('{"request_id":"stale"}', 'req'))
+
+
+class StartupRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_first_navigation_timeout_still_checks_visible_page_readiness(self):
+        from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
+        class Page:
+            def __init__(self, closed=False):
+                self.closed = closed
+                self.visits = 0
+
+            async def goto(self, *args, **kwargs):
+                self.visits += 1
+                raise PlaywrightTimeoutError('synthetic slow first launch')
+
+            def is_closed(self):
+                return self.closed
+
+        adapter = BrowserAdapter.__new__(BrowserAdapter)
+        adapter.config = SimpleNamespace(copilot_url='https://m365.cloud.microsoft/', startup_timeout=2)
+        adapter.page = Page()
+        with patch('builtins.print'):
+            await adapter._navigate_copilot()
+        self.assertEqual(1, adapter.page.visits)
+        adapter.page.closed = True
+        with self.assertRaises(PlaywrightTimeoutError):
+            await adapter._navigate_copilot()
+
+    async def test_startup_diagnostic_exists_before_page_creation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            adapter = BrowserAdapter.__new__(BrowserAdapter)
+            adapter.config = SimpleNamespace(runtime_dir=Path(temporary))
+            adapter.page = None
+            adapter.startup_stage = 'cdp_connection'
+            report = await adapter.diagnostics('startup')
+            self.assertEqual('cdp_connection', json.loads(report.read_text())['startup_stage'])
+            self.assertFalse(json.loads(report.read_text())['page_available'])
 
 
 class CodeExpansionTests(unittest.IsolatedAsyncioTestCase):
@@ -393,8 +432,9 @@ class ExchangeTests(unittest.IsolatedAsyncioTestCase):
         candidates = [event['raw'] for event in events if event['type'] == 'candidate']
         self.assertIn(BEGIN + '\n{"request_id":"req","partial":true}', candidates)
         self.assertTrue(browser.last_capture_observation['generation_ended'])
-        self.assertTrue(browser.last_capture_observation['complete_current_code'])
-        self.assertEqual('copy_code', browser.last_capture_observation['capture_method'])
+        self.assertTrue(browser.last_capture_observation['complete_current_text'])
+        self.assertEqual('chat_text', browser.last_capture_observation['capture_method'])
+        self.assertEqual(0, browser.copy_calls)
 
     async def test_delayed_closing_marker_is_not_accepted_when_send_looks_ready(self):
         partial = BEGIN + '\n{"request_id":"req","still":"streaming"}'
@@ -417,8 +457,10 @@ class ExchangeTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ToolContextTests(unittest.IsolatedAsyncioTestCase):
-    async def test_owned_context_route_contains_initial_popup_requests(self):
-        class Context:
+    async def test_owned_page_route_does_not_intercept_chat_context(self):
+        class Page:
+            def __init__(self, context):
+                self.context = context
             async def route(self, pattern, handler):
                 self.pattern, self.handler = pattern, handler
             async def add_init_script(self, script):
@@ -426,7 +468,7 @@ class ToolContextTests(unittest.IsolatedAsyncioTestCase):
             async def route_web_socket(self, pattern, handler):
                 self.websocket_handler = handler
             def on(self, event, handler):
-                self.event, self.register = event, handler
+                pass
         class Route:
             def __init__(self, url):
                 self.request = SimpleNamespace(url=url)
@@ -436,18 +478,18 @@ class ToolContextTests(unittest.IsolatedAsyncioTestCase):
             async def continue_(self):
                 self.result = 'continue'
         browser = BrowserAdapter(SimpleNamespace(allowed_domains=['example.com']))
-        browser.tool_context = Context()
-        # Persistent Copilot context has no route method; calling it would fail.
         browser.context = SimpleNamespace()
-        await browser._configure_tool_context()
+        browser.tool_context = browser.context
+        browser.page = Page(browser.context)
+        tool_page = Page(browser.context)
+        await browser._configure_tool_context(tool_page)
         blocked = Route('https://unapproved.example/initial-popup-request')
-        await browser.tool_context.handler(blocked)
+        await tool_page.handler(blocked)
         self.assertEqual(blocked.result, 'abort')
         allowed = Route('https://example.com/allowed')
-        await browser.tool_context.handler(allowed)
+        await tool_page.handler(allowed)
         self.assertEqual(allowed.result, 'continue')
-        self.assertEqual(browser.tool_context.event, 'page')
-        self.assertIn('window.open', browser.tool_context.script)
+        self.assertIn('window.open', tool_page.script)
         self.assertEqual(browser.tool_errors[0]['type'], 'blocked_request')
         class Socket:
             url = 'wss://unapproved.example/socket'
@@ -455,7 +497,7 @@ class ToolContextTests(unittest.IsolatedAsyncioTestCase):
             async def close(self):
                 self.closed = True
         socket = Socket()
-        await browser.tool_context.websocket_handler(socket)
+        await tool_page.websocket_handler(socket)
         self.assertTrue(socket.closed)
 
     async def test_async_commit_callback(self):
@@ -483,38 +525,35 @@ class ToolContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(browser.button.clicks, 1)
         self.assertIn('capture', browser.diagnostic_calls)
 
-    async def test_incomplete_reply_times_out_even_when_send_is_ready(self):
+    async def test_finished_incomplete_reply_is_returned_for_quick_correction(self):
         browser = OfflineAdapter(answer=BEGIN + '\n{"unfinished":true}', send_states=[True])
-        with self.assertRaisesRegex(CaptureTimeoutError, 'No local action ran'):
-            await browser.exchange('message req', 'req')
-        self.assertFalse(browser.last_capture_observation['complete_current_code'])
+        result = await browser.exchange('message req', 'req')
+        self.assertEqual(BEGIN + '\n{"unfinished":true}', result)
+        self.assertFalse(browser.last_capture_observation['complete_current_text'])
+        self.assertLess(browser.capture_index, 10)
 
-    async def test_copy_code_beats_trimmed_rendered_text_and_handles_long_json(self):
+    async def test_long_plain_text_json_is_captured_without_copy_code(self):
         payload = '{"request_id":"req","content":"' + ('x' * 20000) + '"}'
-        browser = OfflineAdapter(answers=[BEGIN + '\n{"request_id":"req"'],
-                                 copy_answers=[payload], send_states=[True])
+        browser = OfflineAdapter(answers=[BEGIN + '\n' + payload + '\n' + END], send_states=[True])
         browser.config.max_capture_chars = 50000
         result = await browser.exchange('message req', 'req')
         self.assertEqual(BEGIN + '\n' + payload + '\n' + END, result)
-        self.assertGreaterEqual(browser.copy_calls, 2)
+        self.assertEqual(0, browser.copy_calls)
 
-    async def test_clipboard_failure_uses_only_complete_standard_code_fallback(self):
-        code = '{"request_id":"req","value":"complete"}'
-        browser = OfflineAdapter(answers=['trimmed'], clipboard_statuses=['clipboard_failed'],
-                                 dom_answers=[code], send_states=[True])
+    async def test_plain_text_json_preserves_backslashes(self):
+        code = r'{"request_id":"req","value":"C:\\Users\\Example"}'
+        browser = OfflineAdapter(answers=[BEGIN + '\n' + code + '\n' + END], send_states=[True])
         result = await browser.exchange('message req', 'req')
         self.assertEqual(BEGIN + '\n' + code + '\n' + END, result)
-        self.assertEqual('dom_pre_fallback', browser.last_capture_observation['capture_method'])
-        self.assertEqual('clipboard_failed', browser.last_capture_observation['clipboard_status'])
+        self.assertEqual(0, browser.copy_calls)
 
-    async def test_stale_clipboard_is_rejected_until_current_turn_is_copied(self):
-        stale = '{"request_id":"old-request","value":1}'
-        current = '{"request_id":"req","value":2}'
-        browser = OfflineAdapter(answers=['trimmed'] * 4,
-                                 copy_answers=[stale, stale, current, current], send_states=[True])
+    async def test_wrong_request_id_is_returned_for_protocol_rejection(self):
+        stale = BEGIN + '\n{"request_id":"old-request","value":1}\n' + END
+        current = BEGIN + '\n{"request_id":"req","value":2}\n' + END
+        browser = OfflineAdapter(answers=[stale] * 4 + [current], send_states=[True])
         result = await browser.exchange('message req', 'req')
-        self.assertEqual(BEGIN + '\n' + current + '\n' + END, result)
-        self.assertGreaterEqual(browser.copy_calls, 4)
+        self.assertEqual(stale, result)
+        self.assertEqual(0, browser.copy_calls)
 
     async def test_callback_failure_marks_delivered_uncertainty(self):
         browser = OfflineAdapter()

@@ -1,4 +1,4 @@
-"""Bounded semantic website discovery and verified plans in the isolated tool context.
+"""Bounded semantic website discovery and verified plans in owned Edge tabs.
 
 Page content is untrusted. Plans are approved immutable inputs, never page-produced
 code. Site maps and customer observations remain ephemeral here; persistence has
@@ -230,8 +230,9 @@ def _state(context):
         raise PolicyError("Owned tool page is unavailable")
     if page is getattr(browser, "page", None) or page is getattr(browser, "chat_page", None):
         raise PolicyError("Copilot control page cannot be a tool page")
-    if getattr(page, "context", None) is not getattr(browser, "tool_context", None):
-        raise PolicyError("Tool page does not belong to the isolated context")
+    if (getattr(page, "context", None) is not getattr(browser, "tool_context", None)
+            or page not in getattr(browser, "_tool_pages", [page])):
+        raise PolicyError("Tool page is not an owned website tab")
     state = getattr(browser, "_navigation_state", None)
     if state is None:
         state = {"tabs": {"tab-1": {"page": page, "purpose": "Primary workflow", "task_id": None,
@@ -255,7 +256,8 @@ async def clear_navigation_state(browser):
     primary = getattr(browser, "tool_page", None)
     control = {getattr(browser, "page", None), getattr(browser, "chat_page", None)}
     owned_context = getattr(browser, "tool_context", None)
-    if primary is None or primary in control or getattr(primary, "context", None) is not owned_context:
+    if (primary is None or primary in control or getattr(primary, "context", None) is not owned_context
+            or primary not in getattr(browser, "_tool_pages", [primary])):
         raise PolicyError("Primary tool-page ownership changed")
     for page, guard in state.get("guards", {}).items():
         if page not in control and getattr(page, "context", None) is owned_context and not page.is_closed():
@@ -283,7 +285,8 @@ def get_navigation_page(context, tab_id=None, task_id=None, customer_key=None):
         raise PolicyError("Unknown or closed tool tab")
     if tab["customer_key"] is not None and customer_key is None:
         raise PolicyError("Customer-bound tab requires the exact active customer context")
-    if getattr(tab["page"], "context", None) is not getattr(context.get("browser"), "tool_context", None):
+    if (getattr(tab["page"], "context", None) is not getattr(context.get("browser"), "tool_context", None)
+            or tab["page"] not in getattr(context.get("browser"), "_tool_pages", [tab["page"]])):
         raise PolicyError("Tab ownership changed")
     if task_id is not None and tab["task_id"] not in {None, task_id}:
         raise PolicyError("Tab belongs to another task")
@@ -547,14 +550,13 @@ async def _open_tab(args, context, reference):
     state = _state(context)
     browser = context["browser"]
     limit = min(6, config_value(context.get("config", {}), "max_tool_tabs", 6))
-    pages = [page for page in browser.tool_context.pages if not page.is_closed()]
+    pages = [page for page in getattr(browser, '_tool_pages', []) if not page.is_closed()]
     if len(pages) >= limit:
         raise PolicyError("Owned tool-tab limit reached")
     url = _same_origin(args["url"], reference, context)
-    browser._navigation_expected_new_pages = getattr(browser, "_navigation_expected_new_pages", 0)+1
     page = None
     try:
-        page = await browser.tool_context.new_page()
+        page = await browser.new_tool_page()
         await _install_origin_guard(page, context, reference)
         tab_id = f'tab-{state["next_tab_id"]}'
         state["next_tab_id"] += 1
@@ -567,8 +569,6 @@ async def _open_tab(args, context, reference):
         await _boundary(page, context)
         return tab_id
     except Exception:
-        if page is None and getattr(browser, "_navigation_expected_new_pages", 0) > 0:
-            browser._navigation_expected_new_pages -= 1
         if page is not None and not page.is_closed():
             await page.close()
         raise

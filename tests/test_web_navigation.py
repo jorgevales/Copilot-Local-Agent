@@ -118,7 +118,13 @@ class NavigationBrowserTests(unittest.IsolatedAsyncioTestCase):
         await self.browser_context.route("**/*", route)
         self.page = await self.browser_context.new_page()
         await self.page.goto("https://fixture.test/")
-        self.adapter = SimpleNamespace(tool_page=self.page, tool_context=self.browser_context, page=None)
+        self.adapter = SimpleNamespace(tool_page=self.page, tool_context=self.browser_context,
+                                       page=None, _tool_pages=[self.page])
+        async def new_tool_page():
+            page = await self.browser_context.new_page()
+            self.adapter._tool_pages.append(page)
+            return page
+        self.adapter.new_tool_page = new_tool_page
         self.context = {"browser": self.adapter, "config": {"allowed_domains": ["fixture.test"]},
                         "session_dir": Path(tempfile.mkdtemp(prefix="navigation-fixture-")), "approved": True}
 

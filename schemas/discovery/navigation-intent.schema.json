@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/navigation-intent.schema.json",
+  "title": "PROPOSED navigation-intent v1",
+  "type": "object",
+  "properties": {
+    "version": {
+      "const": "1.0"
+    },
+    "kind": {
+      "const": "navigation_intent"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "target_purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "origins": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "minItems": 1,
+          "maxItems": 10,
+          "uniqueItems": true
+        },
+        "allow_paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "minItems": 1,
+          "maxItems": 50,
+          "uniqueItems": true
+        },
+        "exclude_paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "minItems": 0,
+          "maxItems": 50,
+          "uniqueItems": true
+        },
+        "query_keys": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "minItems": 0,
+          "maxItems": 30,
+          "uniqueItems": true
+        },
+        "max_query_variants": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "allow_private_network": {
+          "const": false
+        },
+        "redirect_limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        }
+      },
+      "required": [
+        "origins",
+        "allow_paths",
+        "exclude_paths",
+        "query_keys",
+        "max_query_variants",
+        "allow_private_network",
+        "redirect_limit"
+      ],
+      "additionalProperties": false
+    },
+    "allow_targeted_discovery": {
+      "type": "boolean"
+    },
+    "allow_consequential_actions": {
+      "const": false
+    },
+    "budgets": {
+      "type": "object",
+      "properties": {
+        "run_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        },
+        "task_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300
+        },
+        "branch_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        },
+        "pages": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "tasks": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000
+        },
+        "requests": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "per_origin_concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "depth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "browser_contexts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4
+        },
+        "per_origin_rps": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 5
+        },
+        "backoff_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300
+        },
+        "browser_restarts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "replans": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "output_repairs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "run_seconds",
+        "task_seconds",
+        "branch_seconds",
+        "pages",
+        "tasks",
+        "requests",
+        "bytes",
+        "concurrency",
+        "per_origin_concurrency",
+        "attempts",
+        "depth",
+        "browser_contexts",
+        "per_origin_rps",
+        "backoff_seconds",
+        "browser_restarts",
+        "replans",
+        "output_repairs"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "version",
+    "kind",
+    "request_id",
+    "objective",
+    "target_purpose",
+    "scope",
+    "allow_targeted_discovery",
+    "allow_consequential_actions",
+    "budgets"
+  ],
+  "additionalProperties": false
+}

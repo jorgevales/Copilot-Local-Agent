@@ -4,11 +4,11 @@ Guidance version: 1.0. The attached `response-v1.schema.json` is the exact machi
 
 ## Envelope
 
-Return exactly one envelope, without introductory prose or an additional competing envelope. Put the JSON object in a single fenced Markdown code block labelled `json` BETWEEN the marker lines. This preserves literal backslashes and other JSON characters in Copilot's rendered UI. Keep the markers outside that code block. The orchestrator extracts the verbatim code text; fences do not change the JSON schema.
+Return exactly one envelope, without introductory prose or an additional competing envelope. Put the JSON object as plain text BETWEEN the marker lines. Do not wrap it in Markdown code fences or a Code Preview. The orchestrator reads the current assistant chat text, then validates the exact marker pair, JSON, schema, and request identity. Preserve valid JSON escapes; use forward slashes in paths where possible.
 
-File-delivery exception: after the END marker, publish the actual generated artifact as one clickable Markdown download link outside the JSON/code block. The local download tool requires a real UI anchor. A link only inside `user_response` is inert code; plain text and `sandbox:` references do not count. Keep exactly one response envelope; never fabricate a link. Avoid copying signed URL query tokens into JSON or summaries.
+File-delivery exception: after the END marker, publish the actual generated artifact as one clickable Markdown download link outside the JSON object. The local download tool requires a real UI anchor. A link only inside `user_response` is not a clickable anchor; plain text and `sandbox:` references do not count. Keep exactly one response envelope; never fabricate a link. Avoid copying signed URL query tokens into JSON or summaries.
 
-The complete no-tool example below shows the exact marker and fence placement.
+The complete no-tool example below shows the exact plain-text marker placement.
 
 Use JSON double quotes, finite numbers, and no comments, trailing commas or duplicate object keys. Never omit required fields. Unknown fields are rejected. A parser may extract one complete envelope from surrounding text as a meaning-preserving repair, but that is recovery behavior, not permission to ignore this format.
 
@@ -52,7 +52,6 @@ The identifiers below are illustrative; replace them with the current request's 
 
 ````text
 <<<COPILOT_AGENT_V1_BEGIN>>>
-```json
 {
   "protocol_version": "1.0",
   "session_id": "example-session",
@@ -77,7 +76,6 @@ The identifiers below are illustrative; replace them with the current request's 
   "completion_status": "complete",
   "recoverable_errors": []
 }
-```
 <<<COPILOT_AGENT_V1_END>>>
 ````
 

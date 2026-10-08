@@ -48,6 +48,13 @@ class Config:
     created_dir: Path | None = None
     created_sync_enabled: bool = False
     model: str = 'GPT-6 Sol'
+    manifest_path: bool = True
+    persistent_graph: bool = True
+    bounded_parallelism: bool = True
+    local_recovery: bool = True
+    knowledge_write: bool = True
+    knowledge_reuse: bool = True
+    targeted_repair: bool = False
     max_attachment_bytes: int = 20 * 1024 * 1024
     download_timeout: float = 90
     max_download_bytes: int = 20 * 1024 * 1024
@@ -89,12 +96,30 @@ class Config:
                         if key == 'root' and not value.is_absolute():
                             value = PROJECT_ROOT / value
                 setattr(cfg, key, value)
+        # Contract assets belong to the selected source, never a
+        # root remembered in a supplied configuration. Direct Config(...)
+        # fixture roots remain supported; the actual application uses load().
+        if os.environ.get('COPILOT_AGENT_EXECUTION_MODE') == 'testing':
+            cfg.root = PROJECT_ROOT
+        # Optional operator feature selection in either runtime mode;
+        # flags never grant execution approval.
+        selected = os.environ.get('COPILOT_AGENT_DISCOVERY_FLAGS', '')
+        if selected:
+            flags = {'manifest_path', 'persistent_graph', 'bounded_parallelism', 'local_recovery',
+                     'knowledge_write', 'knowledge_reuse', 'targeted_repair'}
+            requested = {item.strip() for item in selected.split(',') if item.strip()}
+            if not requested or not requested <= flags:
+                raise ValueError('COPILOT_AGENT_DISCOVERY_FLAGS contains an unknown/empty flag')
+            for key in flags:
+                setattr(cfg, key, key in requested)
         cfg._profile_explicit = bool(data.get('profile_dir'))
         cfg._configured_profile_dir = Path(data['profile_dir']) if data.get('profile_dir') else None
         cfg._configured_allowed_roots = list(data.get('allowed_roots', ['workspace', 'deliveries']))
         cfg._storage_candidates = discover_onedrive_accounts()
         if cfg.storage_dir is None:
-            cfg.storage_dir = saved_storage_choice(cfg._storage_candidates)
+            cfg.storage_dir = (saved_storage_choice(cfg._storage_candidates, testing=True)
+                               if os.environ.get('COPILOT_AGENT_EXECUTION_MODE') == 'testing'
+                               else saved_storage_choice(cfg._storage_candidates))
         if cfg.storage_dir is not None:
             cfg.storage_dir = validate_storage_directory(cfg.storage_dir, cfg._storage_candidates)
         cfg.validate()
@@ -103,9 +128,17 @@ class Config:
     def validate(self) -> None:
         if type(self.debug_port) is not int or not 1024 <= self.debug_port <= 65535:
             raise ValueError('debug_port must be an integer from 1024 to 65535')
-        for key in ('visible', 'attach_existing', 'created_sync_enabled'):
+        for key in ('visible', 'attach_existing', 'created_sync_enabled', 'manifest_path',
+                    'persistent_graph', 'bounded_parallelism', 'local_recovery',
+                    'knowledge_write', 'knowledge_reuse', 'targeted_repair'):
             if type(getattr(self, key)) is not bool:
                 raise ValueError(key + ' must be boolean')
+        if self.targeted_repair:
+            raise ValueError('targeted_repair is unavailable until browser/repair safety gates and adapters exist')
+        if (self.knowledge_write or self.knowledge_reuse) and not self.persistent_graph:
+            raise ValueError('knowledge_write/knowledge_reuse require persistent_graph and its runtime gates')
+        if (self.persistent_graph or self.bounded_parallelism or self.local_recovery) and not self.manifest_path:
+            raise ValueError('persistent_graph/bounded_parallelism/local_recovery require manifest_path')
         for key in ('startup_timeout', 'response_timeout', 'poll_interval', 'tool_timeout', 'sync_timeout', 'sync_poll_interval', 'download_timeout'):
             if type(getattr(self, key)) not in (int, float) or not 0 < getattr(self, key) <= 3600:
                 raise ValueError(key + ' must be positive and at most 3600')

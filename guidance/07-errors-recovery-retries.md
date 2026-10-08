@@ -31,3 +31,11 @@ Ask the user to sign in manually when required. Do not collect cookies, tokens o
 ## Honest recovery outcome
 
 Distinguish recovered, exhausted, unsupported and unexecuted. No local file, tool or UI test is successful without observed evidence. A blocked capability should produce a clear explanation and safe next step rather than fabricated completion.
+
+
+## Discovery-specific rejection and recovery
+A rejected new contract runs zero effects and does not fall through to arbitrary legacy tools. No autonomous shape-repair or model replan loop is installed. The existing explicit user-approved sequential tools remain available for a NEW request, not as automatic bypass/replay.
+
+Only the installed public-read recovery preset may retry (if separately enabled): at most three attempts including the first, shared unchanged task/branch/run deadlines, maximum 60 seconds per URL and the smaller remaining run backoff budget. Honor Retry-After by delaying the same origin and reducing its rate/concurrency. No retry for access denial, authentication, scope/public-IP/integrity violations or unknown effects. No browser escalation to bypass restriction. The local independent finaliser emits cancellation/partial/gap diagnostics even when aggregate dependencies cannot be met.
+
+Cancellation blocks new dispatch and increments the persistent generation; late owner/fence commits are refused. Automatic interrupted-run resume/lease stealing and graph amendments are NOT enabled. Retain clean checkpoints and consumed counters; do not restart an interrupted run under a reset budget or replay an uncertain legacy effect. Runtime cancellation, fault/restore and VDI ACL gates remain NOT RUN until an authorised test phase.

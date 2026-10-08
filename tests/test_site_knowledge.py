@@ -119,6 +119,18 @@ class SiteKnowledgeTests(unittest.TestCase):
         self.assertEqual(record["consent"]["approval_hash"], "a" * 64)
         self.assertEqual(len(record["consent"]["review_sha256"]), 64)
 
+    def test_later_save_merges_observed_generic_routes_and_shows_full_preview(self):
+        self.bind()
+        first = {"origin": "https://example.com", "categories": ["routes"],
+                 "knowledge": {"routes": [{"path": "/inicio", "purpose": "landing", "label": "Dashboard"}]}}
+        self.save(first)
+        later = {"origin": "https://example.com", "categories": ["routes"],
+                 "knowledge": {"routes": [{"path": "/consultas", "purpose": "navigation", "label": "Consultas agendadas"}]}}
+        prepared = self.approve("site_knowledge.save", later)
+        self.assertEqual({item["path"] for item in prepared["knowledge"]["routes"]}, {"/inicio", "/consultas"})
+        execute_knowledge("site_knowledge.save", later, self.context)
+        self.assertEqual({item["path"] for item in self.retrieve()["knowledge"]["routes"]}, {"/inicio", "/consultas"})
+
     def test_all_allowed_categories_and_generic_parameter_templates(self):
         self.bind()
         knowledge = {
@@ -260,6 +272,7 @@ class SiteKnowledgeTests(unittest.TestCase):
 
     def test_authentication_and_captcha_recovery_cannot_bypass_user(self):
         self.bind()
+        saved_failures = set()
         for failure in ("auth_expired", "access_denied", "captcha"):
             args = {"origin": "https://example.com", "categories": ["recovery"],
                     "knowledge": {"recovery": [{"path": "/", "failure": failure, "steps": ["use_locator_fallback"]}]}}
@@ -267,7 +280,8 @@ class SiteKnowledgeTests(unittest.TestCase):
                 prepare_knowledge(args, self.context, name="site_knowledge.save")
             args["knowledge"]["recovery"][0]["steps"] = ["ask_user", "stop"]
             self.save(args)
-            self.assertEqual(self.retrieve()["knowledge"], args["knowledge"])
+            saved_failures.add(failure)
+            self.assertEqual({item["failure"] for item in self.retrieve()["knowledge"]["recovery"]}, saved_failures)
 
     def test_locators_cannot_persist_dynamic_customer_attributes_or_script(self):
         self.bind()

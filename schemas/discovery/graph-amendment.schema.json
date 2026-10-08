@@ -1,0 +1,422 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/graph-amendment.schema.json",
+  "title": "PROPOSED graph-amendment v1",
+  "type": "object",
+  "properties": {
+    "version": {
+      "const": "1.0"
+    },
+    "kind": {
+      "const": "graph_amendment"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+    },
+    "base_revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "replace_pending": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+          },
+          "worker": {
+            "type": "string",
+            "enum": [
+              "bootstrap",
+              "http",
+              "browser",
+              "network",
+              "structure",
+              "validate",
+              "aggregate"
+            ]
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "bootstrap",
+              "fetch",
+              "observe_navigation",
+              "observe_network",
+              "map_structure",
+              "validate_evidence",
+              "aggregate_evidence"
+            ]
+          },
+          "branch": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "task_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+                },
+                "accept": {
+                  "type": "string",
+                  "enum": [
+                    "success",
+                    "usable",
+                    "terminal"
+                  ]
+                }
+              },
+              "required": [
+                "task_id",
+                "accept"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 0,
+            "maxItems": 100
+          },
+          "inputs": {
+            "type": "object",
+            "properties": {
+              "urls": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uri",
+                  "maxLength": 2048
+                },
+                "minItems": 0,
+                "maxItems": 100,
+                "uniqueItems": true
+              },
+              "evidence_from": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+                },
+                "minItems": 0,
+                "maxItems": 100,
+                "uniqueItems": true
+              },
+              "route_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+                },
+                "minItems": 0,
+                "maxItems": 100,
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "urls",
+              "evidence_from",
+              "route_ids"
+            ],
+            "additionalProperties": false
+          },
+          "output_type": {
+            "type": "string",
+            "enum": [
+              "scope_evidence",
+              "page_evidence",
+              "network_evidence",
+              "structure_evidence",
+              "validated_evidence",
+              "result"
+            ]
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "critical": {
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300
+          },
+          "max_attempts": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "recovery_policy": {
+            "type": "string",
+            "enum": [
+              "read_only_v1",
+              "observe_only_v1",
+              "no_retry_v1"
+            ]
+          },
+          "auth_requirement": {
+            "type": "string",
+            "enum": [
+              "public",
+              "approved_session"
+            ]
+          },
+          "approval_requirement": {
+            "type": "string",
+            "enum": [
+              "none",
+              "existing_read_approval",
+              "per_action"
+            ]
+          },
+          "expand_urls": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "worker",
+          "operation",
+          "branch",
+          "depends_on",
+          "inputs",
+          "output_type",
+          "priority",
+          "critical",
+          "timeout_seconds",
+          "max_attempts",
+          "recovery_policy",
+          "auth_requirement",
+          "approval_requirement",
+          "expand_urls"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 0,
+      "maxItems": 50
+    },
+    "add_tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+          },
+          "worker": {
+            "type": "string",
+            "enum": [
+              "bootstrap",
+              "http",
+              "browser",
+              "network",
+              "structure",
+              "validate",
+              "aggregate"
+            ]
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "bootstrap",
+              "fetch",
+              "observe_navigation",
+              "observe_network",
+              "map_structure",
+              "validate_evidence",
+              "aggregate_evidence"
+            ]
+          },
+          "branch": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "task_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+                },
+                "accept": {
+                  "type": "string",
+                  "enum": [
+                    "success",
+                    "usable",
+                    "terminal"
+                  ]
+                }
+              },
+              "required": [
+                "task_id",
+                "accept"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 0,
+            "maxItems": 100
+          },
+          "inputs": {
+            "type": "object",
+            "properties": {
+              "urls": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uri",
+                  "maxLength": 2048
+                },
+                "minItems": 0,
+                "maxItems": 100,
+                "uniqueItems": true
+              },
+              "evidence_from": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+                },
+                "minItems": 0,
+                "maxItems": 100,
+                "uniqueItems": true
+              },
+              "route_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+                },
+                "minItems": 0,
+                "maxItems": 100,
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "urls",
+              "evidence_from",
+              "route_ids"
+            ],
+            "additionalProperties": false
+          },
+          "output_type": {
+            "type": "string",
+            "enum": [
+              "scope_evidence",
+              "page_evidence",
+              "network_evidence",
+              "structure_evidence",
+              "validated_evidence",
+              "result"
+            ]
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "critical": {
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300
+          },
+          "max_attempts": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "recovery_policy": {
+            "type": "string",
+            "enum": [
+              "read_only_v1",
+              "observe_only_v1",
+              "no_retry_v1"
+            ]
+          },
+          "auth_requirement": {
+            "type": "string",
+            "enum": [
+              "public",
+              "approved_session"
+            ]
+          },
+          "approval_requirement": {
+            "type": "string",
+            "enum": [
+              "none",
+              "existing_read_approval",
+              "per_action"
+            ]
+          },
+          "expand_urls": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "worker",
+          "operation",
+          "branch",
+          "depends_on",
+          "inputs",
+          "output_type",
+          "priority",
+          "critical",
+          "timeout_seconds",
+          "max_attempts",
+          "recovery_policy",
+          "auth_requirement",
+          "approval_requirement",
+          "expand_urls"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 0,
+      "maxItems": 50
+    },
+    "skip_pending": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+      },
+      "minItems": 0,
+      "maxItems": 50,
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "version",
+    "kind",
+    "request_id",
+    "run_id",
+    "base_revision",
+    "reason",
+    "replace_pending",
+    "add_tasks",
+    "skip_pending"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,377 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.invalid/navigation-plan.schema.json",
+  "title": "PROPOSED navigation-plan v1",
+  "type": "object",
+  "properties": {
+    "version": {
+      "const": "1.0"
+    },
+    "kind": {
+      "const": "navigation_plan"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+    },
+    "knowledge_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+    },
+    "knowledge_revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000
+    },
+    "scope_identity": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "target_route": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+    },
+    "starting_route": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+          },
+          "action_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+          },
+          "from_route": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+          },
+          "to_route": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "navigate",
+              "click",
+              "fill",
+              "submit"
+            ]
+          },
+          "effect": {
+            "type": "string",
+            "enum": [
+              "read",
+              "consequential"
+            ]
+          },
+          "locators": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "link",
+                    "button",
+                    "textbox",
+                    "combobox",
+                    "checkbox",
+                    "heading"
+                  ]
+                },
+                "accessible_name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                },
+                "within_template": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+                },
+                "unique_required": {
+                  "const": true
+                }
+              },
+              "required": [
+                "role",
+                "accessible_name",
+                "within_template",
+                "unique_required"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 0,
+            "maxItems": 5
+          },
+          "preconditions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "minItems": 1,
+            "maxItems": 20,
+            "uniqueItems": true
+          },
+          "expected_transition": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "validation": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "origin",
+                "scope",
+                "fingerprint",
+                "controls",
+                "authentication",
+                "approval",
+                "target"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 7,
+            "uniqueItems": true
+          },
+          "approval": {
+            "type": "string",
+            "enum": [
+              "existing_read_approval",
+              "per_action"
+            ]
+          },
+          "recovery_policy": {
+            "type": "string",
+            "enum": [
+              "read_only_v1",
+              "observe_only_v1",
+              "no_retry_v1"
+            ]
+          },
+          "success_evidence_types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "page",
+                "structure",
+                "boundary"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 3,
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "id",
+          "action_id",
+          "from_route",
+          "to_route",
+          "kind",
+          "effect",
+          "locators",
+          "preconditions",
+          "expected_transition",
+          "validation",
+          "approval",
+          "recovery_policy",
+          "success_evidence_types"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 0,
+      "maxItems": 100
+    },
+    "budgets": {
+      "type": "object",
+      "properties": {
+        "run_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        },
+        "task_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300
+        },
+        "branch_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        },
+        "pages": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "tasks": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000
+        },
+        "requests": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "per_origin_concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "depth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "browser_contexts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4
+        },
+        "per_origin_rps": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 5
+        },
+        "backoff_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300
+        },
+        "browser_restarts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "replans": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "output_repairs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "run_seconds",
+        "task_seconds",
+        "branch_seconds",
+        "pages",
+        "tasks",
+        "requests",
+        "bytes",
+        "concurrency",
+        "per_origin_concurrency",
+        "attempts",
+        "depth",
+        "browser_contexts",
+        "per_origin_rps",
+        "backoff_seconds",
+        "browser_restarts",
+        "replans",
+        "output_repairs"
+      ],
+      "additionalProperties": false
+    },
+    "stop_on": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "scope_mismatch",
+          "approval_missing",
+          "ambiguous_control",
+          "unexpected_transition",
+          "auth_expired",
+          "budget_exhausted",
+          "cancelled"
+        ]
+      },
+      "minItems": 7,
+      "maxItems": 7,
+      "uniqueItems": true
+    },
+    "success": {
+      "type": "object",
+      "properties": {
+        "route_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+        },
+        "required_evidence_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "page",
+              "structure"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "minimum_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "route_id",
+        "required_evidence_types",
+        "minimum_confidence"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "version",
+    "kind",
+    "request_id",
+    "knowledge_id",
+    "knowledge_revision",
+    "scope_identity",
+    "target_route",
+    "starting_route",
+    "steps",
+    "budgets",
+    "stop_on",
+    "success"
+  ],
+  "additionalProperties": false
+}

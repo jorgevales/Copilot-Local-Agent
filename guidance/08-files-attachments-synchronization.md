@@ -30,7 +30,7 @@ For one non-Office file such as `.py`, `.md`, `.txt`, `.json` or `.csv`, explici
 
 ## Download-link presentation exception
 
-Keep exactly one strict response envelope, with its JSON object fenced between the prescribed markers. When an actual artifact download link is available, you may additionally put one useful Markdown download link AFTER `<<<COPILOT_AGENT_V1_END>>>`, outside the JSON code block. This is the specific delivery exception to envelope-only presentation. A Markdown link inside `user_response` is literal code and does not supply a clickable UI anchor. Do not add another envelope, arbitrary prose, fabricated URLs or sandbox references. Use the actual generated artifact link; if none is available, report that limitation rather than inventing one.
+Keep exactly one strict response envelope, with its JSON object as plain chat text between the prescribed markers. When an actual artifact download link is available, you may additionally put one useful Markdown download link AFTER `<<<COPILOT_AGENT_V1_END>>>`, outside the JSON object. This is the specific delivery exception to envelope-only presentation. A Markdown link inside `user_response` is plain text and does not supply a clickable UI anchor. Do not add another envelope, arbitrary prose, fabricated URLs or sandbox references. Use the actual generated artifact link; if none is available, report that limitation rather than inventing one.
 
 ## Actual download evidence and authorization
 

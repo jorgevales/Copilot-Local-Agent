@@ -1,4 +1,4 @@
-"""Versioned local capabilities. Browser tools use a separate owned tool page."""
+"""Versioned local capabilities. Browser tools use guarded owned Edge tabs."""
 import asyncio
 import hashlib
 import json
@@ -20,6 +20,10 @@ from .downloads import DownloadError
 from .web_navigation import NAVIGATION_SPECS, validate_navigation, execute_navigation, clear_navigation_state
 from .web_documents import DOCUMENT_SPECS, DOCUMENT_EXAMPLES, validate_documents, execute_documents
 from .site_knowledge import KNOWLEDGE_SPECS, KNOWLEDGE_EXAMPLES, validate_knowledge, execute_knowledge
+from .discovery_engine import DISCOVERY_SPECS, validate_discovery, execute_discovery
+from .discovery_knowledge import (KNOWLEDGE_SPECS as DISCOVERY_KNOWLEDGE_SPECS,
+                                  validate_knowledge_tool, execute_knowledge_tool)
+from .discovery_contracts import DiscoveryError, DISCOVERY_ERROR_CODES
 
 
 def obj(properties, required=None):
@@ -124,7 +128,7 @@ SPECS = {
     "system.versions": (obj({}), "read_only", "Read the exact current Python executable/version, operating system version and selected package versions; no environment variables."),
     "system.disk": (obj(PATH), "read_only", "Read filesystem capacity for an allowed path."),
     "system.processes": (obj({}), "read_only", "Report this agent PID and the explicitly launched owned Edge PID when available; no wider process or command-line inventory."),
-    "browser.open": (obj({"url":S,"allowed_domains":{"type":"array","items":S,"maxItems":30}},["url"]), "user_approval", "After explicit approval, navigate the isolated managed tab to an HTTPS website. JavaScript is enabled; explicitly requested dependency hosts are separately approved. No Copilot authentication is shared."),
+    "browser.open": (obj({"url":S,"allowed_domains":{"type":"array","items":S,"maxItems":30}},["url"]), "user_approval", "After explicit approval, open the HTTPS website in an owned tab of the same verified Edge profile, window and CDP port as Copilot. Existing site sign-ins are shared. Dependency hosts require explicit approval; focus returns to Copilot after the tool."),
     "browser.back": (obj({}), "user_approval", "Navigate backward only if the target history URL passes policy."),
     "browser.forward": (obj({}), "user_approval", "Navigate forward only if the target history URL passes policy."),
     "browser.info": (obj({}), "read_only", "Read tool-tab URL and title."),
@@ -153,6 +157,8 @@ SPECS = {
 SPECS.update(NAVIGATION_SPECS)
 SPECS.update(DOCUMENT_SPECS)
 SPECS.update(KNOWLEDGE_SPECS)
+SPECS.update(DISCOVERY_SPECS)
+SPECS.update(DISCOVERY_KNOWLEDGE_SPECS)
 GUIDANCE_TOPICS = ['index', 'reconnaissance', 'plans', 'customers', 'documents', 'tabs', 'memory', 'recovery', 'privacy', 'testing']
 SPECS['guidance.load'] = (obj({'topics': {'type': 'array', 'minItems': 1, 'maxItems': 3,
                                          'items': {'type': 'string', 'enum': GUIDANCE_TOPICS}}}),
@@ -185,6 +191,10 @@ class ToolRegistry:
         if name == "archives.extract": examples = [{"arguments":{"path":"package.zip","destination":"delivered-project","expected_sha256":"0"*64,"expected_files":["README.md"]}}]
         if name in KNOWLEDGE_EXAMPLES: examples = [{'arguments': KNOWLEDGE_EXAMPLES[name]}]
         if name in DOCUMENT_EXAMPLES: examples = [{'arguments': DOCUMENT_EXAMPLES[name]}]
+        if name in DISCOVERY_SPECS or name in DISCOVERY_KNOWLEDGE_SPECS:
+            # Synthetic auto-generated samples cannot establish valid DAGs, current
+            # correlation or locally issued knowledge/run references.
+            examples = []
         if name == 'browser.plan':
             examples = [{'arguments': {'task_id': 'navigation', 'steps': [{'id': 'ready', 'op': 'wait', 'locator': {'role': 'heading', 'name': 'Documents'}}],
                                       'success': [{'kind': 'visible', 'locator': {'role': 'heading', 'name': 'Documents'}}]}}]
@@ -193,6 +203,8 @@ class ToolRegistry:
                                       'identity': [{'locator': {'testid': 'customer-id'}, 'value': 'user-provided-id'}],
                                       'fields': [{'name': 'status', 'locator': {'testid': 'status'}}]}}]
         errors=["invalid_arguments","policy_denied","unavailable","operation_failed","timeout"]
+        if name in DISCOVERY_SPECS or name in DISCOVERY_KNOWLEDGE_SPECS:
+            errors = sorted(set(errors) | set(DISCOVERY_ERROR_CODES))
         result_schema={"type":"object"}
         if name=="browser.structure":
             control_schema={"type":"object","properties":{
@@ -203,15 +215,25 @@ class ToolRegistry:
             result_schema={"anyOf":[{"type":"object","properties":{"controls":{"type":"array","items":control_schema,"maxItems":100}},"required":["controls"],"additionalProperties":False},{"type":"object","properties":{"truncated":{"const":True},"retained_result":{"type":"string"}},"required":["truncated","retained_result"]},{"type":"object","properties":{"truncated":{"const":True},"followup":{"type":"string"}},"required":["truncated","followup"]}]}
         timeout = 300 if name in {"created.wait", "copilot.download"} else 30
         if name in {'browser.plan', 'browser.download_batch'}: timeout = 125
+        if name in {'discovery.manifest', 'navigation.intent'}: timeout = 3605
         return {"name":name,"version":"1.0","description":description,"intended_use":description,"preconditions":["Current validated tool call", "Configured filesystem/domain boundaries", "Explicit user grant for side effects" if approval!="read_only" else "Read-only operation"],"risk_level":"low" if approval=="read_only" else "moderate","timeout":timeout,"output_size_limit":12000,"error_codes":errors,"input_schema":schema,
                 "output_schema":{"type":"object","properties":{"ok":{"type":"boolean"},"tool":{"type":"string"},"result":result_schema,"error":{"type":"object","properties":{"code":{"type":"string"},"message":{"type":"string"}},"required":["code","message"],"additionalProperties":False}},"required":["ok","tool"],"additionalProperties":False},"approval_policy":approval,
-                "side_effects":[] if approval=="read_only" else ["filesystem creation or append" if name.startswith(("files.", "archives.")) or name in {"code_runner", "copilot.download"} else "browser interaction or screenshot"],
+                "side_effects":[] if approval=="read_only" else [
+                    "exact separately consented local knowledge write/invalidation" if name in {'discovery.knowledge_save', 'discovery.knowledge_invalidate'}
+                    else "approved public HTTPS GET/HEAD and optional sanitized local ledger; never browser interaction" if name in {'discovery.manifest', 'navigation.intent'}
+                    else "filesystem creation or append" if name.startswith(("files.", "archives.")) or name in {"code_runner", "copilot.download"}
+                    else "browser interaction or screenshot"],
                 "limits":{"timeout_seconds":timeout,"output_chars":12000,"file_bytes":20971520},
                 "errors":errors,
                 "examples":examples}
 
     def validate_input(self, name, args):
-        validate(args,self.definition(name)["input_schema"])
+        if name in DISCOVERY_SPECS:
+            validate_discovery(name, args)
+        elif name in DISCOVERY_KNOWLEDGE_SPECS:
+            validate_knowledge_tool(name, args)
+        else:
+            validate(args,self.definition(name)["input_schema"])
 
     def validate_call(self, name, args, context):
         """Preflight a complete envelope without performing a capability."""
@@ -224,6 +246,10 @@ class ToolRegistry:
             validate_documents(name, args, context, policy)
         if name in KNOWLEDGE_SPECS:
             validate_knowledge(name, args, context, policy)
+        if name in DISCOVERY_SPECS:
+            validate_discovery(name, args, context)
+        if name in DISCOVERY_KNOWLEDGE_SPECS:
+            validate_knowledge_tool(name, args, context)
         if name == 'files.transfer_to_copilot':
             return {'valid': True}
         if name.startswith("files.") or name in {"system.disk","ocr.image"}:
@@ -291,6 +317,15 @@ class ToolRegistry:
         limit=min(12000,max(1000,config_value(context.get("config",{}),"max_output_chars",12000)))
         encoded=json.dumps(value,ensure_ascii=False,default=str)
         if len(encoded)<=limit: return value
+        if value.get('tool') in DISCOVERY_SPECS or value.get('tool') in DISCOVERY_KNOWLEDGE_SPECS:
+            # New-path projections never use raw previews/filesystem references or
+            # silently truncate away material limitations in the legacy limiter.
+            return {'ok': False, 'tool': value.get('tool'),
+                    'result': {'status': 'bounded_projection_required', 'truncated': True,
+                               'limitation_severity': 'blocking',
+                               'run_id': value.get('result', {}).get('run_id'),
+                               'message': 'Validated result exceeds the configured projection limit; no completion is claimed and no private overflow was persisted.'},
+                    'error': {'code': 'resource_limit', 'message': 'Use a larger approved output budget or a narrower new request.'}}
         from .web_privacy import PRIVATE_TOOLS
         if value.get('tool') in PRIVATE_TOOLS or context.get('website_private') and value.get('tool') not in {'archives.extract', 'copilot.download'}:
             # Large sensitive page observations stay ephemeral rather than on disk.
@@ -331,6 +366,8 @@ class ToolRegistry:
         return bounded
 
     async def execute(self, name, args, context):
+        if name in DISCOVERY_SPECS or name in DISCOVERY_KNOWLEDGE_SPECS:
+            context['discovery_effects_started'] = False
         try:
             definition=self.definition(name)
             self.validate_call(name,args,context)
@@ -344,7 +381,14 @@ class ToolRegistry:
             if name=="copilot.download": timeout=min(295,config_value(config,"download_timeout",90))+1
             if name in {'browser.plan', 'browser.download_batch'}:
                 timeout = min(125, args.get('timeout_seconds', 60) + 5)
+            if name in {'discovery.manifest', 'navigation.intent'}:
+                payload = args['manifest'] if name == 'discovery.manifest' else args['intent']
+                timeout = min(3605, payload['budgets']['run_seconds'] + 5)
             result=await asyncio.wait_for(self._execute(name,args,context,policy),timeout=timeout)
+            if name in DISCOVERY_SPECS or name in DISCOVERY_KNOWLEDGE_SPECS:
+                if result.get('outcome') in {'failed', 'incomplete', 'cancelled'}:
+                    return self._limit({'ok': False, 'tool': name, 'result': result,
+                                        'error': {'code': 'operation_failed', 'message': 'Discovery did not meet the objective; inspect retained evidence and material gaps.'}}, context)
             if name in NAVIGATION_SPECS or name in DOCUMENT_SPECS:
                 if result.get('status') in {'failed', 'partial', 'blocked', 'interrupted', 'cancelled', 'needs_user_input', 'uncertain'}:
                     return self._limit({'ok': False, 'tool': name, 'result': result,
@@ -361,16 +405,28 @@ class ToolRegistry:
             return self._limit({"ok":True,"tool":name,"result":result},context)
         except DownloadError as error:
             return redact({"ok":False,"tool":name,"result":{"status":"uncertain" if error.side_effects_uncertain else "not_started","side_effects_uncertain":error.side_effects_uncertain},"error":{"code":error.code,"message":str(error)}})
+        except DiscoveryError as error:
+            source = context.get('source_request_id')
+            return {'ok': False, 'tool': name,
+                    'result': error.rejection('d' + source if type(source) is str else None,
+                                              context.get('discovery_effects_started') is True),
+                    'error': {'code': error.code, 'message': error.message}}
         except PolicyError as error: return redact({"ok":False,"tool":name,"error":{"code":"policy_denied","message":str(error)}})
         except (ValueError,TypeError) as error: return redact({"ok":False,"tool":name,"error":{"code":"invalid_arguments","message":str(error)}})
         except asyncio.TimeoutError: return {"ok":False,"tool":name,"error":{"code":"timeout","message":"Local operation timed out; inspect partial effects before retrying"}}
-        except Exception as error: return redact({"ok":False,"tool":name,"error":{"code":"operation_failed","message":str(error)[:1000]}})
+        except Exception as error:
+            if name in DISCOVERY_SPECS or name in DISCOVERY_KNOWLEDGE_SPECS:
+                return {'ok': False, 'tool': name, 'result': {'status': 'failed', 'limitation_severity': 'blocking'},
+                        'error': {'code': 'operation_failed', 'message': 'Installed discovery/storage contract failed; no raw diagnostics are exported and no completion is claimed.'}}
+            return redact({"ok":False,"tool":name,"error":{"code":"operation_failed","message":str(error)[:1000]}})
 
     async def _execute(self,name,args,context,policy):
         config=context.get("config",{})
         if name in NAVIGATION_SPECS: return await execute_navigation(name, args, context, policy)
         if name in DOCUMENT_SPECS: return await execute_documents(name, args, context, policy)
         if name in KNOWLEDGE_SPECS: return execute_knowledge(name, args, context, policy)
+        if name in DISCOVERY_SPECS: return await execute_discovery(name, args, context)
+        if name in DISCOVERY_KNOWLEDGE_SPECS: return await execute_knowledge_tool(name, args, context)
         if name == 'guidance.load':
             folder = Path(__file__).resolve().parents[1] / 'guidance' / 'website'
             return {'guides': [{'topic': topic, 'text': (folder / (topic + '.md')).read_text(encoding='utf-8')[:3500]}
@@ -472,6 +528,12 @@ class ToolRegistry:
         if name.startswith("browser."):
             browser=context.get("browser")
             page=getattr(browser,"tool_page",None)
+            if name == "browser.open" and (page is None or page.is_closed()):
+                # A login flow can replace or close an owned tab. The approved
+                # URL is preflighted before opening another tab in this profile.
+                URLPolicy([*config_value(config,"allowed_domains",[]), *context.get("approved_domains",[])]).resolve(args["url"])
+                page = await browser.new_tool_page()
+                browser.tool_page = page
             if page is None or page.is_closed(): raise PolicyError("Owned tool page is unavailable")
             if page is getattr(browser,"page",None) or page is getattr(browser,"chat_page",None): raise PolicyError("Copilot control page cannot be a tool page")
             urls=URLPolicy([*config_value(config,"allowed_domains",[]), *context.get("approved_domains",[])])
@@ -494,11 +556,18 @@ class ToolRegistry:
                 await clear_navigation_state(browser)
                 await page.goto(url,wait_until="domcontentloaded",timeout=20000)
                 urls.resolve(page.url)
-                for field in ('task_id', 'customer_key', 'tenant_id', 'site_namespace_id'):
+                final_origin='https://' + urlsplit(page.url).hostname.lower()
+                bindings=context.get('site_knowledge_bindings',{})
+                same_bound_origin=final_origin in bindings
+                for field in ('task_id', 'customer_key'):
                     context.pop(field, None)
-                for field in ('web_document_tickets', 'document_catalogues', 'site_knowledge_bindings'):
+                if not same_bound_origin:
+                    for field in ('tenant_id', 'site_namespace_id'):
+                        context.pop(field, None)
+                    bindings.clear()
+                for field in ('web_document_tickets', 'document_catalogues'):
                     context.get(field, {}).clear()
-                return {"url":page.url,"title":await page.title(),"javascript_enabled":True,"isolated_profile":True}
+                return {"url":page.url,"title":await page.title(),"javascript_enabled":True,"shared_verified_profile":True}
             if page.url!="about:blank": urls.resolve(page.url)
             if name in {"browser.back","browser.forward"}:
                 session=await page.context.new_cdp_session(page)

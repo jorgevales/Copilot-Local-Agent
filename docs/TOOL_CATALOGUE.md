@@ -7,7 +7,7 @@ The complete versioned machine-readable definitions are in `schemas/tool-catalog
 | Files | List, existence, bounded text read, metadata, SHA-256 | Read-only within configured resolved roots |
 | Files | Create, append, copy, mkdir | Displayed per-execution or immutable plan approval; create/copy never overwrite |
 | System | Exact current Python executable/version, OS/package/browser versions, allowed-path disk capacity, current agent process | Read-only; no unrelated environment variables or credentials |
-| Browser | URL/title, visible text, structured controls, errors and observed downloads | Read-only on an isolated owned page |
+| Browser | URL/title, visible text, structured controls, errors and observed downloads | Read-only on an owned guarded tab in the verified Edge profile |
 | Browser | Open/back/forward, click, fill, scroll, screenshots | Explicit approval; exact HTTPS domain policy covers redirects, resources and popups |
 | Copilot delivery | Actual current-response artifact download after inspecting Edge settings; permanent verified OneDrive target | Immutable observed-artifact approval; strict HTTPS/native-blob binding |
 | Archives | ZIP manifest and hash inspection | Read-only within permitted roots |
@@ -16,7 +16,7 @@ The complete versioned machine-readable definitions are in `schemas/tool-catalog
 | Created files | Baseline snapshot and stable/readable matching-output polling | Disabled until explicitly configured/enabled for the chosen OneDrive directory; no access while disabled and no cloud-delivery assumption |
 | Code Runner | Restricted default `python_subset`; or explicit `local_python` with declared imports, installed libraries, scoped files/HTTPS/processes/desktop effects, bounded runtime and independent output/window verification | Full immutable generated proposal review; user denial/once/exact displayed plan; no standing approval |
 
-Ordinary browser tools cannot control the Copilot chat tab. The separate website context enables JavaScript, blocks service workers/WebSockets and requires manual sign-in. Downloads need exact observed-source grants; other download events are canceled. Oversized private observations stay ephemeral with scoped follow-up references. Policies and verification failures are returned honestly.
+Ordinary browser tools cannot control the Copilot chat tab. Website tabs share its verified Edge profile and existing site logins; focus returns to Copilot after tool execution. Owned-tab WebSockets are blocked, and HTTP requests are filtered by the exact approved host policy. Service-worker traffic in an existing shared profile is not fully intercepted by page routes. Downloads need exact observed-source grants; other download events are canceled. Oversized private observations stay ephemeral with scoped follow-up references. Policies and verification failures are returned honestly.
 
 Website capabilities include `browser.recon`, `browser.route`, `browser.plan`, `browser.tabs`, `browser.customer_summary`, `browser.documents` and `browser.download_batch`. `documents.catalogue/find/retrieve` keep large collections accessible; `files.transfer_to_copilot` ranks and queues relevant hash-bound files within the 20-total-file transport cap. `site_knowledge.bind/retrieve/query/save/invalidate/export` isolate optional approved navigation memory. `guidance.load` routes to concise workflow instructions. See [upgrade evidence](WEBSITE_UPGRADE_REPORT.md).
 

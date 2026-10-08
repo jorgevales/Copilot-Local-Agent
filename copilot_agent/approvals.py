@@ -36,8 +36,8 @@ class ApprovalManager:
             ('Expected effects', arguments.get('expected_effects')),
             ('Website scope', ((preview.get('prepared_code') or {}).get('website_domain') + ' and its subdomains')
              if (preview.get('prepared_code') or {}).get('website_domain') else None),
-            ('Browser access', 'Uses an isolated unauthenticated profile and managed tab; JavaScript enabled'
-             if (preview.get('prepared_code') or {}).get('isolated_profile') else None),
+            ('Browser access', 'Uses an owned tab in the verified Copilot Edge profile; existing site sign-ins are shared'
+             if (preview.get('prepared_code') or {}).get('shared_verified_profile') else None),
             ('Additional hosts', (preview.get('prepared_code') or {}).get('dependency_domains')),
             ('Risk', arguments.get('risk_summary') or preview['complete_pending_plan'].get('risk_summary')),
         ])
@@ -49,6 +49,10 @@ class ApprovalManager:
                                json.dumps(consent, ensure_ascii=False, indent=2) +
                                '\nChoose Deny to continue the current task without saving knowledge.',
                                preserve_markup=True)
+        if str(current_call.get('name', '')).startswith(('discovery.', 'navigation.')):
+            self.feedback.emit('Approval', 'EXACT DISCOVERY / NAVIGATION GRANT\n' +
+                               json.dumps({'call': current_call, 'local_preparation': consent},
+                                          ensure_ascii=False, indent=2), preserve_markup=True)
         if current and all(str(item.get('name', '')).startswith('browser.') for item in current):
             self.feedback.emit('Approval', 'EXACT ORDERED BROWSER PLAN\n' +
                                json.dumps(current, ensure_ascii=False, indent=2), preserve_markup=True)

@@ -12,6 +12,7 @@ from .persistence import write_json
 
 APP_FOLDER = 'Copilot Agent'
 SETTINGS_FILE = 'settings.json'
+TESTING_SETTINGS_FILE = 'testing-settings.json'
 
 
 @dataclass(frozen=True)
@@ -75,10 +76,13 @@ def profile_directory(storage_dir: Path, hostname=None) -> Path:
     return Path(storage_dir) / 'runtime' / 'edge-profiles' / machine_key(hostname)
 
 
-def read_user_settings(storage_dir: Path) -> dict:
-    path = Path(storage_dir) / SETTINGS_FILE
+def read_user_settings(storage_dir: Path, *, testing=False) -> dict:
+    if type(testing) is not bool:
+        raise ValueError('Testing preferences selector must be boolean')
+    path = Path(storage_dir) / (TESTING_SETTINGS_FILE if testing else SETTINGS_FILE)
     if not path.is_file():
-        return {}
+        # Testing may inherit live defaults in memory, never write them back.
+        return read_user_settings(storage_dir) if testing else {}
     if path.stat().st_size > 65536:
         raise ValueError('Per-user settings exceed the bounded settings size')
     value = json.loads(path.read_text(encoding='utf-8-sig'))
@@ -87,12 +91,12 @@ def read_user_settings(storage_dir: Path) -> dict:
     return value
 
 
-def saved_storage_choice(accounts: list[OneDriveAccount]) -> Path | None:
+def saved_storage_choice(accounts: list[OneDriveAccount], *, testing=False) -> Path | None:
     """Restore one recorded account; never guess between multiple choices."""
     selected = []
     for account in accounts:
         directory = default_storage(account)
-        settings = read_user_settings(directory)
+        settings = read_user_settings(directory, testing=True) if testing else read_user_settings(directory)
         if settings.get('selected_account') is True:
             # Local mount/user paths may differ between VDIs. The settings live
             # in the selected account; derive its current local root safely.
@@ -107,12 +111,15 @@ def validate_storage_directory(path: Path, accounts: list[OneDriveAccount]) -> P
     return target
 
 
-def save_user_settings(storage_dir: Path, settings: dict) -> Path:
+def save_user_settings(storage_dir: Path, settings: dict, *, testing=False) -> Path:
+    if type(testing) is not bool:
+        raise ValueError('Testing preferences selector must be boolean')
     directory = Path(storage_dir)
     directory.mkdir(parents=True, exist_ok=True)
     value = dict(settings, schema_version='1.0', selected_account=True, storage_dir=str(directory))
-    write_json(directory / SETTINGS_FILE, value)
-    return directory / SETTINGS_FILE
+    path = directory / (TESTING_SETTINGS_FILE if testing else SETTINGS_FILE)
+    write_json(path, value)
+    return path
 
 
 def shared_python_candidates(values, require_shared=True) -> list[str]:
