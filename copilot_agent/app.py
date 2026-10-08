@@ -30,6 +30,7 @@ _UI_ASK = None
 _UI_APPROVAL_DECIDER = None
 _UI_EVENT_SINK = None
 _UI_CANCEL_EVENT = None
+_UI_PERMISSION_CONTEXT = None
 
 def system(message):
     _TERMINAL.emit('System', message)
@@ -190,6 +191,8 @@ async def start_new_session(config, previous, model_label, registry=None):
         engine = Orchestrator(fresh_config, browser, registry or ToolRegistry(), state,
                               approval_decider=_UI_APPROVAL_DECIDER, display=_TERMINAL.sink,
                               event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT)
+        engine.feedback.color=_TERMINAL.color
+        globals()['_UI_PERMISSION_CONTEXT']=engine.base_context
         await engine.prepare_initialization()
         # Recheck current account availability and the actual checked option.
         await browser.discover_models()
@@ -307,6 +310,8 @@ async def run(args):
         orchestrator = Orchestrator(config, browser, ToolRegistry(), state,
                                     approval_decider=_UI_APPROVAL_DECIDER, display=_TERMINAL.sink,
                                     event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT)
+        orchestrator.feedback.color=_TERMINAL.color
+        globals()['_UI_PERMISSION_CONTEXT']=orchestrator.base_context
         await orchestrator.prepare_initialization()
         models = await browser.discover_models()
         ranked = model_rank(models)

@@ -130,12 +130,14 @@ def parse_response(raw: str, session_id: str, request_id: str, registry=None, se
     if steps != list(range(1, len(steps) + 1)):
         errors.append('Plan steps must be ordered and numbered consecutively from 1')
     kind = obj['response_type']
-    if kind == 'final' and (tools or obj['continuation_state'] != 'complete' or obj['completion_status'] != 'complete' or obj['clarification'] is not None):
+    if kind == 'final' and (tools or (obj['continuation_state'],obj['completion_status']) not in {('complete','complete'),('blocked','blocked')} or obj['clarification'] is not None):
         errors.append('Final response must be complete and contain no tool calls or clarification')
     if kind == 'tool_request' and (not tools or obj['continuation_state'] != 'continue' or obj['completion_status'] != 'in_progress' or obj['clarification'] is not None):
         errors.append('Tool request must contain calls and remain in progress')
-    if kind == 'clarification' and (tools or not obj['clarification'] or obj['continuation_state'] != 'await_user' or obj['completion_status'] != 'in_progress'):
+    if kind == 'clarification' and (tools or not obj['clarification'] or not obj['clarification'].strip() or obj['continuation_state'] != 'await_user'):
         errors.append('Clarification must await user without executing tools')
+    elif kind == 'clarification':
+        obj['completion_status'] = 'in_progress'  # A question always awaits its answer.
     if kind == 'error' and (tools or obj['completion_status'] != 'blocked' or obj['continuation_state'] != 'blocked' or not obj['recoverable_errors']):
         errors.append('Error response must be blocked with error details and no tool calls')
     runner_calls = [t for t in tools if t['name'] == 'code_runner']

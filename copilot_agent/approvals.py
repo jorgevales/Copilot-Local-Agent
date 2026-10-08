@@ -5,6 +5,7 @@ from pathlib import Path
 from .feedback import Feedback
 from .persistence import write_json
 from .state import canonical_hash
+from .presentation import call_summary, readable
 
 
 class ApprovalManager:
@@ -47,16 +48,17 @@ class ApprovalManager:
         consent = preview.get('prepared_code') or {}
         if str(current_call.get('name', '')).startswith('site_knowledge.'):
             self.feedback.emit('Approval', 'WEBSITE KNOWLEDGE CONSENT\n' +
-                               json.dumps(consent, ensure_ascii=False, indent=2) +
+                               readable(consent) +
                                '\nChoose Deny to continue the current task without saving knowledge.',
                                preserve_markup=True)
         if str(current_call.get('name', '')).startswith(('discovery.', 'navigation.')):
             self.feedback.emit('Approval', 'EXACT DISCOVERY / NAVIGATION GRANT\n' +
-                               json.dumps({'call': current_call, 'local_preparation': consent},
-                                          ensure_ascii=False, indent=2), preserve_markup=True)
+                               call_summary(current_call)+'\n'+readable(consent), preserve_markup=True)
         if current and all(str(item.get('name', '')).startswith('browser.') for item in current):
             self.feedback.emit('Approval', 'EXACT ORDERED BROWSER PLAN\n' +
-                               json.dumps(current, ensure_ascii=False, indent=2), preserve_markup=True)
+                               '\n\n'.join(call_summary(item) for item in current), preserve_markup=True)
+        if str(current_call.get('name','')).startswith('permissions.'):
+            self.feedback.emit('Approval','DURABLE RESEARCH CONSENT\n'+readable(consent),preserve_markup=True)
         seen = set()
         for index, item in enumerate(prepared, 1):
             digest = item.get('script_sha256')

@@ -5,6 +5,7 @@ import re
 import sys
 from .logging_utils import now, redact
 from .protocol import BEGIN, END
+from .presentation import readable
 
 PUBLIC_FIELDS = ('user_response', 'task_interpretation', 'decision_summary', 'assumptions', 'action_plan', 'risk_summary')
 ROLE_STYLES = {
@@ -114,7 +115,10 @@ class Feedback:
         label = ('\x1b[' + _actor_style(actor) + 'm ' + actor + ' \x1b[0m') if self.color else plain_label
         clock = ('\x1b[2m[' + stamp[11:19] + ']\x1b[0m') if self.color else '[' + stamp[11:19] + ']'
         prefix = clock + ' ' + label + ' '
-        self.sink('\n'.join(prefix + line for line in message.split('\n')))
+        if self.color and actor in {'Approval','Action'}:
+            self.sink('\n'.join('\x1b[30;103m['+stamp[11:19]+'] ['+actor+'] '+line+'\x1b[0m' for line in message.split('\n')))
+        else:
+            self.sink('\n'.join(prefix + line for line in message.split('\n')))
         if self.state:
             self.state.event('feedback', actor=actor, message=message, **metadata)
 
@@ -129,7 +133,7 @@ class Feedback:
         for label, value in items:
             if value in (None, '', [], {}):
                 continue
-            rendered = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+            rendered = value if isinstance(value, str) else readable(value)
             lines.append('  ' + str(label) + ': ' + rendered)
         self.emit(actor, '\n'.join(lines), **metadata)
 

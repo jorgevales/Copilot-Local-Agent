@@ -62,7 +62,7 @@ class PreviewTests(unittest.TestCase):
         feedback=Feedback(lines.append,color=True)
         for actor in ('System','Orchestrator','Copilot','User','Approval','Error','Tool/code_runner'):
             feedback.emit(actor,'message')
-        styles=[__import__('re').findall(r'\x1b\[([0-9;]+)m',line)[2] for line in lines]
+        styles=[__import__('re').findall(r'\x1b\[([0-9;]+)m',line)[0 if '[Approval]' in line else 2] for line in lines]
         self.assertTrue(all('\x1b[' in line and '\x1b[0m' in line for line in lines))
         self.assertEqual(7,len(set(styles)))
 

@@ -19,9 +19,10 @@ from .archives import ArchiveService, inspect_zip, ArchiveError
 from .downloads import DownloadError
 from .web_navigation import NAVIGATION_SPECS, validate_navigation, execute_navigation, clear_navigation_state
 from .web_documents import DOCUMENT_SPECS, DOCUMENT_EXAMPLES, validate_documents, execute_documents
-from .site_knowledge import KNOWLEDGE_SPECS, KNOWLEDGE_EXAMPLES, validate_knowledge, execute_knowledge
+from .site_knowledge import KNOWLEDGE_SPECS, KNOWLEDGE_EXAMPLES, validate_knowledge, execute_knowledge, safe_proposal, KnowledgeValidationError
 from .discovery_engine import DISCOVERY_SPECS, validate_discovery, execute_discovery
 from .reconciliation import reconcile_browser_call, ReconciliationRequired, browser_diagnostics
+from .research_permissions import PERMISSION_SPECS, execute_permissions, guard_customer_read
 from .discovery_knowledge import (KNOWLEDGE_SPECS as DISCOVERY_KNOWLEDGE_SPECS,
                                   validate_knowledge_tool, execute_knowledge_tool)
 from .discovery_contracts import DiscoveryError, DISCOVERY_ERROR_CODES
@@ -162,6 +163,7 @@ SPECS.update(DOCUMENT_SPECS)
 SPECS.update(KNOWLEDGE_SPECS)
 SPECS.update(DISCOVERY_SPECS)
 SPECS.update(DISCOVERY_KNOWLEDGE_SPECS)
+SPECS.update(PERMISSION_SPECS)
 GUIDANCE_TOPICS = ['index', 'reconnaissance', 'plans', 'customers', 'documents', 'tabs', 'memory', 'recovery', 'privacy', 'testing']
 SPECS['guidance.load'] = (obj({'topics': {'type': 'array', 'minItems': 1, 'maxItems': 3,
                                          'items': {'type': 'string', 'enum': GUIDANCE_TOPICS}}}),
@@ -232,7 +234,10 @@ class ToolRegistry:
                 "examples":examples}
 
     def validate_input(self, name, args):
-        if name in DISCOVERY_SPECS:
+        if name=='site_knowledge.save':
+            clean,_=safe_proposal(args)
+            validate(clean,self.definition(name)['input_schema'])
+        elif name in DISCOVERY_SPECS:
             validate_discovery(name, args)
         elif name in DISCOVERY_KNOWLEDGE_SPECS:
             validate_knowledge_tool(name, args)
@@ -370,6 +375,7 @@ class ToolRegistry:
         return bounded
 
     async def execute(self, name, args, context):
+        if name=='research.perform': context['research_effects_started']=False
         if name in DISCOVERY_SPECS or name in DISCOVERY_KNOWLEDGE_SPECS:
             context['discovery_effects_started'] = False
         try:
@@ -415,11 +421,16 @@ class ToolRegistry:
                     'result': error.rejection('d' + source if type(source) is str else None,
                                               context.get('discovery_effects_started') is True),
                     'error': {'code': error.code, 'message': error.message}}
-        except PolicyError as error: return redact({"ok":False,"tool":name,"error":{"code":"policy_denied","message":str(error)}})
+        except PolicyError as error:
+            return redact({'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {},'error':{'code':'policy_denied','message':str(error)}})
         except ReconciliationRequired as error: return {"ok":False,"tool":name,"error":{"code":"reconciliation_conflict","message":str(error)}}
-        except (ValueError,TypeError) as error: return redact({"ok":False,"tool":name,"error":{"code":"invalid_arguments","message":str(error)}})
-        except asyncio.TimeoutError: return {"ok":False,"tool":name,"error":{"code":"timeout","message":"Local operation timed out; inspect partial effects before retrying"}}
+        except (ValueError,TypeError) as error:
+            return redact({'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {},'error':{'code':'invalid_arguments','message':str(error)}})
+        except asyncio.TimeoutError:
+            return {'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {},'error':{'code':'timeout','message':'Local operation timed out; inspect partial effects before retrying'}}
         except Exception as error:
+            if name=='research.perform':
+                return {'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)},'error':{'code':'operation_failed','message':'Research stopped; inspect partial effects before any retry.'}}
             if name in DISCOVERY_SPECS or name in DISCOVERY_KNOWLEDGE_SPECS:
                 return {'ok': False, 'tool': name, 'result': {'status': 'failed', 'limitation_severity': 'blocking'},
                         'error': {'code': 'operation_failed', 'message': 'Installed discovery/storage contract failed; no raw diagnostics are exported and no completion is claimed.'}}
@@ -427,6 +438,11 @@ class ToolRegistry:
 
     async def _execute(self,name,args,context,policy):
         config=context.get("config",{})
+        if name in PERMISSION_SPECS: return await execute_permissions(name,args,context)
+        customer_bound = bool(args.get('customer_key') or context.get('customer_key') or context.get('research_context',{}).get('active'))
+        if customer_bound and name in {'browser.customer_summary','browser.read','browser.recon','browser.structure','browser.documents'}:
+            await guard_customer_read(context)
+            raise PolicyError('Use research.perform for bounded, category-controlled customer reads under the matching grant')
         if name == 'browser.reconcile':
             return await reconcile_browser_call(context['session_state'], context['browser'], **args)
         if name == 'browser.diagnostics':

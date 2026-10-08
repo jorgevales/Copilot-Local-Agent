@@ -98,7 +98,7 @@ class AgentRuntime:
             text = str(message)
             match = re.search(r'\]\s+\[([^]]+)\]\s*', text)
             actor = match.group(1) if match else 'System'
-            if actor == 'Copilot' or actor.startswith('Tool/'):
+            if actor in {'Copilot','Action'} or actor.startswith('Tool/'):
                 return  # Structured, validated UI events are emitted by the orchestrator.
             if actor == 'Orchestrator' and 'MESSAGE TO COPILOT /' in text:
                 return  # The complete delivered exchange has its own labelled event.
@@ -133,6 +133,35 @@ class AgentRuntime:
 
     def submit(self, text):
         self.broker.submit(text)
+
+    def permission_context(self):
+        from copilot_agent import app
+        context=app._UI_PERMISSION_CONTEXT
+        if context is None: raise ValueError('Wait for the agent session to initialise')
+        return context
+
+    def permission_snapshot(self):
+        from copilot_agent.research_permissions import list_grants, CAPABILITIES
+        return {'grants':list_grants(self.permission_context()),'capabilities':list(CAPABILITIES)}
+
+    def manage_permission(self, action, grant_id, changes=None):
+        from copilot_agent.research_permissions import manage, prepare_permissions, execute_permissions
+        from copilot_agent.state import canonical_hash
+        context=dict(self.permission_context())
+        if action in {'pause','revoke'}: return manage(context,grant_id,action)
+        if action not in {'edit','renew'}: raise ValueError('Unsupported grant operation')
+        name='permissions.'+action
+        args=dict(changes or {},grant_id=grant_id)
+        prepared=prepare_permissions(name,args,context)
+        call={'name':name,'version':'1.0','call_id':'manage-'+grant_id,'arguments':args}
+        plan={'tool_requests':[call],'risk_summary':'Review the changed durable read grant; no write/download permission.'}
+        plan_hash=canonical_hash({'plan':plan,'prepared':prepared})
+        decision=self.request_approval({'plan_hash':plan_hash,'call_hash':canonical_hash(call),
+            'current_call_id':call['call_id'],'complete_pending_plan':plan,'prepared_code':prepared,
+            'approval_scope':'This exact revised durable research grant','choices':['deny','once','plan']})
+        if decision not in {'once','plan'}: return {'status':'denied'}
+        context.update(approved=True,approval_hash=plan_hash,permission_reviewed=prepared)
+        return asyncio.run(execute_permissions(name,args,context))
 
     def action(self, name, value=None):
         if name == 'stop':

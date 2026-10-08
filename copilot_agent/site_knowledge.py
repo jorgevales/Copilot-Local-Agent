@@ -83,6 +83,7 @@ SCOPE_LABEL = {"type": "string", "minLength": 1, "maxLength": 64,
 BIND = _object({"origin": ORIGIN, "tenant": SCOPE_LABEL, "user_scope": SCOPE_LABEL,
                 "environment": _enum(("production", "test", "staging", "development"))})
 SAVE = _object({"origin": ORIGIN,
+                "allow_partial": {"type": "boolean"},
                 "categories": {"type": "array", "items": _enum(CATEGORIES), "minItems": 1,
                                "maxItems": len(CATEGORIES), "uniqueItems": True},
                 "knowledge": KNOWLEDGE,
@@ -142,6 +143,8 @@ SAFE_SEGMENTS = SAFE_WORDS | frozenset({"inicio", "customer-search", "client-sea
                                       "document-search", "sign-in", "sign-out", "help-center",
                                       "customer-service", "case-management", "formularios-clinicos",
                                       "consultas", "agendar-consulta"})
+SAFE_WORDS = SAFE_WORDS | frozenset('interested party parties literature advanced submitted completed corporate actions work progress investment investments filter output balance holdings business box'.split())
+SAFE_SEGMENTS = SAFE_SEGMENTS | SAFE_WORDS
 PLACEHOLDERS = frozenset({"{customer}", "{account}", "{case}", "{document}", "{item}"})
 ENTITY_SEGMENTS = frozenset("customer customers client clients investor investors user users member members account accounts profile profiles case cases transaction transactions policy policies contact contacts person people employee employees document documents file files record records".split())
 STATIC_CHILDREN = frozenset("search lookup find list overview details summary status documents files history activity transactions accounts cases settings new create edit download downloads reports statements products contacts profile profiles landing index".split())
@@ -234,16 +237,21 @@ def _scope(name, args, context):
 
 
 def _safe_route(value):
+    original=value
+    value=re.sub(r'\.(?:aspx|html?|jsp)$','',value,flags=re.I)
     if (not value.startswith("/") or "//" in value or value != value.strip()
             or any(char in value for char in "?&=#%@.:;\\") or len(value) > 320):
         raise ValueError("Persist only generic route templates without URL parameters or concrete identifiers")
     parts = [part for part in value.split("/") if part]
-    if len(parts) > 12 or any(part not in SAFE_SEGMENTS and part not in PLACEHOLDERS for part in parts):
+    def generic(part):
+        words=re.sub(r'([a-z])([A-Z])',r'\1 \2',part).lower().replace('-',' ').replace('_',' ').split()
+        return part in PLACEHOLDERS or bool(words) and all(word in SAFE_WORDS for word in words)
+    if len(parts) > 12 or any(not generic(part) for part in parts):
         raise ValueError("Route contains unsupported or customer-specific segments; use generic navigation routes and parameter placeholders")
     for parent, child in zip(parts, parts[1:]):
-        if parent in ENTITY_SEGMENTS and child not in STATIC_CHILDREN and child not in PLACEHOLDERS:
+        if parent.lower() in ENTITY_SEGMENTS and child.lower() not in STATIC_CHILDREN and child not in PLACEHOLDERS:
             raise ValueError("Concrete entity route parameters are excluded; use a generic parameter placeholder")
-    return value
+    return original
 
 
 def _safe_label(value):
@@ -270,6 +278,13 @@ def _safe_locator(item):
             raise ValueError("Persistent CSS selectors contain unsupported or customer-specific identifiers")
 
 
+class KnowledgeValidationError(ValueError):
+    def __init__(self,path,value,reason):
+        value = value if path.endswith(('.purpose','.strategy','.role')) else '[excluded sha256='+_hash(value)+']'
+        self.detail={'path':path,'value':value,'reason':reason}
+        super().__init__(path+' rejected '+repr(value)+': '+reason)
+
+
 def _sanitize_knowledge(args):
     categories = args["categories"]
     knowledge = args["knowledge"]
@@ -278,12 +293,20 @@ def _sanitize_knowledge(args):
     if sum(len(items) for items in knowledge.values()) > MAX_ITEMS:
         raise ValueError("Website memory exceeds the bounded record limit")
     for category, items in knowledge.items():
-        for item in items:
-            _safe_route(item["path"])
+        for index,item in enumerate(items):
+            errors=validate_schema(item,CATEGORY_SCHEMAS[category])
+            if errors:
+                field=errors[0].split(':',1)[0].removeprefix('$.')
+                raise KnowledgeValidationError('knowledge.'+category+'['+str(index)+'].'+field,item.get(field),errors[0])
+            try:
+                _safe_route(item['path'])
+            except ValueError as exc:
+                raise KnowledgeValidationError('knowledge.'+category+'['+str(index)+'].path',item['path'],str(exc)) from exc
             if "parent_path" in item:
                 _safe_route(item["parent_path"])
             if "label" in item:
-                _safe_label(item["label"])
+                try: _safe_label(item['label'])
+                except ValueError as exc: raise KnowledgeValidationError('knowledge.'+category+'['+str(index)+'].label',item['label'],str(exc)) from exc
             if category == "locators":
                 _safe_locator(item)
             if category == "forms":
@@ -297,14 +320,39 @@ def _sanitize_knowledge(args):
     return deepcopy(knowledge)
 
 
+def safe_proposal(args):
+    errors=validate_schema(args,{**SAVE,'properties':{**SAVE['properties'],'knowledge':{'type':'object'}}})
+    if errors: raise KnowledgeValidationError(errors[0].split(':',1)[0],None,errors[0])
+    cleaned=deepcopy(args); rejected=[]; safe={}
+    for category,items in args['knowledge'].items():
+        if category not in CATEGORY_SCHEMAS or not isinstance(items,list):
+            raise KnowledgeValidationError('knowledge.[unsupported-category]',category,'Unsupported category or array')
+        for index,item in enumerate(items):
+            try:
+                if not isinstance(item,dict): raise ValueError('Knowledge item must be an object')
+                _sanitize_knowledge({'categories':[category],'knowledge':{category:[item]}})
+                safe.setdefault(category,[]).append(deepcopy(item))
+            except ValueError as exc:
+                detail=deepcopy(getattr(exc,'detail',{'path':'knowledge.'+category+'[0]','value':item,'reason':str(exc)}))
+                detail['path']=detail['path'].replace('[0]','['+str(index)+']',1)
+                if not args.get('allow_partial'): raise KnowledgeValidationError(detail['path'],detail['value'],detail['reason']) from exc
+                rejected.append(detail)
+    if set(args['categories'])!=set(args['knowledge']): raise ValueError('Consent categories must match submitted knowledge categories')
+    if not safe: raise ValueError('No safe items remain; nothing was saved. '+str(rejected))
+    cleaned['knowledge']=safe; cleaned['categories']=list(safe)
+    _sanitize_knowledge(cleaned)
+    return cleaned,rejected
+
+
 def validate_knowledge(name, args, context, policy=None):
     """Side-effect-free schema/privacy/namespace preflight; grants checked at execution."""
     if name not in KNOWLEDGE_SPECS:
         raise ValueError("Unknown website knowledge tool")
+    if name=='site_knowledge.save': args,_=safe_proposal(args)
     errors = validate_schema(args, KNOWLEDGE_SPECS[name][0])
     if errors:
         # Do not echo rejected customer data into errors or diagnostic logs.
-        raise ValueError("Invalid website knowledge arguments; use the documented bounded schema")
+        raise ValueError('Invalid website knowledge arguments: '+'; '.join(errors[:5]))
     _scope(name, args, context)
     knowledge_directory(context)
     if name == "site_knowledge.save":
@@ -321,6 +369,8 @@ def prepare_knowledge(args, context, name=None):
     """
     if name is None:
         name = "site_knowledge.save" if "knowledge" in args else "site_knowledge.bind" if "tenant" in args else "site_knowledge.invalidate"
+    rejected=[]
+    if name=='site_knowledge.save': args,rejected=safe_proposal(args)
     validate_knowledge(name, args, context)
     scope = _scope(name, args, context)
     prepared = {"kind": name, "scope": scope, "namespace_id": _hash(scope),
@@ -346,7 +396,8 @@ def prepare_knowledge(args, context, name=None):
                                 else (old['path'],)) != identity)]
                 current.append(deepcopy(item))
         _sanitize_knowledge({'categories': list(knowledge), 'knowledge': knowledge})
-        prepared.update(categories=sorted(knowledge), knowledge=knowledge,
+        prepared.update(categories=sorted(knowledge), knowledge=knowledge, rejected_items=rejected,
+                        revision=existing.get('revision',0)+1,
                         prior_payload_sha256=_hash(prior) if prior else None,
                         payload_sha256=_hash(knowledge),
                         item_counts={key: len(knowledge[key]) for key in sorted(knowledge)},
@@ -419,7 +470,7 @@ def _read(context, scope):
         raise PolicyError("Stored website knowledge is damaged; replace it after local review") from error
     expected = {"schema_version", "namespace_id", "scope_fingerprint", "knowledge", "consent",
                 "provenance", "observed_at", "expires_at", "invalidated_at", "payload_sha256"}
-    if (type(value) is not dict or set(value) != expected or value.get("schema_version") != SCHEMA_VERSION
+    if (type(value) is not dict or set(value) not in (expected,expected|{'revision'}) or value.get("schema_version") != SCHEMA_VERSION
             or value.get("namespace_id") != _hash(scope) or value.get("scope_fingerprint") != _fingerprint(scope)
             or type(value.get("consent")) is not dict or type(value.get("provenance")) is not dict):
         raise PolicyError("Stored website knowledge does not match the selected namespace and schema")
@@ -495,6 +546,7 @@ def _write(context, scope, value):
 def _retrieve(context, scope):
     value = _read(context, scope)
     base = {"namespace_id": _hash(scope), "schema_version": SCHEMA_VERSION}
+    if value is not None: base['revision']=value.get('revision',0)
     if value is None:
         return dict(base, status="missing", knowledge={})
     if value["invalidated_at"] is not None:
@@ -531,7 +583,7 @@ def execute_knowledge(name, args, context, policy=None):
         prepared = _approval(name, args, context)
         knowledge = deepcopy(prepared['knowledge'])
         now = _now(context)
-        value = {"schema_version": SCHEMA_VERSION, "namespace_id": _hash(scope),
+        value = {"schema_version": SCHEMA_VERSION, "namespace_id": _hash(scope), 'revision':prepared['revision'],
                  "scope_fingerprint": _fingerprint(scope), "knowledge": knowledge,
                  "observed_at": _timestamp(now), "expires_at": _timestamp(now + timedelta(days=prepared["ttl_days"])),
                  "invalidated_at": None, "payload_sha256": _hash(knowledge),
@@ -546,6 +598,7 @@ def execute_knowledge(name, args, context, policy=None):
         if verified != value:
             raise PolicyError("Website knowledge save did not verify against the approved payload")
         return {"status": "saved", "namespace_id": _hash(scope), "categories": prepared["categories"],
+                'revision':prepared['revision'],'rejected_items':prepared['rejected_items'],
                 "item_counts": prepared["item_counts"], "expires_at": value["expires_at"],
                 "payload_sha256": value["payload_sha256"], "locally_verified": True}
     if name == "site_knowledge.invalidate":

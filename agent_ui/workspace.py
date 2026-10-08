@@ -26,7 +26,7 @@ class Workspace:
 
     def emit(self, kind, payload):
         # Runtime supplies safe, redacted UI content. Raw private reasoning is not accepted.
-        if kind not in {'user','copilot','system','warning','error','status','plan','tool','context','model','artifact','session','connection','exchange'}:
+        if kind not in {'user','copilot','system','warning','error','status','plan','tool','context','model','artifact','session','connection','exchange','action'}:
             raise ValueError('Unsupported event type')
         if not isinstance(payload, dict):
             raise ValueError('Event payload must be an object')
@@ -136,6 +136,10 @@ class Handler(BaseHTTPRequestHandler):
             try: after=max(0,int(parse_qs(parsed.query).get('after',['0'])[0]))
             except ValueError: return self.reply(400,{'error':'Invalid cursor'})
             return self.reply(200,self.server.workspace.snapshot(after))
+        if parsed.path=='/api/permissions':
+            if not self.authorized(): return self.reply(401,{'error':'Unauthorized'})
+            try: return self.reply(200,self.server.workspace.runtime.permission_snapshot())
+            except Exception: return self.reply(400,{'error':'Permissions are available after agent startup'})
         paths={'/':'index.html','/app.js':'app.js','/styles.css':'styles.css'}
         name=paths.get(parsed.path)
         if name is None: return self.reply(404,{'error':'Not found'})
@@ -158,6 +162,10 @@ class Handler(BaseHTTPRequestHandler):
             ws=self.server.workspace
             if route=='/api/submit': ws.submit(body.get('text'))
             elif route=='/api/approval': ws.decide(body.get('ticket'),body.get('decision'),body.get('plan_hash'),body.get('call_hash'))
+            elif route=='/api/permissions/manage':
+                if ws.runtime is None: raise ValueError('Agent runtime is unavailable')
+                result=ws.runtime.manage_permission(body.get('action'),body.get('grant_id'),body.get('changes'))
+                return self.reply(200,result)
             elif route=='/api/action':
                 action=body.get('action')
                 if action not in {'stop','new_session','attach','set_model','resume'} or not ws.capabilities.get(action):

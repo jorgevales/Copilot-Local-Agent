@@ -15,6 +15,8 @@ from .feedback import Feedback, public_preview
 from .logging_utils import redact, SENSITIVE
 from .policy import PathPolicy, PolicyError, URLPolicy
 from .reconciliation import capture_baseline, recover_missing_navigation, navigation_scope_allows, _binding
+from .presentation import exchange_summary, call_summary
+from .research_permissions import prepare_permissions
 from .prompts import PromptBuilder
 from .protocol import ProtocolError, parse_response, correction_message
 from .state import canonical_hash
@@ -52,6 +54,7 @@ class Orchestrator:
                              'pending_file_attachments': [],
                              'approved_attachment_hashes': self.approved_attachment_hashes,
                              'site_knowledge_bindings': {},
+                             'active_research_grants': {}, 'research_usage': {}, 'research_context': {'active': False},
                              'discovery_runs': {},
                              'web_document_tickets': {},
                              'document_catalogues': {}, 'download_manifest_hashes': {},
@@ -83,7 +86,7 @@ class Orchestrator:
 
     def _action_text(self, response):
         return '; '.join(str(step.get('step', '?')) + '. ' + str(step.get('action', '')) +
-                         ' | verify: ' + str(step.get('verification', ''))
+                         '\n  Check: ' + str(step.get('verification', ''))
                          for step in response.get('action_plan', []) if isinstance(step, dict))
 
     def _emit_validated_response(self, response, title):
@@ -305,8 +308,7 @@ class Orchestrator:
         self.feedback.emit('Orchestrator', 'Sending your request to Copilot' + attachment_note + '.',
                            request_id=request_id)
         delivered = redact(content)
-        self.feedback.section('Orchestrator', 'MESSAGE TO COPILOT / ' + kind,
-                              [('Content', delivered)], request_id=request_id)
+        self.feedback.emit('Orchestrator', exchange_summary(kind,delivered), request_id=request_id)
         if self.event_sink:
             self.event_sink('exchange', {'actor': 'Orchestrator', 'label': 'Orchestrator → Copilot',
                                          'text': delivered if isinstance(delivered, str) else json.dumps(delivered, ensure_ascii=False, indent=2),
@@ -553,6 +555,7 @@ class Orchestrator:
         self.base_context['created_baseline'] = (CreatedSync(self.config.created_dir).baseline()
                                                if self.config.created_sync_enabled and self.config.created_dir else None)
         kind, content = 'user_turn', user_input
+        self.base_context['research_user_request'] = user_input
         catalog = {d['name']: d for d in self.registry.definitions()}
         for round_number in range(self.config.max_tool_rounds + 1):
             response = await self._validated_exchange(kind, content, attachments if round_number == 0 else ())
@@ -649,7 +652,7 @@ class Orchestrator:
                 context['remaining_attachment_capacity'] = max(0, 10 - len(context['pending_image_attachments']))
                 context['source_request_id'] = response['request_id']
                 needs_approval = definition['approval_policy'] not in {'none', 'read_only', 'automatic', 'auto_readonly'}
-                effectful = needs_approval
+                effectful = needs_approval or call['name']=='research.perform' and call['arguments'].get('operation') in {'search','navigate','open_profile','open_document_library','open_document'}
                 navigation_authorized = needs_approval and navigation_scope_allows(call, self.browser, self.navigation_domains, self.navigation_binding)
                 if navigation_authorized:
                     needs_approval = False
@@ -664,6 +667,8 @@ class Orchestrator:
                     if call['name'] == 'browser.open':
                         self.registry.validate_call(call['name'], call['arguments'], context)
                     prepared = self._browser_preparation(call)
+                if call['name'] in {'permissions.grant','permissions.edit','permissions.renew'}:
+                    prepared = prepare_permissions(call['name'],call['arguments'],context)
                 if call['name'].startswith('site_knowledge.'):
                     from .site_knowledge import prepare_knowledge
                     try:
@@ -723,6 +728,8 @@ class Orchestrator:
                         break
                     context['approved'] = True
                     context['approval_hash'] = approval_hash
+                    if call['name'].startswith('permissions.'):
+                        context['permission_reviewed'] = prepared
                     if call['name'] in {'discovery.manifest', 'discovery.knowledge_save', 'discovery.knowledge_invalidate', 'navigation.intent'}:
                         context['discovery_reviewed'] = prepared
                         if call['name'] == 'discovery.knowledge_save':
@@ -779,6 +786,10 @@ class Orchestrator:
                             and not context.get('consequential_approved_plan_hash')
                             and hasattr(self.browser, 'tool_page') else None)
                 self.state.begin_call(call, state_changing=effectful, reconciliation_baseline=baseline)
+                if effectful or call['name']=='research.perform':
+                    self.feedback.emit('Action', 'APPROVED ACTION\n'+call_summary(call))
+                    if self.event_sink:
+                        self.event_sink('action', {'text':'Approved action\n'+call_summary(call)})
                 self.feedback.section('Tool/' + call['name'], 'STARTING', [
                     ('Authority', 'approved session navigation scope' if navigation_authorized else 'exact explicit approval' if needs_approval else 'read-only policy'),
                     ('Language', call.get('arguments', {}).get('language')),
@@ -804,6 +815,7 @@ class Orchestrator:
                 if call['name'] in {'discovery.manifest', 'navigation.intent'}:
                     self.base_context['discovery_synthesis_pending'] = True
                 if result.get('ok') and call['name'] == 'browser.open':
+                    self.base_context['research_context']['active'] = False
                     for field in ('task_id', 'customer_key'):
                         self.base_context.pop(field, None)
                     from urllib.parse import urlsplit
