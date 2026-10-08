@@ -100,6 +100,8 @@ class AgentRuntime:
             actor = match.group(1) if match else 'System'
             if actor == 'Copilot' or actor.startswith('Tool/'):
                 return  # Structured, validated UI events are emitted by the orchestrator.
+            if actor == 'Orchestrator' and 'MESSAGE TO COPILOT /' in text:
+                return  # The complete delivered exchange has its own labelled event.
             kind = {'Copilot': 'copilot', 'User': 'user', 'Error': 'error',
                     'Warning': 'warning', 'Tool': 'tool', 'Approval': 'status'}.get(actor, 'system')
             self.emit(kind, {'text': text})

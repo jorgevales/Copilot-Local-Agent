@@ -39,6 +39,7 @@ class ApprovalManager:
             ('Browser access', 'Uses an owned tab in the verified Copilot Edge profile; existing site sign-ins are shared'
              if (preview.get('prepared_code') or {}).get('shared_verified_profile') else None),
             ('Additional hosts', (preview.get('prepared_code') or {}).get('dependency_domains')),
+            ('Continued navigation', (preview.get('prepared_code') or {}).get('navigation_scope')),
             ('Risk', arguments.get('risk_summary') or preview['complete_pending_plan'].get('risk_summary')),
         ])
         self.feedback.record('Approval', 'Full immutable approval record retained.',

@@ -2,6 +2,15 @@
 
 Guidance version: 1.0.
 
+A locally reviewed browser approval also grants continued navigation for this
+agent session within the approved HTTPS websites and their subdomains. Use the
+`approved_navigation_scope` supplied by the orchestrator for further opens,
+history navigation, navigation-only plans and bounded same-origin new tabs.
+Do not claim forms, searches, customer-bound actions, downloads or scripts are
+covered. New hosts need approval. The scope expires when this agent session ends.
+Delivered decisions, plans and tool exchanges are shown to the user as Copilot
+process summaries; provide concise useful progress on each response.
+
 ## Authoritative catalogue
 
 Use only the attached current machine-readable catalogue. Each tool definition states its name, version, description, intended use, schemas, preconditions, side effects, risk, approval policy, timeout, output limit, errors and examples. Do not invent tools, capabilities, optional arguments or browser permissions. Guidance examples do not override those definitions.

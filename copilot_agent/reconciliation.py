@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 import uuid
 
 from .logging_utils import now
@@ -29,6 +29,17 @@ def _origin(url: str) -> str:
     return 'https://' + parsed.hostname.lower().rstrip('.')
 
 
+def _binding(browser):
+    config = getattr(browser, 'config', None)
+    return _hash(str(getattr(browser, 'endpoint', '')) + '|' + str(getattr(config, 'profile_dir', ''))
+                 + '|' + str(id(getattr(browser, 'context', None))))
+
+
+def _query_free(url):
+    parsed = urlsplit(url)
+    return urlunsplit((parsed.scheme, parsed.hostname or '', parsed.path, '', ''))
+
+
 def _navigation_only(request: dict) -> bool:
     name = request.get('name')
     if name in {'browser.open', 'browser.back', 'browser.forward'}:
@@ -42,8 +53,8 @@ def _navigation_only(request: dict) -> bool:
            for step in steps):
         return False
     transitions = [step for step in steps if step.get('op') in {'navigate', 'click'}]
-    return (len(transitions) == 1
-            and (transitions[0]['op'] == 'navigate' or transitions[0].get('effect') == 'navigation')
+    return (bool(transitions)
+            and all(step['op'] == 'navigate' or step.get('effect') == 'navigation' for step in transitions)
             and not request.get('arguments', {}).get('customer_key'))
 
 
@@ -66,7 +77,12 @@ async def capture_baseline(browser, request):
     """Capture a private pre-effect fingerprint immediately before an eligible call."""
     if not _navigation_only(request):
         return None
-    page = _owned_page(browser, request)
+    try:
+        page = _owned_page(browser, request)
+    except PolicyError:
+        if request.get('name') == 'browser.open':
+            return None  # Fresh-tab bootstrap must reach new_tool_page().
+        raise
     url = page.url
     title = await asyncio.wait_for(page.title(), timeout=3)
     origin = _origin(url) if url != 'about:blank' else None
@@ -75,9 +91,89 @@ async def capture_baseline(browser, request):
     browser._reconciliation_pages[token] = page
     return {'kind': 'navigation_only', 'page_token': token,
             'allow_origin_change': request.get('name') == 'browser.open',
+            'browser_binding_sha256': _binding(browser),
+            'transition_count': sum(step.get('op') in {'navigate', 'click'} for step in request.get('arguments', {}).get('steps', [])) if request.get('name') == 'browser.plan' else 1,
             'url_sha256': _hash(url), 'title_sha256': _hash(title),
             'origin_sha256': _hash(origin) if origin else None,
             'captured_at': now()}
+
+
+def recover_missing_navigation(state, browser):
+    """Quarantine lost navigation evidence without crediting or replaying it."""
+    recovered = []
+    for call_id, call in list(state.data['calls'].items()):
+        baseline = call.get('reconciliation_baseline') or {}
+        if call.get('status') != 'uncertain' or baseline.get('kind') != 'navigation_only':
+            continue
+        page = getattr(browser, '_reconciliation_pages', {}).get(baseline.get('page_token'))
+        connection = getattr(browser, 'browser', None)
+        disconnected = connection is not None and not connection.is_connected()
+        if page is None or page.is_closed() or disconnected:
+            state.quarantine_missing_navigation(call_id)
+            recovered.append(call_id)
+    return recovered
+
+
+def navigation_scope_allows(request, browser, domains, expected_binding=None):
+    """A browser grant covers navigation, never forms, scripts or downloads."""
+    if (not domains or request.get('arguments', {}).get('customer_key')
+            or expected_binding is not None and expected_binding != _binding(browser)):
+        return False
+    name, args = request.get('name'), request.get('arguments', {})
+    urls = URLPolicy(domains)
+    try:
+        if name == 'browser.open':
+            urls.resolve(args['url'])
+            for host in args.get('allowed_domains', []):
+                urls.resolve('https://' + host)
+            return True
+        page = _owned_page(browser, request)
+        urls.resolve(page.url)
+        if name in {'browser.back', 'browser.forward'}:
+            return True
+        if name == 'browser.tabs':
+            if args.get('operation') == 'list':
+                return True
+            if args.get('operation') == 'open':
+                urls.resolve(args['url'])
+                return _origin(args['url']) == _origin(page.url)
+            return False
+        if name != 'browser.plan' or args.get('resume_token'):
+            return False
+        for step in args.get('steps', []):
+            op = step.get('op')
+            if step.get('effect') == 'consequential':
+                return False
+            if op in {'wait', 'assert', 'capture'}:
+                continue
+            if op == 'navigate':
+                urls.resolve(step['url'])
+                if _origin(step['url']) != _origin(page.url):
+                    return False
+            elif op == 'click' and step.get('effect') == 'navigation':
+                continue  # Runtime still inspects consequential controls before clicking.
+            else:
+                return False
+        return bool(args.get('steps'))
+    except (PolicyError, ValueError, KeyError):
+        return False
+
+
+def browser_diagnostics(state, browser):
+    owned = getattr(browser, '_launched_process', None)
+    connection = getattr(browser, 'browser', None)
+    context = getattr(browser, 'context', None)
+    return {'registration': 'owned_launcher' if owned is not None else 'shared_verified_context' if context is not None else 'unavailable',
+            'connected': bool(connection is not None and connection.is_connected()),
+            'owned_launcher_running': owned.poll() is None if owned is not None else None,
+            'owned_tabs': sum(not page.is_closed() for page in getattr(browser, '_tool_pages', [])),
+            'endpoint_sha256': _hash(str(getattr(browser, 'endpoint', 'unavailable'))),
+            'browser_binding_sha256': _binding(browser),
+            'operations': [{'operation_id': _hash(call_id), 'tool': call.get('request', {}).get('name'),
+                            'state': call['status'], 'navigation_only': (call.get('reconciliation_baseline') or {}).get('kind') == 'navigation_only',
+                            'baseline_present': bool(call.get('reconciliation_baseline'))}
+                           for call_id, call in state.data['calls'].items()
+                           if call['status'] in {'uncertain', 'unverifiable_original_tab_missing'}]}
 
 
 async def reconcile_browser_call(state, browser, call_id: str, outcome: str,
@@ -86,6 +182,10 @@ async def reconcile_browser_call(state, browser, call_id: str, outcome: str,
     if outcome not in {'completed', 'not_executed'}:
         raise ValueError('Choose completed or not_executed')
     call = state.data['calls'].get(call_id)
+    if call is None:
+        original = next((key for key in state.data['calls'] if _hash(key) == call_id), None)
+        if original is not None:
+            call_id, call = original, state.data['calls'][original]
     if call is None:
         raise ValueError('Unknown pending operation ID; use :status to list uncertain calls')
     if call.get('reconciliation'):
@@ -110,9 +210,15 @@ async def reconcile_browser_call(state, browser, call_id: str, outcome: str,
     page = getattr(browser, '_reconciliation_pages', {}).get(baseline['page_token'])
     if page is None or page.is_closed():
         raise ReconciliationRequired('The original owned tab is unavailable; its outcome cannot be established automatically')
+    if (baseline.get('browser_binding_sha256', _binding(browser)) != _binding(browser)
+            or page not in getattr(browser, '_tool_pages', [])
+            or hasattr(browser, 'context') and getattr(page, 'context', None) is not browser.context):
+        raise ReconciliationRequired('Browser profile, endpoint or owned-tab binding changed; reconciliation remains blocked')
     current_url = page.url
     current_title = await asyncio.wait_for(page.title(), timeout=3)
-    if current_url != observed_url or (observed_title and current_title != observed_title):
+    proposal_query_free = not urlsplit(observed_url).query and not urlsplit(observed_url).fragment
+    projected_match = proposal_query_free and _query_free(current_url) == observed_url
+    if (current_url != observed_url and not projected_match) or (observed_title and current_title != observed_title):
         raise ReconciliationRequired('Proposed final page state conflicts with a fresh browser inspection; the operation remains blocked')
     if current_url != 'about:blank':
         current_origin = _origin(current_url)
@@ -123,6 +229,8 @@ async def reconcile_browser_call(state, browser, call_id: str, outcome: str,
     current_title_hash = _hash(current_title)
     if outcome == 'completed' and current_url_hash == baseline['url_sha256']:
         raise ReconciliationRequired('The current URL still matches the pre-action page; completion is not established')
+    if outcome == 'completed' and baseline.get('transition_count', 1) != 1:
+        raise ReconciliationRequired('A final URL cannot establish completion of every step in this navigation plan; retain the unverified operation')
     if outcome == 'not_executed' and (current_url_hash != baseline['url_sha256']
                                       or current_title_hash != baseline['title_sha256']):
         raise ReconciliationRequired('The current page differs from the pre-action state; no-effect outcome is not established')
@@ -130,6 +238,8 @@ async def reconcile_browser_call(state, browser, call_id: str, outcome: str,
              'call_id_sha256': _hash(call_id), 'baseline_url_sha256': baseline['url_sha256'],
              'observed_url_sha256': current_url_hash, 'observed_title_sha256': current_title_hash,
              'proposed_url_sha256': _hash(observed_url), 'observed_at': now(),
+             'observed_query_free_url_sha256': _hash(_query_free(current_url)),
+             'proposal_query_free': proposal_query_free,
              'session_id': state.session_id}
     state.reconcile_call(call_id, outcome, proof=proof)
     return {'status': outcome, 'call_id': call_id, 'already_reconciled': False}

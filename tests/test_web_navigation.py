@@ -136,6 +136,34 @@ class NavigationBrowserTests(unittest.IsolatedAsyncioTestCase):
     async def execute(self, name, args):
         return await execute_navigation(name, args, self.context)
 
+    async def test_lost_navigation_tab_recovers_with_fresh_open_without_credit(self):
+        from copilot_agent.reconciliation import capture_baseline, recover_missing_navigation
+        from copilot_agent.state import SessionState
+        from copilot_agent.tools import ToolRegistry
+        state = SessionState(self.context['session_dir'] / 'session')
+        state.data['website_private'] = True
+        state.approve_domain('fixture.test')
+        self.adapter.context = self.browser_context
+        self.adapter.browser = self.browser
+        call = {'call_id': 'lost-tab', 'name': 'browser.open', 'version': '1.0',
+                'arguments': {'url': 'https://fixture.test/documents'}}
+        state.begin_call(call, reconciliation_baseline=await capture_baseline(self.adapter, call))
+        state.finish_call(call['call_id'], {'ok': False, 'error': {'code': 'timeout'}})
+        await self.page.close()
+        self.assertEqual(['lost-tab'], recover_missing_navigation(state, self.adapter))
+        self.context['session_state'] = state
+        registry = ToolRegistry()
+        result = await registry.execute('browser.open', {'url': 'https://fixture.test/documents'}, self.context)
+        self.assertTrue(result['ok'], result)
+        self.assertIsNot(self.page, self.adapter.tool_page)
+        info = await registry.execute('browser.info', {}, self.context)
+        self.assertTrue(info['ok'], info)
+        self.assertEqual('https://fixture.test/documents', info['result']['url'])
+        diagnostics = await registry.execute('browser.diagnostics', {}, self.context)
+        self.assertEqual('shared_verified_context', diagnostics['result']['registration'])
+        self.assertEqual('unverifiable_original_tab_missing', state.data['calls']['lost-tab']['status'])
+        self.assertFalse(state.data['calls']['lost-tab']['completion_credited'])
+
     async def test_recon_one_snapshot_covers_routes_forms_tables_frames_shadow_and_docs(self):
         await self.page.locator("#query").fill("PRIVATE CUSTOMER INPUT")
         result = await self.execute("browser.recon", {"goal": "customer search", "max_elements": 80, "max_text_chars": 2000})

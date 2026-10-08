@@ -26,7 +26,7 @@ class Workspace:
 
     def emit(self, kind, payload):
         # Runtime supplies safe, redacted UI content. Raw private reasoning is not accepted.
-        if kind not in {'user','copilot','system','warning','error','status','plan','tool','context','model','artifact','session','connection'}:
+        if kind not in {'user','copilot','system','warning','error','status','plan','tool','context','model','artifact','session','connection','exchange'}:
             raise ValueError('Unsupported event type')
         if not isinstance(payload, dict):
             raise ValueError('Event payload must be an object')

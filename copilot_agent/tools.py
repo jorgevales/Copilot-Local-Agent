@@ -21,7 +21,7 @@ from .web_navigation import NAVIGATION_SPECS, validate_navigation, execute_navig
 from .web_documents import DOCUMENT_SPECS, DOCUMENT_EXAMPLES, validate_documents, execute_documents
 from .site_knowledge import KNOWLEDGE_SPECS, KNOWLEDGE_EXAMPLES, validate_knowledge, execute_knowledge
 from .discovery_engine import DISCOVERY_SPECS, validate_discovery, execute_discovery
-from .reconciliation import reconcile_browser_call, ReconciliationRequired
+from .reconciliation import reconcile_browser_call, ReconciliationRequired, browser_diagnostics
 from .discovery_knowledge import (KNOWLEDGE_SPECS as DISCOVERY_KNOWLEDGE_SPECS,
                                   validate_knowledge_tool, execute_knowledge_tool)
 from .discovery_contracts import DiscoveryError, DISCOVERY_ERROR_CODES
@@ -133,6 +133,7 @@ SPECS = {
     "browser.back": (obj({}), "user_approval", "Navigate backward only if the target history URL passes policy."),
     "browser.forward": (obj({}), "user_approval", "Navigate forward only if the target history URL passes policy."),
     "browser.info": (obj({}), "read_only", "Read tool-tab URL and title."),
+    "browser.diagnostics": (obj({}), "read_only", "Read sanitized authoritative browser registration, connection, owned-tab count and uncertain/quarantined ledger states. No URLs, titles, cookies or page content."),
     "browser.reconcile": (obj({"call_id":S,"outcome":{"type":"string","enum":["completed","not_executed"]},"observed_url":S,"observed_title":{"type":"string","maxLength":300}},["call_id","outcome","observed_url"]), "read_only", "Resolve an uncertain navigation-only browser call automatically after fresh local inspection confirms the exact observed URL and pre-action fingerprint. No click or navigation; never use for forms or writes."),
     "browser.read": (obj({"frame_selector":S},[]), "read_only", "Read bounded visible body text from the managed tab or one explicit iframe."),
     "browser.structure": (obj({"frame_selector":S},[]), "read_only", "Read visible controls without input values from the managed tab or one explicit iframe."),
@@ -428,6 +429,8 @@ class ToolRegistry:
         config=context.get("config",{})
         if name == 'browser.reconcile':
             return await reconcile_browser_call(context['session_state'], context['browser'], **args)
+        if name == 'browser.diagnostics':
+            return browser_diagnostics(context['session_state'], context['browser'])
         if name in NAVIGATION_SPECS: return await execute_navigation(name, args, context, policy)
         if name in DOCUMENT_SPECS: return await execute_documents(name, args, context, policy)
         if name in KNOWLEDGE_SPECS: return execute_knowledge(name, args, context, policy)

@@ -6,6 +6,7 @@ import json
 import re
 
 PRIVATE_TOOLS = {
+    'browser.reconcile', 'browser.diagnostics',
     'browser.recon', 'browser.plan', 'browser.tabs', 'browser.customer_summary',
     'browser.route', 'browser.documents', 'browser.download_batch',
     'files.transfer_to_copilot',
@@ -22,6 +23,7 @@ ERROR_CODES = frozenset({
     'action_limit', 'loop_limit', 'unsafe_filename', 'stale_source', 'unsupported_link',
     'link_unavailable', 'settings_unavailable', 'ticket_limit', 'download_failed',
     'hash_mismatch', 'size_limit', 'delivery_unverified',
+    'reconciliation_conflict',
 })
 
 

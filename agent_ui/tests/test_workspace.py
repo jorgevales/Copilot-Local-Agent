@@ -14,6 +14,14 @@ spec=importlib.util.spec_from_file_location('workspace',Path(__file__).resolve()
 module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
 
 class WorkspaceTests(unittest.TestCase):
+    def test_delivered_process_and_orchestrator_exchanges_are_visible(self):
+        ws = module.Workspace()
+        ws.emit('exchange', {'actor': 'Copilot', 'label': 'Copilot process summary (delivered)',
+                             'text': 'Inspect the live page.', 'details': {'decision_summary': 'Use browser.info'}})
+        ws.emit('exchange', {'actor': 'Orchestrator', 'label': 'Orchestrator → Copilot',
+                             'text': 'Fresh tool result', 'message_kind': 'tool_results'})
+        self.assertEqual(['exchange', 'exchange'], [event['kind'] for event in ws.snapshot()['events']])
+
     def test_no_runtime_never_sends(self):
         ws=module.Workspace()
         with self.assertRaises(ValueError): ws.submit('Synthetic request')

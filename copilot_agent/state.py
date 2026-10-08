@@ -1,6 +1,7 @@
 from __future__ import annotations
 import hashlib
 import json
+import re
 from copy import deepcopy
 from pathlib import Path
 import uuid
@@ -163,6 +164,23 @@ class SessionState:
             self.event('browser_domain_approved', domain=domain)
             self.save()
 
+    def quarantine_missing_navigation(self, call_id: str):
+        call = self.data['calls'][call_id]
+        if call.get('status') == 'unverifiable_original_tab_missing':
+            return False
+        if call.get('status') != 'uncertain' or (call.get('reconciliation_baseline') or {}).get('kind') != 'navigation_only':
+            raise ValueError('Only retained navigation-only uncertainty can be quarantined')
+        previous = deepcopy(call)
+        call.update(status='unverifiable_original_tab_missing', completion_credited=False,
+                    reconciliation_reason='original_owned_tab_missing', quarantined_at=now())
+        try:
+            self.save()
+        except Exception:
+            self.data['calls'][call_id] = previous
+            raise
+        self.event('navigation_quarantined', call_id=call_id, reason='original_owned_tab_missing', completion_credited=False)
+        return True
+
     def reconcile_call(self, call_id: str, outcome: str, *, proof=None):
         call = self.data['calls'].get(call_id)
         if call is None or outcome not in {'completed', 'not_executed'}:
@@ -176,7 +194,11 @@ class SessionState:
         if (type(proof) is not dict or proof.get('kind') != 'fresh_browser_observation'
                 or proof.get('outcome') != outcome or proof.get('session_id') != self.session_id
                 or proof.get('call_id_sha256') != hashlib.sha256(call_id.encode()).hexdigest()
-                or proof.get('observed_url_sha256') != proof.get('proposed_url_sha256')
+                or (call.get('reconciliation_baseline') or {}).get('kind') != 'navigation_only'
+                or any(not isinstance(proof.get(key), str) or not re.fullmatch(r'[a-f0-9]{64}', proof[key])
+                       for key in ('observed_url_sha256', 'proposed_url_sha256', 'baseline_url_sha256'))
+                or not (proof.get('observed_url_sha256') == proof.get('proposed_url_sha256')
+                        or proof.get('proposal_query_free') is True and proof.get('proposed_url_sha256') == proof.get('observed_query_free_url_sha256'))
                 or proof.get('baseline_url_sha256') != call.get('reconciliation_baseline', {}).get('url_sha256')):
             raise ValueError('Fresh matching browser reconciliation evidence is required')
         previous, prior_status = deepcopy(call), self.data['status']
@@ -210,6 +232,10 @@ class SessionState:
             consumed += size
         pending = {k: v for k, v in self.data['calls'].items() if v['status'] in {'executing', 'uncertain'}}
         return {k: self.data[k] for k in ('session_id', 'summary', 'requirements', 'decisions', 'constraints', 'unresolved_questions', 'current_plan')} | {
+            'unverified_lost_navigation': [{'operation_id_sha256': hashlib.sha256(key.encode()).hexdigest(),
+                                           'state': 'unverifiable_original_tab_missing', 'completion_credited': False,
+                                           'instruction': 'Open a fresh approved page and observe live before using facts from the lost tab.'}
+                                          for key, call in self.data['calls'].items() if call['status'] == 'unverifiable_original_tab_missing'],
             'recent_messages': list(reversed(recent)), 'pending_operations': pending,
             'approval_state': self.data['approvals'], 'message_count': self.message_count,
             'attachments': self.data['attachments'], 'history_messages_retained_locally': len(self.data['messages'])}
