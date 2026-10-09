@@ -1,6 +1,7 @@
 """Startup latency contracts without launching Edge or sending Copilot messages."""
 from pathlib import Path
 from types import SimpleNamespace
+import os
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -42,6 +43,8 @@ class StartupOrchestrator:
     def __init__(self, config, browser, registry, state, **kwargs):
         self.browser = browser
         self.state = state
+        self.feedback = SimpleNamespace(color=False)
+        self.base_context = {}
         self.findings = SimpleNamespace(data={'findings': []})
         self.events.append('orchestrator:create')
 
@@ -80,7 +83,9 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
         args = SimpleNamespace(config=None, attach_existing=False, port=None,
                                profile=None, model=explicit_model, setup_only=False,
                                resume=None, yes_setup=True)
-        with patch('copilot_agent.app.Config.load', return_value=config), \
+        with patch.dict(os.environ), \
+             patch('copilot_agent.app._UI_PERMISSION_CONTEXT'), \
+             patch('copilot_agent.app.Config.load', return_value=config), \
              patch('copilot_agent.app.discover_onedrive_accounts', return_value=[]), \
              patch('copilot_agent.app.validate_storage_directory', side_effect=lambda path, accounts: Path(path)), \
              patch('copilot_agent.app.read_user_settings', return_value={}), \

@@ -11,6 +11,7 @@ Double-click **Start Agent UI.cmd**.
 The launcher asks which project version to run, then starts an authenticated local server on loopback and opens the workspace in your default browser. This UI port is separate from Edge debugging; it never takes over the Copilot browser. The launch token stays in page memory and is removed from the address bar. Keep the launcher window open. Closing it denies pending approvals and ends the agent session; it cannot roll back an action already submitted.
 
 ## Implemented
+- A compact Start agent card appears at the existing visible-run confirmation prompt. Start and Cancel submit the same `y` and `n` replies through `/api/submit`, the prompt broker and `app.run`; no terminal command or launch configuration is rebuilt. The card waits for backend feedback, prevents duplicate confirmation, preserves the first-request draft and reports local submission errors inline.
 - A cohesive light workspace palette and compact display mode.
 - Collapsible navigation and context panels; responsive layout.
 - Safe Markdown subset, code copy, basic tables and lists; raw HTML is inert.
@@ -21,11 +22,11 @@ The launcher asks which project version to run, then starts an authenticated loc
 - Export review for visible UI transcript; clear-view does not clear backend context.
 - Keyboard focus, reduced-motion and high-contrast support.
 - Local bearer authentication, Host/Origin checks, no external assets or telemetry.
-- New-session and native attachment-picker actions use the existing agent commands. Stop, model switching and resume are disabled because the backend does not expose safe operations for them. Voice is unavailable.
+- New-session and native attachment-picker actions use the existing agent commands. Stop requests the backend's supported cancellation; model switching and resume remain unavailable. Voice is unavailable.
 
 ## Limitations
 - Backend conversation history, pinned sessions, durable bookmarks or saved workflows.
-- Model switching, resume and mid-action cancellation are unsupported. Use a new session or close the launcher; uncertain actions still require reconciliation.
+- Model switching and resume are unsupported. Cancellation cannot roll back submitted effects; uncertain actions still require reconciliation.
 - Full CommonMark, syntax highlighting, resizable panel splitters, large-session virtualisation.
 - Production accessibility/security audit and live Windows/VDI acceptance. Automated tests are synthetic, not target-VDI acceptance.
 
@@ -57,3 +58,5 @@ python -B -m unittest discover -s agent_ui\tests -v
 ```
 
 Tests use synthetic inputs and a local fake runtime only. They do not establish target-VDI acceptance or production accessibility. The UI keeps up to 5,000 events in memory; authoritative long-term history remains the backend's responsibility.
+
+The launch presentation tests use the existing Playwright dependency and installed Microsoft Edge in headless mode. They check exact confirmation payloads, keyboard activation, retained drafts, duplicate prevention, error/cancel/disconnection states, reduced motion, and layouts down to 320 pixels. Review screenshots remain under ignored `runtime/ui-design/`. The reference ZIP is ignored and is never a build input.
