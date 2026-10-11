@@ -10001,6 +10001,104 @@
           }
         }
       ]
+    },
+    {
+      "name": "browser.recover_uncertain",
+      "version": "1.0",
+      "description": "Quarantine one uncertain non-navigation browser action without crediting its outcome, open a fresh approved same-origin checkpoint, and resume the current run. Never replays the action.",
+      "intended_use": "Quarantine one uncertain non-navigation browser action without crediting its outcome, open a fresh approved same-origin checkpoint, and resume the current run. Never replays the action.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Explicit user grant for side effects"
+      ],
+      "risk_level": "moderate",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "checkpoint_url": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "call_id",
+          "checkpoint_url"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "user_approval",
+      "side_effects": [
+        "browser interaction or screenshot"
+      ],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "call_id": "prior-form-call-id",
+            "checkpoint_url": "https://example.com/start"
+          }
+        }
+      ]
     }
   ]
 }

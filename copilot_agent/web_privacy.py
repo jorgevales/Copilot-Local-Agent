@@ -6,7 +6,7 @@ import json
 import re
 
 PRIVATE_TOOLS = {
-    'browser.reconcile', 'browser.diagnostics',
+    'browser.reconcile', 'browser.recover_uncertain', 'browser.diagnostics',
     'browser.recon', 'browser.plan', 'browser.tabs', 'browser.customer_summary',
     'browser.route', 'browser.documents', 'browser.download_batch',
     'files.transfer_to_copilot',

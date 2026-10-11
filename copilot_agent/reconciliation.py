@@ -173,7 +173,8 @@ def browser_diagnostics(state, browser):
                             'state': call['status'], 'navigation_only': (call.get('reconciliation_baseline') or {}).get('kind') == 'navigation_only',
                             'baseline_present': bool(call.get('reconciliation_baseline'))}
                            for call_id, call in state.data['calls'].items()
-                           if call['status'] in {'uncertain', 'unverifiable_original_tab_missing'}]}
+                           if call['status'] in {'uncertain', 'unverifiable_original_tab_missing',
+                                                 'abandoned_unverifiable'}]}
 
 
 async def reconcile_browser_call(state, browser, call_id: str, outcome: str,
@@ -243,3 +244,53 @@ async def reconcile_browser_call(state, browser, call_id: str, outcome: str,
              'session_id': state.session_id}
     state.reconcile_call(call_id, outcome, proof=proof)
     return {'status': outcome, 'call_id': call_id, 'already_reconciled': False}
+
+
+async def abandon_uncertain_browser_call(state, browser, call_id: str, checkpoint_url: str):
+    """Quarantine an unknowable browser effect and establish a clean owned checkpoint."""
+    call = state.data['calls'].get(call_id)
+    if call is None:
+        original = next((key for key in state.data['calls'] if _hash(key) == call_id), None)
+        if original is not None:
+            call_id, call = original, state.data['calls'][original]
+    if call is None or call.get('status') != 'uncertain':
+        raise ValueError('Choose one currently uncertain browser operation')
+    request = call.get('request', {})
+    if (not str(request.get('name', '')).startswith('browser.')
+            or (call.get('reconciliation_baseline') or {}).get('kind') == 'navigation_only'):
+        raise ReconciliationRequired('Use evidence-based reconciliation for navigation-only operations')
+    checkpoint_url = URLPolicy(state.data.get('approved_domains', [])).resolve(checkpoint_url)
+    previous_page = getattr(browser, 'tool_page', None)
+    if previous_page is None or _origin(previous_page.url) != _origin(checkpoint_url):
+        raise PolicyError('Recovery checkpoint must remain on the uncertain action website')
+    page = await browser.new_tool_page()
+    if (page is None or page is getattr(browser, 'page', None)
+            or page is getattr(browser, 'chat_page', None)
+            or page not in getattr(browser, '_tool_pages', [])):
+        raise PolicyError('Fresh recovery checkpoint is not an owned website tab')
+    await asyncio.wait_for(page.goto(checkpoint_url, wait_until='domcontentloaded', timeout=15000), timeout=17)
+    if page.is_closed() or _origin(page.url) != _origin(checkpoint_url):
+        raise ReconciliationRequired('Fresh checkpoint navigation was not verified on the approved origin')
+    URLPolicy(state.data.get('approved_domains', [])).resolve(page.url)
+    title = await asyncio.wait_for(page.title(), timeout=3)
+    browser.tool_page = page
+    navigation = getattr(browser, '_navigation_state', None)
+    if isinstance(navigation, dict):
+        result = call.get('result', {}).get('result', {})
+        token = result.get('resume_token') if isinstance(result, dict) else None
+        if token:
+            navigation.get('plans', {}).pop(token, None)
+        navigation.setdefault('tabs', {})['tab-1'] = {
+            'page': page, 'purpose': 'Recovered workflow checkpoint', 'task_id': None,
+            'customer_key': None, 'customer_verified': False, 'primary': True}
+    baseline = call.get('reconciliation_baseline') or {}
+    getattr(browser, '_reconciliation_pages', {}).pop(baseline.get('page_token'), None)
+    proof = {'kind': 'fresh_browser_checkpoint', 'session_id': state.session_id,
+             'call_id_sha256': _hash(call_id), 'checkpoint_url_sha256': _hash(page.url),
+             'checkpoint_title_sha256': _hash(title),
+             'browser_binding_sha256': _binding(browser)}
+    state.abandon_browser_uncertainty(call_id, proof)
+    return {'status': 'checkpoint_verified', 'abandoned_call_id': call_id,
+            'completion_credited': False, 'outcome_determined': False,
+            'checkpoint': {'origin': _origin(page.url), 'url_sha256': _hash(page.url),
+                           'title_sha256': _hash(title)}}

@@ -99,12 +99,17 @@ class SessionState:
             self.data['pending_submission'] = None
             self.save()
 
-    def begin_call(self, request: dict, state_changing: bool = True, reconciliation_baseline=None):
+    def begin_call(self, request: dict, state_changing: bool = True, reconciliation_baseline=None,
+                   uncertainty_recovery: bool = False):
         call_id = request['call_id']
         from .web_privacy import private_id
+        if uncertainty_recovery and request.get('name') != 'browser.recover_uncertain':
+            raise RuntimeError('Only the uncertainty recovery tool may bypass the pending-effect gate')
         if call_id in self.data['calls'] or private_id(call_id) in self.data['calls']:
             raise RuntimeError('Duplicate call ID cannot execute again')
-        if state_changing and any(c['status'] == 'uncertain' and c.get('state_changing', True) for c in self.data['calls'].values()):
+        if (state_changing and not uncertainty_recovery
+                and any(c['status'] == 'uncertain' and c.get('state_changing', True)
+                        for c in self.data['calls'].values())):
             raise RuntimeError('A previous state-changing operation remains uncertain; inspect and reconcile before another change')
         action_hash = canonical_hash({k: request[k] for k in ('name', 'version', 'arguments')})
         if any(c.get('action_hash') == action_hash and c['status'] == 'uncertain' for c in self.data['calls'].values()):
@@ -114,6 +119,38 @@ class SessionState:
             self.data['calls'][call_id]['reconciliation_baseline'] = deepcopy(reconciliation_baseline)
         self.event('tool_intent', call_id=call_id, name=request['name'], request_hash=canonical_hash(request))
         self.save()
+
+    def abandon_browser_uncertainty(self, call_id: str, proof: dict):
+        """Quarantine an unknowable browser effect after a fresh approved checkpoint."""
+        call = self.data['calls'].get(call_id)
+        if call is None or call.get('status') != 'uncertain':
+            raise ValueError('Only an uncertain browser operation may be abandoned')
+        request = call.get('request', {})
+        if (not str(request.get('name', '')).startswith('browser.')
+                or (call.get('reconciliation_baseline') or {}).get('kind') == 'navigation_only'):
+            raise ValueError('This recovery is only for uncertain non-navigation browser operations')
+        if (type(proof) is not dict or proof.get('kind') != 'fresh_browser_checkpoint'
+                or proof.get('session_id') != self.session_id
+                or proof.get('call_id_sha256') != hashlib.sha256(call_id.encode()).hexdigest()
+                or any(not isinstance(proof.get(key), str)
+                       or not re.fullmatch(r'[a-f0-9]{64}', proof[key])
+                       for key in ('checkpoint_url_sha256', 'checkpoint_title_sha256',
+                                   'browser_binding_sha256'))):
+            raise ValueError('A fresh verified browser checkpoint is required')
+        previous, prior_status = deepcopy(call), self.data['status']
+        call.update(status='abandoned_unverifiable', completion_credited=False,
+                    outcome_determined=False, recovery=deepcopy(proof), quarantined_at=now())
+        if not any(item.get('status') == 'uncertain' for item in self.data['calls'].values()):
+            self.data['status'] = 'ready'
+        try:
+            self.save()
+        except Exception:
+            self.data['calls'][call_id] = previous
+            self.data['status'] = prior_status
+            raise
+        self.event('browser_uncertainty_abandoned', call_id=call_id,
+                   completion_credited=False, outcome_determined=False)
+        return True
 
     def finish_call(self, call_id: str, result: dict):
         call = self.data['calls'][call_id]
@@ -236,6 +273,11 @@ class SessionState:
                                            'state': 'unverifiable_original_tab_missing', 'completion_credited': False,
                                            'instruction': 'Open a fresh approved page and observe live before using facts from the lost tab.'}
                                           for key, call in self.data['calls'].items() if call['status'] == 'unverifiable_original_tab_missing'],
+            'abandoned_browser_operations': [{'operation_id_sha256': hashlib.sha256(key.encode()).hexdigest(),
+                                              'state': 'abandoned_unverifiable',
+                                              'completion_credited': False, 'outcome_determined': False}
+                                             for key, call in self.data['calls'].items()
+                                             if call['status'] == 'abandoned_unverifiable'],
             'recent_messages': list(reversed(recent)), 'pending_operations': pending,
             'approval_state': self.data['approvals'], 'message_count': self.message_count,
             'attachments': self.data['attachments'], 'history_messages_retained_locally': len(self.data['messages'])}

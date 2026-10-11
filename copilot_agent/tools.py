@@ -21,7 +21,8 @@ from .web_navigation import NAVIGATION_SPECS, validate_navigation, execute_navig
 from .web_documents import DOCUMENT_SPECS, DOCUMENT_EXAMPLES, validate_documents, execute_documents
 from .site_knowledge import KNOWLEDGE_SPECS, KNOWLEDGE_EXAMPLES, validate_knowledge, execute_knowledge, safe_proposal, KnowledgeValidationError
 from .discovery_engine import DISCOVERY_SPECS, validate_discovery, execute_discovery
-from .reconciliation import reconcile_browser_call, ReconciliationRequired, browser_diagnostics
+from .reconciliation import (reconcile_browser_call, abandon_uncertain_browser_call,
+                             ReconciliationRequired, browser_diagnostics)
 from .research_permissions import PERMISSION_SPECS, execute_permissions, guard_customer_read
 from .discovery_knowledge import (KNOWLEDGE_SPECS as DISCOVERY_KNOWLEDGE_SPECS,
                                   validate_knowledge_tool, execute_knowledge_tool)
@@ -138,6 +139,7 @@ SPECS = {
     "browser.info": (obj({}), "read_only", "Read tool-tab URL and title."),
     "browser.diagnostics": (obj({}), "read_only", "Read sanitized authoritative browser registration, connection, owned-tab count and uncertain/quarantined ledger states. No URLs, titles, cookies or page content."),
     "browser.reconcile": (obj({"call_id":S,"outcome":{"type":"string","enum":["completed","not_executed"]},"observed_url":S,"observed_title":{"type":"string","maxLength":300}},["call_id","outcome","observed_url"]), "read_only", "Resolve an uncertain navigation-only browser call automatically after fresh local inspection confirms the exact observed URL and pre-action fingerprint. No click or navigation; never use for forms or writes."),
+    "browser.recover_uncertain": (obj({"call_id":S,"checkpoint_url":S}), "user_approval", "Quarantine one uncertain non-navigation browser action without crediting its outcome, open a fresh approved same-origin checkpoint, and resume the current run. Never replays the action."),
     "browser.read": (obj({"frame_selector":S},[]), "read_only", "Read bounded visible body text from the managed tab or one explicit iframe."),
     "browser.structure": (obj({"frame_selector":S},[]), "read_only", "Read visible controls without input values from the managed tab or one explicit iframe."),
     "browser.click": (obj({"selector":S,"frame_selector":S},["selector"]), "user_approval", "Click one unique selector in the managed tab or explicit iframe. May change third-party state."),
@@ -196,6 +198,7 @@ class ToolRegistry:
             examples = [{"arguments":{"script":"print('reviewed computation')","purpose":"Compute a bounded result","language":"python_subset","working_directory":".","read_paths":[],"create_paths":[],"expected_outputs":[],"commands":[],"network_destinations":[],"permissions":[],"risk_summary":"No external side effects","recovery_notes":"Review failure output before retry"}}]
         if name == "browser.open": examples = [{"arguments":{"url":"https://example.com/"}}]
         if name == "browser.reconcile": examples = [{"arguments":{"call_id":"prior-navigation-call-id","outcome":"completed","observed_url":"https://example.com/actual-page"}}]
+        if name == "browser.recover_uncertain": examples = [{"arguments":{"call_id":"prior-form-call-id","checkpoint_url":"https://example.com/start"}}]
         if name == "copilot.download": examples = [{"arguments":{"expected_name":"package.zip"}}]
         if name == "archives.extract": examples = [{"arguments":{"path":"package.zip","destination":"delivered-project","expected_sha256":"0"*64,"expected_files":["README.md"]}}]
         if name in KNOWLEDGE_EXAMPLES: examples = [{'arguments': KNOWLEDGE_EXAMPLES[name]}]
@@ -457,6 +460,8 @@ class ToolRegistry:
             raise PolicyError('Use research.perform for bounded, category-controlled customer reads under the matching grant')
         if name == 'browser.reconcile':
             return await reconcile_browser_call(context['session_state'], context['browser'], **args)
+        if name == 'browser.recover_uncertain':
+            return await abandon_uncertain_browser_call(context['session_state'], context['browser'], **args)
         if name == 'browser.diagnostics':
             return browser_diagnostics(context['session_state'], context['browser'])
         if name in NAVIGATION_SPECS: return await execute_navigation(name, args, context, policy)

@@ -484,8 +484,11 @@ class Orchestrator:
             if any(c.get('action_hash') == action_hash and c['status'] == 'completed'
                    and not c.get('result', {}).get('ok') for c in self.state.data['calls'].values()):
                 raise PolicyError('This method already failed; propose a materially different safe recovery approach')
-            if catalog[call['name']]['approval_policy'] != 'read_only' and any(c['status'] == 'uncertain' and c.get('state_changing', True) for c in self.state.data['calls'].values()):
-                raise PolicyError('A prior action has uncertain effects; only inspection is allowed. For navigation-only calls, inspect with browser.info and request browser.reconcile with its call ID and observed final URL. Other effects remain blocked.')
+            if (catalog[call['name']]['approval_policy'] != 'read_only'
+                    and call['name'] != 'browser.recover_uncertain'
+                    and any(c['status'] == 'uncertain' and c.get('state_changing', True)
+                            for c in self.state.data['calls'].values())):
+                raise PolicyError('A prior action has uncertain effects. Reconcile navigation-only calls from fresh evidence, or request separately approved browser.recover_uncertain for an unreconcilable non-navigation browser action. Other effects remain blocked.')
             # Validate argument shape before execution; page/filesystem state may
             # depend on an earlier successful step in this same ordered batch.
             if hasattr(self.registry, 'validate_input'):
@@ -785,7 +788,8 @@ class Orchestrator:
                             if call['name'] in {'browser.open', 'browser.back', 'browser.forward', 'browser.plan'}
                             and not context.get('consequential_approved_plan_hash')
                             and hasattr(self.browser, 'tool_page') else None)
-                self.state.begin_call(call, state_changing=effectful, reconciliation_baseline=baseline)
+                self.state.begin_call(call, state_changing=effectful, reconciliation_baseline=baseline,
+                                      uncertainty_recovery=call['name'] == 'browser.recover_uncertain')
                 if effectful or call['name']=='research.perform':
                     self.feedback.emit('Action', 'APPROVED ACTION\n'+call_summary(call))
                     if self.event_sink:
@@ -823,6 +827,12 @@ class Orchestrator:
                     if origin not in self.base_context.get('site_knowledge_bindings', {}):
                         for field in ('tenant_id', 'site_namespace_id'):
                             self.base_context.pop(field, None)
+                if result.get('ok') and call['name'] == 'browser.recover_uncertain':
+                    self.base_context['research_context']['active'] = False
+                    for field in ('task_id', 'customer_key'):
+                        self.base_context.pop(field, None)
+                    self.base_context['web_document_tickets'].clear()
+                    self.base_context['document_catalogues'].clear()
                 if result.get('ok') and call['name'] == 'site_knowledge.bind':
                     scope = result.get('result', {}).get('scope', {})
                     self.base_context['tenant_id'] = scope.get('tenant')
@@ -860,7 +870,9 @@ class Orchestrator:
                 'a materially different safe approach available through registered tools or a newly proposed exact '
                 'Code Runner script. Every materially changed local execution requires its normal fresh approval. '
                 'If a navigation-only browser call is uncertain, request browser.info, then browser.reconcile '
-                'with the prior call ID, observed URL and outcome in a separate request before further actions. '
+                'with fresh evidence. If a non-navigation browser effect cannot be reconciled, request the separately '
+                'approved browser.recover_uncertain action; it quarantines the unknown outcome, verifies a fresh '
+                'same-origin checkpoint, and permits this original run to continue without replay. '
                 'Stop only at success, exhausted bounded rounds, denial, or a genuine safety/permission boundary.')}
             if self.base_context.get('discovery_synthesis_pending'):
                 content['instruction'] = ('This consolidated discovery/navigation run is terminal. Produce final evidence-ID-grounded synthesis or a blocked error with material gaps. '

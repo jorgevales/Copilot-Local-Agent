@@ -3,7 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from copilot_agent.reconciliation import (ReconciliationRequired, capture_baseline, reconcile_browser_call,
+from copilot_agent.reconciliation import (ReconciliationRequired, abandon_uncertain_browser_call,
+                                          capture_baseline, reconcile_browser_call,
                                           recover_missing_navigation, navigation_scope_allows, browser_diagnostics)
 from copilot_agent.state import SessionState
 from copilot_agent.tools import ToolRegistry
@@ -17,6 +18,10 @@ class Page:
     async def title(self):
         return self.current_title
 
+    async def goto(self, url, **kwargs):
+        self.url = url
+        self.current_title = 'Recovered checkpoint'
+
     def is_closed(self):
         return self.closed
 
@@ -26,7 +31,15 @@ class Browser:
         self.tool_page = page
         self.page = Page('https://m365.cloud.microsoft/chat', 'Copilot')
         self._tool_pages = [page]
+        self._reconciliation_pages = {}
+        self.context = None
+        self.endpoint = 'local-test'
         self._navigation_state = {'tabs': {'tab-1': {'page': page}}}
+
+    async def new_tool_page(self):
+        page = Page('about:blank', '')
+        self._tool_pages.append(page)
+        return page
 
 
 class ReconciliationTests(unittest.IsolatedAsyncioTestCase):
@@ -164,8 +177,92 @@ class ReconciliationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual('completed', result['status'])
         self.assertNotIn('private-value', self.state.path.read_text(encoding='utf-8'))
 
+    async def test_uncertain_form_and_search_clicks_can_be_quarantined_without_outcome_credit(self):
+        await reconcile_browser_call(self.state, self.browser, 'nav-1', 'not_executed', self.page.url)
+        for index, (name, arguments) in enumerate((
+                ('browser.fill', {'selector': '#query', 'text': 'private'}),
+                ('browser.click', {'selector': '#search'}))):
+            call_id = f'uncertain-{index}'
+            request = {'call_id': call_id, 'name': name, 'version': '1.0', 'arguments': arguments}
+            self.state.begin_call(request)
+            self.state.finish_call(call_id, {'ok': False, 'error': {'code': 'timeout'},
+                                             'result': {'side_effects_uncertain': True}})
+            result = await abandon_uncertain_browser_call(
+                self.state, self.browser, call_id, 'https://example.com/recovered')
+            call = self.state.data['calls'][call_id]
+            self.assertEqual('checkpoint_verified', result['status'])
+            self.assertEqual('abandoned_unverifiable', call['status'])
+            self.assertFalse(call['completion_credited'])
+            self.assertFalse(call['outcome_determined'])
+
+    async def test_only_recovery_tool_can_bypass_uncertainty_gate(self):
+        with self.assertRaises(RuntimeError):
+            self.state.begin_call({'call_id': 'bypass', 'name': 'browser.click', 'version': '1.0',
+                                   'arguments': {'selector': '#x'}}, uncertainty_recovery=True)
+
 
 class RecoveryOrchestrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_approved_recovery_continues_to_sanitized_site_knowledge_save(self):
+        from copy import deepcopy
+        from tests.test_protocol_state import make_fixture
+        from tests.test_orchestrator import MockBrowser, final_response, tool_response
+        from copilot_agent.orchestrator import Orchestrator
+        from copilot_agent.site_knowledge import KNOWLEDGE_EXAMPLES, execute_knowledge, prepare_knowledge
+
+        root, config, state, _ = make_fixture('uncertain-action-recovery-')
+        state.approve_domain('example.com')
+        uncertain = {'call_id': 'uncertain-search', 'name': 'browser.click', 'version': '1.0',
+                     'arguments': {'selector': '#search'}}
+        state.begin_call(uncertain)
+        state.finish_call(uncertain['call_id'], {'ok': False, 'error': {'code': 'timeout'},
+                                                'result': {'side_effects_uncertain': True}})
+        save_args = deepcopy(KNOWLEDGE_EXAMPLES['site_knowledge.save'])
+        browser = MockBrowser([
+            final_response,
+            lambda msg: tool_response(msg, 'recover', 'browser.recover_uncertain',
+                                      {'call_id': 'uncertain-search',
+                                       'checkpoint_url': 'https://example.com/start'}),
+            lambda msg: tool_response(msg, 'save', 'site_knowledge.save', save_args),
+            final_response])
+        browser.tool_page = Page('https://example.com/search', 'Search')
+        browser.page = Page('https://m365.cloud.microsoft/chat', 'Copilot')
+        browser.chat_page = browser.page
+        browser._tool_pages = [browser.tool_page]
+        browser._reconciliation_pages = {}
+        browser._navigation_state = {'tabs': {'tab-1': {'page': browser.tool_page}}, 'plans': {}}
+        browser.tool_context = object()
+        browser.tool_page.context = browser.tool_context
+        browser.endpoint = 'local-test'
+        async def new_page():
+            page = Page('about:blank', '')
+            page.context = browser.tool_context
+            browser._tool_pages.append(page)
+            return page
+        browser.new_tool_page = new_page
+        approvals = []
+        def approve(preview):
+            approvals.append(preview)
+            return 'once'
+        registry = ToolRegistry()
+        app = Orchestrator(config, browser, registry, state, approval_decider=approve,
+                           display=lambda text: None)
+        app.base_context['knowledge_directory'] = root / 'site-knowledge'
+        bind_args = deepcopy(KNOWLEDGE_EXAMPLES['site_knowledge.bind'])
+        bind_review = prepare_knowledge(bind_args, app.base_context, name='site_knowledge.bind')
+        bind_context = dict(app.base_context, approved=True, approval_hash='a' * 64,
+                            site_knowledge_reviewed=bind_review)
+        execute_knowledge('site_knowledge.bind', bind_args, bind_context)
+
+        await app.initialize()
+        response = await app.turn('Recover safely, continue, and retain generic navigation knowledge.')
+
+        self.assertEqual('complete', response['completion_status'])
+        self.assertEqual('abandoned_unverifiable', state.data['calls']['uncertain-search']['status'])
+        self.assertTrue(state.data['calls']['recover']['result']['ok'])
+        self.assertTrue(state.data['calls']['save']['result']['ok'])
+        self.assertEqual(2, len(approvals))
+        self.assertTrue(list((root / 'site-knowledge').glob('*.json')))
+
     async def test_closed_tab_fresh_open_navigation_grant_and_visible_exchange(self):
         from tests.test_protocol_state import make_fixture
         from tests.test_orchestrator import MockBrowser, final_response, tool_response
