@@ -35,13 +35,14 @@ class PromptBuilder:
                                  'exposed_application_imports': ['copilot_agent.desktop'],
                                  'desktop_permissions': ['desktop_capture', 'window_management']}}
         from .discovery_engine import FLAGS
-        import os
         feature_flags = {flag: getattr(config, flag, False) is True for flag in FLAGS}
+        feature_flags['operation_reuse'] = getattr(config, 'operation_reuse', False) is True
         for definition in definitions:
             name = definition.get('name', '')
-            if not name.startswith(('discovery.', 'navigation.')):
+            if not name.startswith(('discovery.', 'navigation.', 'operation.')):
                 continue
-            required_flag = ('knowledge_reuse' if name in {'discovery.knowledge_lookup', 'navigation.intent'}
+            required_flag = ('operation_reuse' if name.startswith('operation.')
+                             else 'knowledge_reuse' if name in {'discovery.knowledge_lookup', 'navigation.intent'}
                              else 'knowledge_write' if name in {'discovery.knowledge_save', 'discovery.knowledge_invalidate'}
                              else 'manifest_path')
             definition['availability'] = {'available': feature_flags[required_flag],

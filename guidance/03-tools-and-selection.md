@@ -54,3 +54,11 @@ When available, one `discovery.manifest` call carries the complete bounded publi
 `navigation.intent` is locally compiled from fresh, bound, pinned trusted knowledge, then public static GET fingerprints/links are verified within the same budgets. It does NOT move the browser or verify rendered controls/authentication. Zero-step success still needs fresh target evidence. Missing/stale/ambiguous knowledge requires a new separately approved discovery request; targeted repair is unavailable. Knowledge never grants permission.
 
 Synthesis uses only actual returned evidence IDs, states and limitations. Preserve useful sibling results; never label partial results complete or claim whole-site coverage from queue exhaustion. A projection is explicitly incomplete evidence, not a fabricated summary. State every material gap and terminal reason. Do not persist website facts in Useful Findings.
+
+## Public operation reuse
+
+When `operation_reuse` is available, call `operation.list` before repeating browser discovery for a known public JSON lookup. Use `operation.call` only for a retained operation on the exact origin. Batch independent known calls together; the local adapter deduplicates identical calls and bounds concurrency. Treat its returned data, revision, failure class and transport metrics as evidence. It never grants browser, authentication or write authority.
+
+Use `operation.learn` only after two distinct public GET URLs have already been observed and a third unseen set of safe public input values is available. It performs three public validation GETs and requires separate exact local approval. Supply only generic parameter names and public, non-customer values. Never include cookies, tokens, credentials, customer identifiers or authenticated URLs. A successful promotion retains the sanitized template and response shape, not the variable example values; fixed route/query literals remain part of the template and must also be non-sensitive.
+
+For drift, stop using the degraded operation, collect fresh browser evidence, and propose a new expected revision. For authentication, rate limiting, access denial or input rejection, stop and report the classified boundary. Do not turn a failed operation into an automatic browser action, retry loop or state-changing request.

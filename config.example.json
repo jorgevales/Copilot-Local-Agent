@@ -28,5 +28,6 @@
   "local_recovery": true,
   "knowledge_write": true,
   "knowledge_reuse": true,
-  "targeted_repair": false
+  "targeted_repair": false,
+  "operation_reuse": false
 }

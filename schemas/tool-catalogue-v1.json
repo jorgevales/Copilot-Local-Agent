@@ -9573,6 +9573,434 @@
           }
         }
       ]
+    },
+    {
+      "name": "operation.learn",
+      "version": "1.0",
+      "description": "Learn one public read-only GET from two observed URLs, validate it with unseen inputs, and promote a sanitized versioned operation. Performs exactly three public GETs; no cookies, headers, browser, writes, or automatic fallback.",
+      "intended_use": "Learn one public read-only GET from two observed URLs, validate it with unseen inputs, and promote a sanitized versioned operation. Performs exactly three public GETs; no cookies, headers, browser, writes, or automatic fallback.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Explicit user grant for side effects"
+      ],
+      "risk_level": "moderate",
+      "timeout": 95,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 280
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+          },
+          "intent": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "example_url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "example_args": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          },
+          "example2_url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "example2_args": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          },
+          "validation_args": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "extract": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000
+                    }
+                  ]
+                },
+                "maxItems": 16
+              },
+              "pick": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
+                "maxItems": 30,
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "extract"
+            ],
+            "additionalProperties": false
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 99999
+          }
+        },
+        "required": [
+          "origin",
+          "name",
+          "intent",
+          "example_url",
+          "example_args",
+          "example2_url",
+          "example2_args",
+          "validation_args",
+          "response",
+          "expected_revision"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "user_approval",
+      "side_effects": [
+        "three approved public HTTPS GET validations and a sanitized versioned operation record"
+      ],
+      "limits": {
+        "timeout_seconds": 95,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "origin": "https://example.com",
+            "name": "search",
+            "intent": "Return public search results",
+            "example_url": "https://example.com/search?q=alpha",
+            "example_args": {
+              "query": "alpha"
+            },
+            "example2_url": "https://example.com/search?q=bravo",
+            "example2_args": {
+              "query": "bravo"
+            },
+            "validation_args": {
+              "query": "charlie"
+            },
+            "response": {
+              "extract": [
+                "results"
+              ],
+              "pick": [
+                "title",
+                "url"
+              ]
+            },
+            "expected_revision": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "operation.list",
+      "version": "1.0",
+      "description": "List compact current public operations retained for one exact origin. No network or browser use.",
+      "intended_use": "List compact current public operations retained for one exact origin. No network or browser use.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Read-only operation"
+      ],
+      "risk_level": "low",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 280
+          }
+        },
+        "required": [
+          "origin"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "read_only",
+      "side_effects": [],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "origin": "https://example.com"
+          }
+        }
+      ]
+    },
+    {
+      "name": "operation.call",
+      "version": "1.0",
+      "description": "Execute up to eight retained public GET operations locally, deduplicating identical calls and using bounded concurrency. No Copilot UI or browser round trip; failures are classified and never trigger a write or blind replay.",
+      "intended_use": "Execute up to eight retained public GET operations locally, deduplicating identical calls and using bounded concurrency. No Copilot UI or browser round trip; failures are classified and never trigger a write or blind replay.",
+      "preconditions": [
+        "Current validated tool call",
+        "Configured filesystem/domain boundaries",
+        "Read-only operation"
+      ],
+      "risk_level": "low",
+      "timeout": 30,
+      "output_size_limit": 12000,
+      "error_codes": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 280
+          },
+          "calls": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+                },
+                "arguments": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "arguments"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "origin",
+          "calls"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "tool"
+        ],
+        "additionalProperties": false
+      },
+      "approval_policy": "read_only",
+      "side_effects": [],
+      "limits": {
+        "timeout_seconds": 30,
+        "output_chars": 12000,
+        "file_bytes": 20971520
+      },
+      "errors": [
+        "invalid_arguments",
+        "policy_denied",
+        "unavailable",
+        "operation_failed",
+        "timeout"
+      ],
+      "examples": [
+        {
+          "arguments": {
+            "origin": "https://example.com",
+            "calls": [
+              {
+                "name": "search",
+                "arguments": {
+                  "query": "charlie"
+                }
+              }
+            ]
+          }
+        }
+      ]
     }
   ]
 }

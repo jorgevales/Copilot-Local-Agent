@@ -148,13 +148,16 @@ class TLSStream:
 
 
 class PublicReader:
-    def __init__(self, scope, store, run, budgets, cancelled, monotonic_deadline=None):
+    def __init__(self, scope, store, run, budgets, cancelled, monotonic_deadline=None,
+                 content_types=None):
         self.scope, self.store, self.run = scope, store, run
         self.monotonic_deadline = monotonic_deadline if monotonic_deadline is not None else time.monotonic() + budgets['run_seconds'] - 1
         self.budgets, self.cancelled = budgets, cancelled
         self.writers = set()
         self.origin_active = {}
         self.origin_condition = asyncio.Condition()
+        self.content_types = frozenset(content_types or
+                                       {'text/html', 'application/xhtml+xml', 'text/plain'})
 
     def check(self, deadline):
         if self.cancelled():
@@ -266,8 +269,10 @@ class PublicReader:
             peer = writer.raw.getpeername()[0]
             if not public_address(peer) or ipaddress.ip_address(peer) != ipaddress.ip_address(address[0]):
                 raise ReadFailure('connection_mismatch')
+            accept = ','.join(sorted(self.content_types))
             request = (method + ' ' + scoped.path + ' HTTP/1.1\r\nHost: ' + scoped.host +
-                       '\r\nUser-Agent: CopilotLocalAgent-Discovery/1\r\nAccept: text/html,text/plain\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n').encode('ascii')
+                       '\r\nUser-Agent: CopilotLocalAgent-Discovery/1\r\nAccept: ' + accept +
+                       '\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n').encode('ascii')
             await writer.write(request)
             status_line = await self.line(reader, deadline)
             match = re.fullmatch(rb'HTTP/1\.[01] ([0-9]{3}) [^\r\n]*\r\n', status_line)
@@ -313,7 +318,8 @@ class PublicReader:
             content_type = headers.get('content-type', '').split(';')[0].strip().lower()
             if method == 'HEAD':
                 return status, content_type, b'', None
-            if content_type not in ('text/html', 'application/xhtml+xml', 'text/plain'):
+            if content_type not in self.content_types and not (
+                    'application/json' in self.content_types and content_type.endswith('+json')):
                 raise ReadFailure('unsupported_content')
             if headers.get('content-encoding', 'identity').lower() != 'identity':
                 raise ReadFailure('compressed_content_unavailable')

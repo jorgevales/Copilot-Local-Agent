@@ -116,6 +116,19 @@ class Store:
           partition TEXT NOT NULL, revision INTEGER NOT NULL, payload TEXT NOT NULL,
           hash TEXT NOT NULL, consent TEXT NOT NULL, created REAL NOT NULL, invalidated INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY(partition,revision));
+        CREATE TABLE IF NOT EXISTS operation_heads(
+          partition TEXT NOT NULL, name TEXT NOT NULL, revision INTEGER NOT NULL,
+          PRIMARY KEY(partition,name));
+        CREATE TABLE IF NOT EXISTS operations(
+          partition TEXT NOT NULL, name TEXT NOT NULL, revision INTEGER NOT NULL,
+          payload TEXT NOT NULL, hash TEXT NOT NULL, status TEXT NOT NULL,
+          created REAL NOT NULL, last_success REAL, failure_count INTEGER NOT NULL DEFAULT 0,
+          last_failure_class TEXT,
+          PRIMARY KEY(partition,name,revision));
+        CREATE TABLE IF NOT EXISTS operation_events(
+          partition TEXT NOT NULL, name TEXT NOT NULL, sequence INTEGER NOT NULL,
+          created REAL NOT NULL, event TEXT NOT NULL,
+          PRIMARY KEY(partition,name,sequence));
         PRAGMA user_version=1;
         ''')
         self.purge_expired()
@@ -432,6 +445,90 @@ class Store:
             if (row[0] if row else 0) != expected:
                 raise DiscoveryError('stale_knowledge_revision')
             db.execute('UPDATE knowledge SET invalidated=1 WHERE partition=?', (partition,))
+
+    def operation_revision(self, partition, name):
+        with self.lock:
+            row = self.db.execute(
+                'SELECT revision FROM operation_heads WHERE partition=? AND name=?',
+                (partition, name)).fetchone()
+            return row[0] if row else 0
+
+    def operation(self, partition, name):
+        with self.lock:
+            row = self.db.execute(
+                'SELECT * FROM operations WHERE partition=? AND name=? '
+                'ORDER BY revision DESC LIMIT 1', (partition, name)).fetchone()
+        if not row:
+            return None
+        value = json.loads(row['payload'])
+        if digest(value) != row['hash']:
+            raise DiscoveryError('knowledge_integrity')
+        return dict(row, value=value)
+
+    def operations(self, partition):
+        with self.lock:
+            rows = self.db.execute(
+                'SELECT o.* FROM operations o JOIN operation_heads h '
+                'ON o.partition=h.partition AND o.name=h.name AND o.revision=h.revision '
+                'WHERE o.partition=? ORDER BY o.name', (partition,)).fetchall()
+        result = []
+        for row in rows:
+            value = json.loads(row['payload'])
+            if digest(value) != row['hash']:
+                raise DiscoveryError('knowledge_integrity')
+            result.append(dict(row, value=value))
+        return result
+
+    def save_operation(self, partition, name, expected, payload):
+        encoded = canonical(payload)
+        if len(encoded.encode()) > MAX_ARTIFACT_BYTES:
+            raise DiscoveryError('resource_limit')
+        with self.transaction() as db:
+            row = db.execute(
+                'SELECT revision FROM operation_heads WHERE partition=? AND name=?',
+                (partition, name)).fetchone()
+            current = row[0] if row else 0
+            if current != expected or payload['revision'] != expected + 1:
+                raise DiscoveryError('stale_knowledge_revision')
+            now = time.time()
+            db.execute('INSERT INTO operations VALUES(?,?,?,?,?,?,?,?,?,?)',
+                       (partition, name, current + 1, encoded, digest(payload), 'active',
+                        now, now, 0, None))
+            db.execute('INSERT INTO operation_heads VALUES(?,?,?) '
+                       'ON CONFLICT(partition,name) DO UPDATE SET revision=excluded.revision',
+                       (partition, name, current + 1))
+            self._operation_event(db, partition, name,
+                                  {'event': 'validated_and_promoted', 'revision': current + 1})
+
+    @staticmethod
+    def _operation_event(db, partition, name, event):
+        row = db.execute(
+            'SELECT COALESCE(MAX(sequence),0)+1 FROM operation_events '
+            'WHERE partition=? AND name=?', (partition, name)).fetchone()
+        db.execute('INSERT INTO operation_events VALUES(?,?,?,?,?)',
+                   (partition, name, row[0], time.time(), canonical(event)))
+
+    def record_operation_outcome(self, partition, name, revision, outcome, failure_class=None):
+        if outcome not in {'success', 'cache_hit', 'failure'}:
+            raise DiscoveryError('invalid_transition')
+        with self.transaction() as db:
+            row = db.execute(
+                'SELECT revision FROM operation_heads WHERE partition=? AND name=?',
+                (partition, name)).fetchone()
+            if row is None or row[0] != revision:
+                raise DiscoveryError('stale_knowledge_revision')
+            if outcome == 'success':
+                db.execute('UPDATE operations SET status=?,last_success=?,last_failure_class=NULL '
+                           'WHERE partition=? AND name=? AND revision=?',
+                           ('active', time.time(), partition, name, revision))
+            elif outcome == 'failure':
+                status = 'degraded' if failure_class == 'drift' else 'active'
+                db.execute('UPDATE operations SET status=?,failure_count=failure_count+1,'
+                           'last_failure_class=? WHERE partition=? AND name=? AND revision=?',
+                           (status, failure_class, partition, name, revision))
+            self._operation_event(db, partition, name,
+                                  {'event': outcome, 'revision': revision,
+                                   'failure_class': failure_class})
 
     def close(self):
         with self.lock:

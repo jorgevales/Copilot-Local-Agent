@@ -26,6 +26,8 @@ from .research_permissions import PERMISSION_SPECS, execute_permissions, guard_c
 from .discovery_knowledge import (KNOWLEDGE_SPECS as DISCOVERY_KNOWLEDGE_SPECS,
                                   validate_knowledge_tool, execute_knowledge_tool)
 from .discovery_contracts import DiscoveryError, DISCOVERY_ERROR_CODES
+from .web_operations import (OPERATION_SPECS, OPERATION_EXAMPLES,
+                             validate_operation, execute_operation)
 
 
 def obj(properties, required=None):
@@ -164,6 +166,7 @@ SPECS.update(KNOWLEDGE_SPECS)
 SPECS.update(DISCOVERY_SPECS)
 SPECS.update(DISCOVERY_KNOWLEDGE_SPECS)
 SPECS.update(PERMISSION_SPECS)
+SPECS.update(OPERATION_SPECS)
 GUIDANCE_TOPICS = ['index', 'reconnaissance', 'plans', 'customers', 'documents', 'tabs', 'memory', 'recovery', 'privacy', 'testing']
 SPECS['guidance.load'] = (obj({'topics': {'type': 'array', 'minItems': 1, 'maxItems': 3,
                                          'items': {'type': 'string', 'enum': GUIDANCE_TOPICS}}}),
@@ -197,6 +200,7 @@ class ToolRegistry:
         if name == "archives.extract": examples = [{"arguments":{"path":"package.zip","destination":"delivered-project","expected_sha256":"0"*64,"expected_files":["README.md"]}}]
         if name in KNOWLEDGE_EXAMPLES: examples = [{'arguments': KNOWLEDGE_EXAMPLES[name]}]
         if name in DOCUMENT_EXAMPLES: examples = [{'arguments': DOCUMENT_EXAMPLES[name]}]
+        if name in OPERATION_EXAMPLES: examples = [{'arguments': OPERATION_EXAMPLES[name]}]
         if name in DISCOVERY_SPECS or name in DISCOVERY_KNOWLEDGE_SPECS:
             # Synthetic auto-generated samples cannot establish valid DAGs, current
             # correlation or locally issued knowledge/run references.
@@ -221,11 +225,13 @@ class ToolRegistry:
             result_schema={"anyOf":[{"type":"object","properties":{"controls":{"type":"array","items":control_schema,"maxItems":100}},"required":["controls"],"additionalProperties":False},{"type":"object","properties":{"truncated":{"const":True},"retained_result":{"type":"string"}},"required":["truncated","retained_result"]},{"type":"object","properties":{"truncated":{"const":True},"followup":{"type":"string"}},"required":["truncated","followup"]}]}
         timeout = 300 if name in {"created.wait", "copilot.download"} else 30
         if name in {'browser.plan', 'browser.download_batch'}: timeout = 125
+        if name == 'operation.learn': timeout = 95
         if name in {'discovery.manifest', 'navigation.intent'}: timeout = 3605
         return {"name":name,"version":"1.0","description":description,"intended_use":description,"preconditions":["Current validated tool call", "Configured filesystem/domain boundaries", "Explicit user grant for side effects" if approval!="read_only" else "Read-only operation"],"risk_level":"low" if approval=="read_only" else "moderate","timeout":timeout,"output_size_limit":12000,"error_codes":errors,"input_schema":schema,
                 "output_schema":{"type":"object","properties":{"ok":{"type":"boolean"},"tool":{"type":"string"},"result":result_schema,"error":{"type":"object","properties":{"code":{"type":"string"},"message":{"type":"string"}},"required":["code","message"],"additionalProperties":False}},"required":["ok","tool"],"additionalProperties":False},"approval_policy":approval,
                 "side_effects":[] if approval=="read_only" else [
                     "exact separately consented local knowledge write/invalidation" if name in {'discovery.knowledge_save', 'discovery.knowledge_invalidate'}
+                    else "three approved public HTTPS GET validations and a sanitized versioned operation record" if name == 'operation.learn'
                     else "approved public HTTPS GET/HEAD and optional sanitized local ledger; never browser interaction" if name in {'discovery.manifest', 'navigation.intent'}
                     else "filesystem creation or append" if name.startswith(("files.", "archives.")) or name in {"code_runner", "copilot.download"}
                     else "browser interaction or screenshot"],
@@ -241,6 +247,8 @@ class ToolRegistry:
             validate_discovery(name, args)
         elif name in DISCOVERY_KNOWLEDGE_SPECS:
             validate_knowledge_tool(name, args)
+        elif name in OPERATION_SPECS:
+            validate_operation(name, args)
         else:
             validate(args,self.definition(name)["input_schema"])
 
@@ -259,6 +267,8 @@ class ToolRegistry:
             validate_discovery(name, args, context)
         if name in DISCOVERY_KNOWLEDGE_SPECS:
             validate_knowledge_tool(name, args, context)
+        if name in OPERATION_SPECS:
+            validate_operation(name, args, context)
         if name == 'files.transfer_to_copilot':
             return {'valid': True}
         if name.startswith("files.") or name in {"system.disk","ocr.image"}:
@@ -391,6 +401,8 @@ class ToolRegistry:
             if name=="copilot.download": timeout=min(295,config_value(config,"download_timeout",90))+1
             if name in {'browser.plan', 'browser.download_batch'}:
                 timeout = min(125, args.get('timeout_seconds', 60) + 5)
+            if name == 'operation.learn':
+                timeout = 95
             if name in {'discovery.manifest', 'navigation.intent'}:
                 payload = args['manifest'] if name == 'discovery.manifest' else args['intent']
                 timeout = min(3605, payload['budgets']['run_seconds'] + 5)
@@ -452,6 +464,7 @@ class ToolRegistry:
         if name in KNOWLEDGE_SPECS: return execute_knowledge(name, args, context, policy)
         if name in DISCOVERY_SPECS: return await execute_discovery(name, args, context)
         if name in DISCOVERY_KNOWLEDGE_SPECS: return await execute_knowledge_tool(name, args, context)
+        if name in OPERATION_SPECS: return await execute_operation(name, args, context)
         if name == 'guidance.load':
             folder = Path(__file__).resolve().parents[1] / 'guidance' / 'website'
             return {'guides': [{'topic': topic, 'text': (folder / (topic + '.md')).read_text(encoding='utf-8')[:3500]}

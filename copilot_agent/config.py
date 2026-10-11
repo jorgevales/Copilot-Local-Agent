@@ -55,6 +55,7 @@ class Config:
     knowledge_write: bool = True
     knowledge_reuse: bool = True
     targeted_repair: bool = False
+    operation_reuse: bool = False
     max_attachment_bytes: int = 20 * 1024 * 1024
     download_timeout: float = 90
     max_download_bytes: int = 20 * 1024 * 1024
@@ -106,7 +107,7 @@ class Config:
         selected = os.environ.get('COPILOT_AGENT_DISCOVERY_FLAGS', '')
         if selected:
             flags = {'manifest_path', 'persistent_graph', 'bounded_parallelism', 'local_recovery',
-                     'knowledge_write', 'knowledge_reuse', 'targeted_repair'}
+                     'knowledge_write', 'knowledge_reuse', 'targeted_repair', 'operation_reuse'}
             requested = {item.strip() for item in selected.split(',') if item.strip()}
             if not requested or not requested <= flags:
                 raise ValueError('COPILOT_AGENT_DISCOVERY_FLAGS contains an unknown/empty flag')
@@ -130,13 +131,15 @@ class Config:
             raise ValueError('debug_port must be an integer from 1024 to 65535')
         for key in ('visible', 'attach_existing', 'created_sync_enabled', 'manifest_path',
                     'persistent_graph', 'bounded_parallelism', 'local_recovery',
-                    'knowledge_write', 'knowledge_reuse', 'targeted_repair'):
+                    'knowledge_write', 'knowledge_reuse', 'targeted_repair', 'operation_reuse'):
             if type(getattr(self, key)) is not bool:
                 raise ValueError(key + ' must be boolean')
         if self.targeted_repair:
             raise ValueError('targeted_repair is unavailable until browser/repair safety gates and adapters exist')
         if (self.knowledge_write or self.knowledge_reuse) and not self.persistent_graph:
             raise ValueError('knowledge_write/knowledge_reuse require persistent_graph and its runtime gates')
+        if self.operation_reuse and not self.persistent_graph:
+            raise ValueError('operation_reuse requires persistent_graph')
         if (self.persistent_graph or self.bounded_parallelism or self.local_recovery) and not self.manifest_path:
             raise ValueError('persistent_graph/bounded_parallelism/local_recovery require manifest_path')
         for key in ('startup_timeout', 'response_timeout', 'poll_interval', 'tool_timeout', 'sync_timeout', 'sync_poll_interval', 'download_timeout'):
