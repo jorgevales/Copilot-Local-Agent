@@ -234,7 +234,7 @@ async def run(args):
     settings = read_runtime_settings(config)
     if args.config is None and isinstance(settings.get('config'), dict):
         personal = settings['config']
-        allowed_keys = {'allowed_domains', 'allowed_roots', 'model', 'response_timeout', 'max_corrections', 'max_tool_rounds', 'sync_timeout', 'max_delivery_retries', 'download_timeout', 'copilot_download_hosts'}
+        allowed_keys = {'allowed_domains', 'allowed_roots', 'model', 'response_timeout', 'max_corrections', 'sync_timeout', 'max_delivery_retries', 'download_timeout', 'copilot_download_hosts'}
         for key in allowed_keys & personal.keys():
             setattr(config, key, personal[key])
         # Migrate the former two-attempt personal default to the production
@@ -267,7 +267,7 @@ async def run(args):
     await choose_edge(config, settings, ask, system, force=getattr(args, 'setup_only', False))
     settings['python_executable'] = sys.executable
     settings['config'] = {key: value for key, value in config.as_dict().items() if key in {
-        'allowed_domains', 'allowed_roots', 'model', 'response_timeout', 'max_corrections', 'max_tool_rounds',
+        'allowed_domains', 'allowed_roots', 'model', 'response_timeout', 'max_corrections',
         'sync_timeout', 'max_delivery_retries', 'download_timeout', 'copilot_download_hosts'}}
     settings['config']['allowed_roots'] = [str(Path(path).relative_to(config.storage_dir))
                                           if Path(path).is_relative_to(config.storage_dir) else path

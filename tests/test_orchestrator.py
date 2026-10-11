@@ -69,6 +69,24 @@ def tool_response(message, call_id='read-one', name='synthetic.read', arguments=
 
 
 class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tool_usage_has_no_round_count_limit(self):
+        root, config, state, registry = make_fixture('unlimited-tool-rounds-')
+        responders = [final_response]
+        responders.extend(
+            lambda message, index=index: tool_response(
+                message, f'read-{index}', 'synthetic.read', {'path': f'item-{index}.txt'})
+            for index in range(15))
+        responders.append(final_response)
+        browser = MockBrowser(responders)
+        app = Orchestrator(config, browser, registry, state, display=lambda text: None)
+
+        await app.initialize()
+        response = await app.turn('Complete all observations without a tool-round cap.')
+
+        self.assertEqual('complete', response['completion_status'])
+        self.assertEqual(15, len(registry.calls))
+        self.assertEqual([], browser.responders)
+
     async def test_prepared_pending_files_keep_the_exact_immutable_identity_later_sent(self):
         root, config, state, registry = make_fixture('next-turn-preload-')
         browser = PreloadingBrowser([final_response])
@@ -486,7 +504,7 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(['synthetic.write', 'synthetic.read'], [call[0] for call in registry.calls])
         self.assertNotIn('aliased-write', state.data['calls'])
         self.assertEqual('uncertain', state.data['calls']['first-write']['status'])
-        self.assertIn('only inspection is allowed', state.data['retry_records'][0]['errors'][0])
+        self.assertIn('browser.recover_uncertain', state.data['retry_records'][0]['errors'][0])
 
     async def test_approved_attachment_hash_and_actual_upload_are_bound(self):
         previews = []

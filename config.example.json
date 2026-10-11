@@ -11,7 +11,6 @@
   ],
   "response_timeout": 180,
   "max_corrections": 12,
-  "max_tool_rounds": 12,
   "sync_timeout": 120,
   "created_dir": null,
   "created_sync_enabled": false,

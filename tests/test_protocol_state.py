@@ -70,7 +70,7 @@ def make_fixture(prefix='contract-'):
     (root / 'schemas' / 'response-v1.schema.json').write_bytes(
         (PROJECT_ROOT / 'schemas' / 'response-v1.schema.json').read_bytes())
     config = Config(root=root, profile_dir=root / 'profile', allowed_roots=[str(root / 'workspace')],
-                    max_corrections=1, max_tool_rounds=3)
+                    max_corrections=1)
     config.validate()
     state = SessionState(root / 'session')
     return root, config, state, FixtureRegistry()
@@ -447,7 +447,7 @@ class StateAndPromptTests(unittest.TestCase):
 
     def test_config_rejects_bad_types_and_unknown_settings(self):
         for changed in ({'debug_port': True}, {'visible': 'false'}, {'max_corrections': 13},
-                        {'max_tool_rounds': 0}, {'allowed_roots': []}, {'poll_interval': float('nan')}):
+                        {'allowed_roots': []}, {'poll_interval': float('nan')}):
             with self.subTest(changed=changed), self.assertRaises(ValueError):
                 Config(**changed).validate()
         root = retained_root('config-')

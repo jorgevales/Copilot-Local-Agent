@@ -560,8 +560,10 @@ class Orchestrator:
         kind, content = 'user_turn', user_input
         self.base_context['research_user_request'] = user_input
         catalog = {d['name']: d for d in self.registry.definitions()}
-        for round_number in range(self.config.max_tool_rounds + 1):
+        round_number = 0
+        while True:
             response = await self._validated_exchange(kind, content, attachments if round_number == 0 else ())
+            round_number += 1
             if self.cancel_event.is_set():
                 self.state.data['status'] = 'cancelled'
                 self.state.save()
@@ -571,7 +573,7 @@ class Orchestrator:
                 if delivery.get('mode', 'none') != 'none' and delivery_denied:
                     response = dict(response, completion_status='blocked', user_response='File delivery was denied; no complete delivery is claimed. ' + response['user_response'])
                 if delivery.get('mode', 'none') != 'none' and not delivery_denied and not self._delivery_verified(delivery, delivery_reports):
-                    if delivery_attempts < self.config.max_delivery_retries and round_number < self.config.max_tool_rounds:
+                    if delivery_attempts < self.config.max_delivery_retries:
                         delivery_attempts += 1
                         reason = 'No verified local artifact satisfies this requested delivery. A UI link or a Copilot claim alone is insufficient.'
                         content = retry_message(reason, delivery_attempts, self.config.max_delivery_retries, office=delivery['mode'] == 'zip')
@@ -602,7 +604,7 @@ class Orchestrator:
                 failed_calls = [item for key, item in self.state.data['calls'].items()
                                 if key in turn_call_ids and not item.get('result', {}).get('ok')]
                 if (response['response_type'] == 'error' and failed_calls
-                        and not delivery_denied and round_number < self.config.max_tool_rounds
+                        and not delivery_denied
                         and not self.base_context.get('discovery_synthesis_pending')
                         and not any(item.get('result', {}).get('error', {}).get('code') == 'approval_denied'
                                     for item in failed_calls)):
@@ -610,12 +612,11 @@ class Orchestrator:
                         'goal': user_input,
                         'instruction': ('Continue from actual retained outcomes. Do not replay uncertain effects. '
                                         'After uncertain state changes, use read-only inspection until reconciliation. '
-                                        'Respect denial, authentication, safety and remaining budgets.'),
-                        'remaining_tool_rounds': self.config.max_tool_rounds - round_number,
+                                        'Respect denial, authentication, safety and resource budgets.'),
                         'failed_calls': redact(failed_calls[-3:])}
                     continue
                 if (response['response_type'] == 'error' and delivery.get('mode') != 'none' and delivery_link_rejected and
-                        not delivery_denied and delivery_attempts < self.config.max_delivery_retries and round_number < self.config.max_tool_rounds):
+                        not delivery_denied and delivery_attempts < self.config.max_delivery_retries):
                     delivery_attempts += 1
                     kind, content = 'delivery_retry', retry_message('The observed link was rejected before any download started. Try an actual downloadable UI artifact; for a single non-Office file, try ZIP fallback.', delivery_attempts, self.config.max_delivery_retries, office=delivery['mode'] == 'zip')
                     delivery_link_rejected = False
@@ -630,11 +631,6 @@ class Orchestrator:
                     ('Status', response.get('completion_status'))])
                 self._schedule_next_turn_preparation()
                 return response
-            if round_number == self.config.max_tool_rounds:
-                self.state.data['status'] = 'blocked'
-                self.state.save()
-                self.feedback.emit('Orchestrator', 'Maximum tool rounds exhausted; pending requests were not executed.')
-                raise RuntimeError('Maximum tool rounds exhausted; pending requests were not executed')
             plan = {'action_plan': response['action_plan'], 'tool_requests': response['tool_requests'], 'risk_summary': response['risk_summary']}
             prepared_plan = None
             if len(response['tool_requests']) > 1 and all(call['name'] == 'code_runner' for call in response['tool_requests']):
@@ -866,14 +862,14 @@ class Orchestrator:
                             for call in response['tool_requests'] if call['call_id'] not in completed_ids]
             kind, content = 'tool_results', {'results': redact(results), 'not_executed': not_executed, 'instruction': (
                 'Use these actual outcomes. Never infer unexecuted steps succeeded. A denial is authoritative. '
-                'When a method fails with verified certain effects, continue within the bounded tool rounds using '
+                'When a method fails with verified certain effects, continue using '
                 'a materially different safe approach available through registered tools or a newly proposed exact '
                 'Code Runner script. Every materially changed local execution requires its normal fresh approval. '
                 'If a navigation-only browser call is uncertain, request browser.info, then browser.reconcile '
                 'with fresh evidence. If a non-navigation browser effect cannot be reconciled, request the separately '
                 'approved browser.recover_uncertain action; it quarantines the unknown outcome, verifies a fresh '
                 'same-origin checkpoint, and permits this original run to continue without replay. '
-                'Stop only at success, exhausted bounded rounds, denial, or a genuine safety/permission boundary.')}
+                'Stop only at success, denial, cancellation, or a genuine safety/permission boundary.')}
             if self.base_context.get('discovery_synthesis_pending'):
                 content['instruction'] = ('This consolidated discovery/navigation run is terminal. Produce final evidence-ID-grounded synthesis or a blocked error with material gaps. '
                                           'No further tool, Code Runner, fallback, routine retry or replan call is accepted in this turn; a new execution needs a new explicit user request.')

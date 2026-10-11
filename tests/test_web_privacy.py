@@ -33,7 +33,7 @@ class WebPrivacyTests(unittest.IsolatedAsyncioTestCase):
             (PROJECT_ROOT / "schemas" / "response-v1.schema.json").read_bytes())
         self.config = Config(root=self.root, profile_dir=self.root / "profile",
                              allowed_roots=[str(self.root / "workspace")],
-                             max_context_chars=1200, max_corrections=1, max_tool_rounds=3)
+                             max_context_chars=1200, max_corrections=1)
         self.config.validate()
         self.state = SessionState(self.root / "session")
         self.state.data["website_private"] = True

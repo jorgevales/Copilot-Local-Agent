@@ -37,7 +37,6 @@ class Config:
     capture_stable_samples: int = 3
     max_capture_chars: int = 100000
     max_corrections: int = 12
-    max_tool_rounds: int = 12
     max_context_chars: int = 16000
     max_output_chars: int = 12000
     tool_timeout: float = 30
@@ -87,6 +86,9 @@ class Config:
         data = {}
         if path and Path(path).exists():
             data = json.loads(Path(path).read_text(encoding='utf-8-sig'))
+            # Retain startup compatibility with older configs, while ignoring
+            # the removed tool-round cap.
+            data.pop('max_tool_rounds', None)
             unknown = set(data) - set(asdict(cfg))
             if unknown:
                 raise ValueError('Unknown configuration fields: ' + ', '.join(sorted(unknown)))
@@ -145,7 +147,7 @@ class Config:
         for key in ('startup_timeout', 'response_timeout', 'poll_interval', 'tool_timeout', 'sync_timeout', 'sync_poll_interval', 'download_timeout'):
             if type(getattr(self, key)) not in (int, float) or not 0 < getattr(self, key) <= 3600:
                 raise ValueError(key + ' must be positive and at most 3600')
-        for key in ('capture_stable_samples', 'max_capture_chars', 'max_tool_rounds', 'max_context_chars', 'max_output_chars', 'max_attachment_bytes', 'max_download_bytes'):
+        for key in ('capture_stable_samples', 'max_capture_chars', 'max_context_chars', 'max_output_chars', 'max_attachment_bytes', 'max_download_bytes'):
             if type(getattr(self, key)) is not int or getattr(self, key) < 1:
                 raise ValueError(key + ' must be a positive integer')
         if type(self.max_corrections) is not int or not 0 <= self.max_corrections <= 12:
