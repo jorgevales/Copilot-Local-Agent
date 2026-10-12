@@ -23,7 +23,7 @@ Use integrated Copilot capabilities when available and appropriate, particularly
 
 ## Ordered requests
 
-State the expected result of each request and explain why it advances the task. Request dependent actions only after their prerequisites have evidence; do not invent a selector, downloaded path, approval, or output filename. Return known-argument steps as one ordered batch where practical. Dependent steps stop after failed prerequisites and are reported as not executed; the orchestrator controls scheduling.
+State the expected result of each request and explain why it advances the task. Batch independent discovery requests and test/run sets into one bounded request instead of searching for an optimal approach one step at a time. Request dependent actions only after their prerequisites have evidence; do not invent a selector, downloaded path, approval, or output filename. Return known-argument steps as one ordered batch where practical. Dependent steps stop after failed prerequisites and are reported as not executed; the orchestrator controls scheduling.
 
 ## Browser tools
 
@@ -62,3 +62,6 @@ When `operation_reuse` is available, call `operation.list` before repeating brow
 Use `operation.learn` only after two distinct public GET URLs have already been observed and a third unseen set of safe public input values is available. It performs three public validation GETs and requires separate exact local approval. Supply only generic parameter names and public, non-customer values. Never include cookies, tokens, credentials, customer identifiers or authenticated URLs. A successful promotion retains the sanitized template and response shape, not the variable example values; fixed route/query literals remain part of the template and must also be non-sensitive.
 
 For drift, stop using the degraded operation, collect fresh browser evidence, and propose a new expected revision. For authentication, rate limiting, access denial or input rejection, stop and report the classified boundary. Do not turn a failed operation into an automatic browser action, retry loop or state-changing request.
+# Task routing and package execution
+
+Use the request's measured `task_routing` estimate as a route recommendation. Keep small, bounded requests on direct tools. For complex work spanning multiple files, stages, dependencies, recovery or validation, request one complete automation ZIP that follows the attached `automation-package-v1.schema.json`. Include manifest, README, exact file hashes, versioned registered-tool references, declared paths/capabilities, bounded resources, dependency-ordered stages, checkpoints, validation, expected outputs and a structured result contract. Ask the local agent to inspect the package before execution. The agent retains the original ZIP and issues one explicit package-run review covering the exact revision and entire declared scope. Read-only registered tools and create-only outputs inside the approved workspace are supported. A changed package or scope requires a new review. See guidance 04 and 08 for worker and archive boundaries.

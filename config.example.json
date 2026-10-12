@@ -18,6 +18,14 @@
   "download_timeout": 90,
   "max_download_bytes": 20971520,
   "max_delivery_retries": 3,
+  "automation_max_runtime_seconds": 1800,
+  "automation_max_stages": 100,
+  "automation_max_parallel_stages": 4,
+  "automation_max_output_chars": 65536,
+  "automation_package_score": 8,
+  "automation_minimum_steps": 4,
+  "automation_minimum_files": 3,
+  "automation_minimum_runtime_seconds": 120,
   "copilot_download_hosts": [
     "eu-prod.asyncgw.teams.microsoft.com",
     "m365.cloud.microsoft"

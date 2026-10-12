@@ -84,17 +84,12 @@ def _edge_listener_process(port: int) -> dict:
     """Return the proven Edge listener command without exposing it to callers."""
     if os.name != "nt":
         raise EndpointError("Existing-session profile ownership currently supports Windows only.")
-    # Constant PowerShell script, numeric port only; profile never enters shell code.
-    script = (
-        f"$owner = Get-NetTCPConnection -LocalPort {int(port)} -State Listen -ErrorAction Stop "
-        "| Select-Object -ExpandProperty OwningProcess -Unique; "
-        "if (@($owner).Count -ne 1) { throw 'Listener ownership is ambiguous' }; "
-        "Get-CimInstance Win32_Process -Filter ('ProcessId=' + $owner) "
-        "| Select-Object Name,CommandLine | ConvertTo-Json -Compress"
-    )
     try:
-        info = json.loads(_hidden_command(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script]))
-    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        owner = loopback_listener_pid(int(port))
+        if owner is None:
+            raise EndpointError("The debugging listener owner is unavailable or ambiguous.")
+        info = _windows_process_details(owner)
+    except (OSError, ValueError, RuntimeError) as exc:
         raise EndpointError("Cannot prove the debugging port's dedicated profile ownership.") from exc
     line = info.get("CommandLine") or ""
     if info.get("Name", "").casefold() != "msedge.exe":
@@ -103,6 +98,56 @@ def _edge_listener_process(port: int) -> dict:
     if not port_match or int(port_match[1]) != int(port):
         raise EndpointError("Cannot prove the Edge debugging listener's local port.")
     return {'command_line': line, 'profile': _profile_argument(line)}
+
+
+def _windows_process_details(pid: int) -> dict:
+    """Read a process image and command line without privileged CIM/WMI access."""
+    if os.name != "nt":
+        raise OSError("Windows process inspection is unavailable")
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    ntdll = ctypes.WinDLL("ntdll")
+    open_process = kernel32.OpenProcess
+    open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    open_process.restype = wintypes.HANDLE
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+    image_query = kernel32.QueryFullProcessImageNameW
+    image_query.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+                            ctypes.POINTER(wintypes.DWORD))
+    image_query.restype = wintypes.BOOL
+    handle = open_process(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        image = ctypes.create_unicode_buffer(32768)
+        image_length = wintypes.DWORD(len(image))
+        if not image_query(handle, 0, image, ctypes.byref(image_length)):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        class UnicodeString(ctypes.Structure):
+            _fields_ = [("Length", wintypes.USHORT), ("MaximumLength", wintypes.USHORT),
+                        ("Buffer", wintypes.LPWSTR)]
+
+        command_buffer = ctypes.create_string_buffer(65536)
+        returned = wintypes.ULONG()
+        query = ntdll.NtQueryInformationProcess
+        query.argtypes = (wintypes.HANDLE, wintypes.ULONG, ctypes.c_void_p,
+                          wintypes.ULONG, ctypes.POINTER(wintypes.ULONG))
+        query.restype = wintypes.LONG
+        status = query(handle, 60, command_buffer, len(command_buffer), ctypes.byref(returned))
+        if status < 0:
+            raise OSError(f"Process command-line query failed with NTSTATUS 0x{status & 0xffffffff:08x}")
+        command = ctypes.cast(command_buffer, ctypes.POINTER(UnicodeString)).contents
+        if command.Length % 2 or command.Length > 65534 or not command.Buffer:
+            raise OSError("Process command line was malformed")
+        return {"Name": Path(image.value).name,
+                "CommandLine": ctypes.wstring_at(command.Buffer, command.Length // 2)}
+    finally:
+        close_handle(handle)
 
 
 def validate_edge_listener(port: int, profile: Path | None = None) -> Path | None:
@@ -180,31 +225,50 @@ def port_listening(port: int) -> bool:
 
 
 def loopback_listener_pid(port: int) -> int | None:
-    """Read the Windows TCP listener owner without PowerShell/CIM privileges."""
+    """Read IPv4/IPv6 loopback listener owners without PowerShell/CIM privileges."""
     if os.name != "nt":
         return None
     import ctypes
 
-    class TcpRow(ctypes.Structure):
+    class Tcp4Row(ctypes.Structure):
         _fields_ = [(name, ctypes.c_uint32) for name in
                     ('state', 'local_address', 'local_port', 'remote_address', 'remote_port', 'pid')]
 
     query = ctypes.windll.iphlpapi.GetExtendedTcpTable
-    size = ctypes.c_uint32()
-    if query(None, ctypes.byref(size), False, 2, 3, 0) != 122 or not 4 <= size.value <= 4 * 1024 * 1024:
-        return None
-    buffer = ctypes.create_string_buffer(size.value)
-    if query(buffer, ctypes.byref(size), False, 2, 3, 0) != 0:
-        return None
-    count = ctypes.c_uint32.from_buffer_copy(buffer).value
-    if 4 + count * ctypes.sizeof(TcpRow) > size.value:
-        return None
     matches = set()
-    for index in range(count):
-        row = TcpRow.from_buffer_copy(buffer, 4 + index * ctypes.sizeof(TcpRow))
-        if (row.state == 2 and socket.ntohs(row.local_port & 0xffff) == port and
-                socket.inet_ntoa(row.local_address.to_bytes(4, 'little')) == '127.0.0.1'):
-            matches.add(row.pid)
+
+    def read_table(family: int, row_type, is_ipv6: bool) -> bool:
+        size = ctypes.c_uint32()
+        if query(None, ctypes.byref(size), False, family, 3, 0) != 122 or not 4 <= size.value <= 4 * 1024 * 1024:
+            return False
+        buffer = ctypes.create_string_buffer(size.value)
+        if query(buffer, ctypes.byref(size), False, family, 3, 0) != 0:
+            return False
+        count = ctypes.c_uint32.from_buffer_copy(buffer).value
+        if 4 + count * ctypes.sizeof(row_type) > size.value:
+            return False
+        for index in range(count):
+            row = row_type.from_buffer_copy(buffer, 4 + index * ctypes.sizeof(row_type))
+            if row.state != 2 or socket.ntohs(row.local_port & 0xffff) != port:
+                continue
+            raw_address = (bytes(row.local_address) if is_ipv6 else
+                           row.local_address.to_bytes(4, 'little'))
+            address = socket.inet_ntop(socket.AF_INET6 if is_ipv6 else socket.AF_INET, raw_address)
+            is_loopback = (address == '::1' or address.casefold() == '::ffff:127.0.0.1') if is_ipv6 else address == '127.0.0.1'
+            if is_loopback:
+                matches.add(row.pid)
+        return True
+
+    class Tcp6Row(ctypes.Structure):
+        _fields_ = [('state', ctypes.c_uint32), ('local_address', ctypes.c_ubyte * 16),
+                    ('local_scope_id', ctypes.c_uint32), ('local_port', ctypes.c_uint32),
+                    ('remote_address', ctypes.c_ubyte * 16), ('remote_scope_id', ctypes.c_uint32),
+                    ('remote_port', ctypes.c_uint32), ('pid', ctypes.c_uint32)]
+
+    ipv4_ok = read_table(2, Tcp4Row, False)
+    ipv6_ok = read_table(23, Tcp6Row, True)
+    if not ipv4_ok and not ipv6_ok:
+        return None
     return next(iter(matches)) if len(matches) == 1 else None
 
 
@@ -278,7 +342,8 @@ def stop_launched_edge(process: subprocess.Popen | None) -> None:
         pass
 
 
-async def connect_bounded(playwright, endpoint: str, timeout: float, process=None, initial_payload=None):
+async def connect_bounded(playwright, endpoint: str, timeout: float, process=None, initial_payload=None,
+                          endpoint_validator=None):
     """Bounded CDP startup with sanitized failure categories."""
     deadline = time.monotonic() + max(1, timeout)
     handshakes = 0
@@ -301,6 +366,9 @@ async def connect_bounded(playwright, endpoint: str, timeout: float, process=Non
                 print('[System] Edge debugging endpoint is ready; connecting Playwright.')
             endpoint_seen = True
             websocket = validate_endpoint(endpoint, payload)
+            if endpoint_validator is not None:
+                await asyncio.to_thread(endpoint_validator)
+                endpoint_validator = None
             # The reference workflow found browser target enumeration can exceed 8s.
             remaining = deadline - time.monotonic()
             if remaining > 0:

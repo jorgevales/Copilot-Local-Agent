@@ -59,6 +59,7 @@ class Orchestrator:
         self.approved_attachment_hashes = {}
         self.approved_attachment_upload_names = {}
         self.base_context = {'config': config, 'session_dir': state.directory, 'browser': browser, 'session_state': state, 'approved': False,
+                             'path_policy': self.policy,
                              'pending_image_attachments': [], 'created_snapshots': {},
                              'pending_file_attachments': [],
                              'approved_attachment_hashes': self.approved_attachment_hashes,
@@ -76,6 +77,8 @@ class Orchestrator:
                              'cancel_event': self.cancel_event, 'cancelled': self.cancel_event.is_set,
                              'process_registry': self.process_registry,
                              'approved_domains': self.state.data.setdefault('approved_domains', [])}
+        self.base_context['automation_progress'] = lambda event: self.feedback.emit(
+            'Automation package', json.dumps(event, ensure_ascii=False, sort_keys=True))
         def display_s_path(directory):
             import ntpath
             try:
@@ -700,6 +703,15 @@ class Orchestrator:
                                                if self.config.created_sync_enabled and self.config.created_dir else None)
         kind, content = 'user_turn', user_input
         self.base_context['research_user_request'] = user_input
+        from .automation_packages import estimate_task
+        route = estimate_task(user_input, {
+            'package_score': self.config.automation_package_score,
+            'minimum_steps': self.config.automation_minimum_steps,
+            'minimum_files': self.config.automation_minimum_files,
+            'minimum_runtime_seconds': self.config.automation_minimum_runtime_seconds,
+        })
+        self.state.data['task_routing'] = route
+        self.state.save()
         catalog = {d['name']: d for d in self.registry.definitions()}
         round_number = 0
         round_attachments = list(attachments)
@@ -860,6 +872,9 @@ class Orchestrator:
                 if call['name'] == 'code_runner':
                     needs_approval = True
                     prepared = self._code_runner().prepare(call['arguments'])
+                if call['name'] == 'automation.run':
+                    needs_approval = True
+                    prepared = self.registry.validate_call(call['name'], call['arguments'], context)
                 if call['name'].startswith('browser.'):
                     if call['name'] == 'browser.open':
                         self.registry.validate_call(call['name'], call['arguments'], context)
@@ -955,6 +970,9 @@ class Orchestrator:
                         break
                     context['approved'] = True
                     context['approval_hash'] = approval_hash
+                    if call['name'] == 'automation.run':
+                        context['package_plan_hash'] = prepared['package_plan_hash']
+                        context['approved_hash'] = prepared['package_plan_hash']
                     if call['name'].startswith('permissions.'):
                         context['permission_reviewed'] = prepared
                     if call['name'] in {'discovery.manifest', 'discovery.knowledge_save', 'discovery.knowledge_invalidate', 'navigation.intent'}:
@@ -997,7 +1015,7 @@ class Orchestrator:
                                 authorize(domain)
                         context['approved_domains'] = self.state.data['approved_domains']
                     if prepared:
-                        if 'proposal_hash' in prepared:
+                        if 'proposal_hash' in prepared and call['name'] != 'automation.run':
                             context['approved_hash'] = prepared['proposal_hash']
                         if 'mapped_s_drive_destination' in prepared:
                             context['s_drive_destination'] = prepared['mapped_s_drive_destination']

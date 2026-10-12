@@ -61,6 +61,14 @@ class Config:
     download_timeout: float = 90
     max_download_bytes: int = 20 * 1024 * 1024
     max_delivery_retries: int = 3
+    automation_max_runtime_seconds: int = 1800
+    automation_max_stages: int = 100
+    automation_max_parallel_stages: int = 4
+    automation_max_output_chars: int = 65536
+    automation_package_score: int = 8
+    automation_minimum_steps: int = 4
+    automation_minimum_files: int = 3
+    automation_minimum_runtime_seconds: int = 120
     copilot_download_hosts: list[str] = field(default_factory=lambda: ['eu-prod.asyncgw.teams.microsoft.com', 'm365.cloud.microsoft'])
 
     @property
@@ -152,6 +160,13 @@ class Config:
             raise ValueError('max_corrections must be from 0 to 12')
         if type(self.max_delivery_retries) is not int or not 0 <= self.max_delivery_retries <= 5:
             raise ValueError('max_delivery_retries must be from 0 to 5')
+        for key, maximum in (('automation_max_runtime_seconds', 1800), ('automation_max_stages', 100),
+                             ('automation_max_parallel_stages', 4), ('automation_max_output_chars', 65536),
+                             ('automation_package_score', 100), ('automation_minimum_steps', 20),
+                             ('automation_minimum_files', 100), ('automation_minimum_runtime_seconds', 3600)):
+            value = getattr(self, key)
+            if type(value) is not int or not 1 <= value <= maximum:
+                raise ValueError(key + ' must be an integer from 1 to ' + str(maximum))
         if not isinstance(self.copilot_download_hosts, list) or not self.copilot_download_hosts or not all(isinstance(h, str) and h and all(c.isalnum() or c in '.-' for c in h) for h in self.copilot_download_hosts):
             raise ValueError('copilot_download_hosts must contain exact hostnames')
         if not isinstance(self.allowed_roots, list) or not self.allowed_roots or not all(isinstance(p, str) and p for p in self.allowed_roots):

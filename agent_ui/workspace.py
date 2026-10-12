@@ -104,7 +104,7 @@ class Workspace:
         return item['decision']
 
     def decide(self, ticket, decision, plan_hash, call_hash):
-        if decision not in {'deny', 'once', 'plan'}:
+        if not isinstance(decision, str):
             raise ValueError('Invalid decision')
         with self.lock:
             item = self.pending.get(ticket)
@@ -112,6 +112,8 @@ class Workspace:
                 raise ValueError('Approval is no longer pending')
             if item['preview']['plan_hash'] != plan_hash or item['preview']['call_hash'] != call_hash:
                 raise ValueError('Approval identity changed')
+            if decision not in item['preview'].get('choices', ['deny', 'once', 'plan']):
+                raise ValueError('Decision is not offered for this approval scope')
             item['decision'] = decision
             item['gate'].set()
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import json
+import time
 from pathlib import Path
 from .feedback import Feedback
 from .persistence import write_json
@@ -21,6 +22,23 @@ class ApprovalManager:
         current = preview['complete_pending_plan'].get('tool_requests', [])
         current_call = next((item for item in current if item.get('call_id') == preview['current_call_id']), {})
         arguments = current_call.get('arguments', {})
+        scope = preview.get('prepared_code') or {}
+        if scope.get('approval_scope_type') == 'automation_package':
+            self.feedback.section('Package execution scope', 'ONE REVIEW COVERS THIS RUN', [
+                ('Package', scope.get('package_id')),
+                ('Task', scope.get('task_id')),
+                ('ZIP SHA-256', scope.get('archive_sha256')),
+                ('Manifest SHA-256', scope.get('manifest_sha256')),
+                ('Workspace', scope.get('workspace')),
+                ('Resume run', scope.get('resume_run_id')),
+                ('Patch source run', scope.get('prior_run_id')),
+                ('Python stages', scope.get('python_stages')),
+                ('Registered read-only tool stages', scope.get('tool_stages')),
+                ('Declared capabilities', scope.get('capabilities')),
+                ('Configured resource ceilings', scope.get('resource_limits')),
+                ('Expected outputs', scope.get('expected_outputs')),
+                ('Expiry', '30 minutes after approval; exact package run only'),
+            ])
         self.feedback.section('Approval', 'EXPLICIT APPROVAL REQUIRED', [
             ('Scope', 'This exact immutable execution only; every material change requires fresh approval.'),
             ('Purpose', arguments.get('purpose') or current_call.get('name')),
@@ -100,12 +118,23 @@ class ApprovalManager:
             plan_hash = canonical_hash({'plan': plan, 'prepared_current_call': prepared}) if prepared is not None else canonical_hash(plan)
         call_hash = canonical_hash({'plan_hash': plan_hash, 'call': call})
         grant = self.state.data['approvals'].get(plan_hash)
+        package_scope = bool((prepared or {}).get('approval_scope_type') == 'automation_package')
+        if grant and grant.get('decision') == 'plan' and package_scope:
+            try:
+                expires_at = float(grant.get('expires_at', 0))
+            except (TypeError, ValueError):
+                expires_at = 0
+            if expires_at <= time.time():
+                grant = None
         if grant and grant['decision'] == 'plan':
             return True, plan_hash
         preview = {'approval_scope': 'Only this exact plan or execution; material changes require renewed approval.',
                    'plan_hash': plan_hash, 'call_hash': call_hash, 'current_call_id': call['call_id'],
                    'complete_pending_plan': plan, 'prepared_code': prepared,
                    'choices': ['deny', 'once', 'plan']}
+        if package_scope:
+            preview['approval_scope'] = 'This exact automation package run and its reviewed stage scope; expires after 30 minutes; changed package or scope requires fresh approval.'
+            preview['approval_scope_type'] = 'automation_package'
         if prepared_plan is not None:
             preview['prepared_pending_plan'] = prepared_plan
         path = self.state.directory / 'approvals' / (call_hash + '.json')
@@ -132,5 +161,8 @@ class ApprovalManager:
         if decision not in {'deny', 'once', 'plan'}:
             decision = 'deny'
         self.state.grant(plan_hash if decision == 'plan' else call_hash, decision)
+        if decision == 'plan' and package_scope:
+            self.state.data['approvals'][plan_hash]['expires_at'] = time.time() + 1800
+            self.state.save()
         self.feedback.emit('User', 'Approval decision: ' + decision + '.')
         return decision in {'once', 'plan'}, plan_hash if decision == 'plan' else call_hash

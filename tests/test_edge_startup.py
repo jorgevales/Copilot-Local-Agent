@@ -109,6 +109,25 @@ class EdgeLaunchTests(unittest.TestCase):
             listener.listen()
             self.assertEqual(os.getpid(), edge.loopback_listener_pid(listener.getsockname()[1]))
 
+    @unittest.skipUnless(os.name == 'nt', 'Windows process command-line inspection')
+    def test_process_details_are_read_without_privileged_cim(self):
+        details = edge._windows_process_details(os.getpid())
+        self.assertTrue(details['Name'].casefold().endswith('.exe'))
+        self.assertTrue(details['CommandLine'])
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows listener and process inspection')
+    def test_edge_listener_ownership_uses_local_tcp_table_and_process_query(self):
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            listener.listen()
+            port = listener.getsockname()[1]
+            with patch.object(edge, '_windows_process_details', return_value={
+                    'Name': 'msedge.exe',
+                    'CommandLine': f'msedge.exe --remote-debugging-port={port} "--user-data-dir=C:\\Agent Profile"'}) as inspect:
+                profile = edge.validate_edge_listener(port)
+            self.assertEqual(Path('C:\\Agent Profile'), profile)
+            inspect.assert_called_once_with(os.getpid())
+
     def test_fresh_launch_uses_exact_listener_pid_and_otherwise_checks_profile(self):
         process = Mock(pid=123)
         process.poll.return_value = None
@@ -220,6 +239,22 @@ class EdgeHandshakeTests(unittest.IsolatedAsyncioTestCase):
         probe.assert_not_called()
         handshake.assert_awaited_once_with(
             PAYLOAD['webSocketDebuggerUrl'], timeout=ANY)
+
+    async def test_fresh_endpoint_ownership_is_proved_before_playwright_attaches(self):
+        order = []
+        browser = SimpleNamespace(is_connected=lambda: True, contexts=[object()])
+        async def handshake(*_args, **_kwargs):
+            order.append('handshake')
+            return browser
+        def validate_owner():
+            order.append('owner')
+        playwright = SimpleNamespace(chromium=SimpleNamespace(connect_over_cdp=handshake))
+        with patch.object(edge, 'remote_debugging_blocked', return_value=False):
+            result = await edge.connect_bounded(
+                playwright, ENDPOINT, 1, initial_payload=PAYLOAD,
+                endpoint_validator=validate_owner)
+        self.assertIs(result, browser)
+        self.assertEqual(['owner', 'handshake'], order)
 
     async def test_close_preserves_owned_and_attached_browser(self):
         with patch.object(edge, 'stop_launched_edge') as stop:

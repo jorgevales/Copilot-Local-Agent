@@ -330,10 +330,10 @@ class StateAndPromptTests(unittest.TestCase):
         recovered = {path.name: path.read_bytes() for path in builder.guidance[:6]}
         for group in builder.bundle['group_records']:
             recovered.update(read_bundle_components(group['path'], group))
-        self.assertEqual(10, len(recovered))
+        self.assertEqual(11, len(recovered))
         for source in builder.component_paths:
             self.assertEqual(source.read_bytes(), recovered[source.name])
-        self.assertEqual(10, json.loads(text)['startup_references']['component_count'])
+        self.assertEqual(11, json.loads(text)['startup_references']['component_count'])
         self.assertLessEqual(len(names), 20)
         # Restored initialization can coincide with a findings boundary and a context reference.
         state.data['message_count'] = 9

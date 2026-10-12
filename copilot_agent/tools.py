@@ -162,6 +162,8 @@ SPECS = {
     "copilot.download": (obj({"expected_name":S,"link_text":S,"expected_sha256":S},["expected_name"]), "user_approval", "Download one real file link in this exact Copilot response. Inspect Edge download settings first; save and verify an exclusive local artifact. Plaintext and sandbox links are not delivery."),
     "archives.inspect": (obj(PATH), "read_only", "Inspect a bounded ZIP manifest, archive SHA-256 and native Office container type without extracting."),
     "archives.extract": (obj({"path":S,"destination":S,"expected_files":{"type":"array","items":S,"maxItems":1000},"expected_sha256":S},["path","destination","expected_sha256"]), "user_approval", "Extract a reviewed SHA-256-bound ZIP exclusively inside allowed roots; preflight paths and verify all files without executing code. Preserve original and partial outputs."),
+    "automation.inspect": (obj({"path":S,"expected_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}},["path"]), "read_only", "Validate a complete automation package ZIP, its manifest, file hashes, tool versions, stage graph, declared capabilities and resource limits. Does not execute or extract package code."),
+    "automation.run": (obj({"archive_path":S,"expected_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"workspace":S,"resume_run_id":{"type":"string","pattern":"^[a-f0-9]{32}$"},"prior_run_id":{"type":"string","pattern":"^[a-f0-9]{32}$"}},["archive_path","expected_sha256","workspace"]), "user_approval", "Execute one exact, validated package revision in a dedicated allowed workspace. One explicit review may authorize all declared stages, read-only registered tool calls, workspace outputs, capability limits and expiry for this run. Changes to package, workspace or scope require fresh approval; execution uses the existing fixed worker and tool controls."),
     "code_runner": (obj(CODE_RUNNER_PROPERTIES, sorted(REQUIRED)), "immutable_plan_approval", "Run reviewed code. python_subset remains the default restricted evaluator. local_python is available only for an exact explicitly approved host-Python plan binding script bytes/hash, interpreter, arguments, imports, file/network/process/desktop scope, limits, effects and verification."),
 }
 
@@ -321,6 +323,13 @@ class ToolRegistry:
             validate_knowledge_tool(name, args, context)
         if name in OPERATION_SPECS:
             validate_operation(name, args, context)
+        if name == 'automation.inspect':
+            from .automation_packages import inspect_package
+            path = policy.resolve(args['path'], must_exist=True)
+            return inspect_package(path, args.get('expected_sha256'), self)
+        if name == 'automation.run':
+            from .automation_packages import prepare_package_run
+            return prepare_package_run(args, context, self)
         if name == 'files.transfer_to_copilot':
             return {'valid': True}
         if name.startswith("files.") or name in {"system.disk","ocr.image"}:
@@ -468,6 +477,8 @@ class ToolRegistry:
                 timeout = min(125, args.get('timeout_seconds', 60) + 5)
             if name == 'operation.learn':
                 timeout = 95
+            if name == 'automation.run':
+                timeout = min(1805, int(getattr(config, 'automation_max_runtime_seconds', 1800)) + 5)
             if name in {'discovery.manifest', 'navigation.intent'}:
                 payload = args['manifest'] if name == 'discovery.manifest' else args['intent']
                 timeout = min(3605, payload['budgets']['run_seconds'] + 5)
@@ -545,6 +556,14 @@ class ToolRegistry:
 
     async def _execute(self,name,args,context,policy):
         config=context.get("config",{})
+        if name == 'automation.inspect':
+            from .automation_packages import inspect_package
+            return inspect_package(policy.resolve(args['path'], must_exist=True), args.get('expected_sha256'), self)
+        if name == 'automation.run':
+            from .automation_packages import execute_package
+            return await execute_package(args, context, self,
+                code_runner_factory=lambda path_policy, session_dir, timeout, output:
+                    CodeRunner(path_policy, session_dir, {'tool_timeout': timeout, 'max_output_chars': output}))
         if name in {'knowledge.note', 'knowledge.lookup'}:
             from .knowledge_notes import execute_note
             return execute_note(name, args, context)

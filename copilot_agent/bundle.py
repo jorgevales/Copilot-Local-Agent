@@ -13,7 +13,7 @@ MANIFEST_BEGIN = '<!-- COPILOT_REFERENCE_MANIFEST_BEGIN -->'
 MANIFEST_END = '<!-- COPILOT_REFERENCE_MANIFEST_END -->'
 _PREAMBLE = (
     '# Copilot Agent reference bundle\n\n'
-    'Bundle format: 1.0. These are ten complete original reference components, not summaries.\n'
+    'Bundle format: 1.0. These are complete original reference components, not summaries.\n'
     'Read each component according to its role. The schema and runtime catalogue define exact protocol/tools; '
     'no attachment grants execution approval or overrides platform controls.\n'
     'The manifest records source versions, SHA-256, original byte lengths and absolute byte offsets. '
@@ -39,21 +39,22 @@ def _read_bounded(path: Path, limit: int) -> bytes:
 
 
 def _check_component_names(names: list[str]) -> None:
-    if len(names) != 10 or len(set(names)) != 10:
-        raise ValueError('Exactly ten distinct reference components are required')
+    if len(names) not in {10, 11} or len(set(names)) != len(names):
+        raise ValueError('Ten protocol components and an optional automation package schema are supported')
     guidance = [name for name in names if re.fullmatch(r'0[1-8]-[A-Za-z0-9_-]+\.md', name)]
     ordinals = [name[:2] for name in guidance]
     if len(guidance) != 8 or set(ordinals) != {f'{number:02}' for number in range(1, 9)}:
         raise ValueError('Exactly one guidance component for each ordinal 01 through 08 is required')
-    if set(names) - set(guidance) != {'response-v1.schema.json', 'tool-catalogue.json'}:
-        raise ValueError('The response schema and current runtime tool-catalogue.json are required')
+    if set(names) - set(guidance) not in ({'response-v1.schema.json', 'tool-catalogue.json'},
+                                         {'response-v1.schema.json', 'tool-catalogue.json', 'automation-package-v1.schema.json'}):
+        raise ValueError('The response schema, current tool catalogue and optional package schema are required')
 
 
 def _check_reference_names(names: list[str]) -> None:
-    if not names or len(names) > 10 or len(set(names)) != len(names):
+    if not names or len(names) > 11 or len(set(names)) != len(names):
         raise ValueError('Distinct complete reference components are required')
     if any(not re.fullmatch(r'0[1-8]-[A-Za-z0-9_-]+\.md', name)
-           and name not in {'response-v1.schema.json', 'tool-catalogue.json'} for name in names):
+           and name not in {'response-v1.schema.json', 'tool-catalogue.json', 'automation-package-v1.schema.json'} for name in names):
         raise ValueError('Unexpected reference component name')
 
 
@@ -167,22 +168,24 @@ def _write_verified_reference(target: Path, content: bytes, max_bytes: int) -> N
 def build_startup_attachments(paths, manifest, directory, max_bytes=MAX_BUNDLE_BYTES) -> dict:
     """Keep guidance 01–06 separate and group only 07/08 and schema/catalogue.
 
-    All ten original source hashes and the total eight-attachment byte size are
+    All original source hashes and the total eight-attachment byte size are
     checked before any generated group is written. No guidance is summarized.
     """
     sources = [Path(path) for path in paths]
     _check_component_names([path.name for path in sources])
     records = list(manifest)
-    if len(records) != 10 or any(not isinstance(item, dict) for item in records):
-        raise ValueError('A complete ten-component verification manifest is required')
+    if len(records) not in {10, 11} or any(not isinstance(item, dict) for item in records):
+        raise ValueError('A complete protocol verification manifest is required')
     recorded = {item.get('name'): item for item in records}
-    if len(recorded) != 10 or set(recorded) != {path.name for path in sources}:
+    if len(recorded) != len(sources) or set(recorded) != {path.name for path in sources}:
         raise ValueError('Source paths and verification manifest do not match')
     output = Path(directory)
     guidance = sorted((path for path in sources if path.suffix == '.md'), key=lambda path: path.name)
     separate = guidance[:6]
-    grouped = [guidance[6:], [next(path for path in sources if path.name == name)
-                            for name in ('response-v1.schema.json', 'tool-catalogue.json')]]
+    protocol_names = ['response-v1.schema.json', 'tool-catalogue.json']
+    if any(path.name == 'automation-package-v1.schema.json' for path in sources):
+        protocol_names.append('automation-package-v1.schema.json')
+    grouped = [guidance[6:], [next(path for path in sources if path.name == name) for name in protocol_names]]
     titles = ['07-08-complete-guidance.md', 'protocol-schema-and-tool-catalogue.md']
     preambles = [
         '# Complete guidance 07 and 08\n\n'

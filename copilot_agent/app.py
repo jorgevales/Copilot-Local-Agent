@@ -271,25 +271,47 @@ def persist_runtime_settings(config, settings):
     return save_user_settings(config.storage_dir, settings)
 
 
+def configure_isolated_test_workspace(config, requested_path):
+    """Enable the one-shot C: proof harness without weakening production S: policy."""
+    proof_parent = (Path(config.root) / 'runtime' / 'proof-runs').resolve()
+    target = Path(requested_path).expanduser().resolve()
+    if (target.drive.upper() != 'C:' or not target.is_relative_to(proof_parent)
+            or target == proof_parent):
+        raise ValueError('Isolated proof storage must be a new C: child of this project runtime/proof-runs folder.')
+    if target.exists() and any(target.iterdir()):
+        raise ValueError('Isolated proof storage must be new or empty.')
+    config.select_storage(target)
+    config.knowledge_directory = target
+    config._automation_test_mode = True
+    config._s_storage_verified = False
+    config.allowed_roots = [str(target)]
+    return target
+
+
 async def run(args):
     global _TERMINAL_INPUT, _UI_STEERING_POLL, _UI_TAKE_ATTACHMENTS
     terminal_input = None
     config = Config.load(args.config)
-    from .storage import discoveries_storage
-    canonical_storage = discoveries_storage(config.root)
-    if config.storage_dir.resolve() != canonical_storage.resolve():
-        system('Configured storage is not the canonical S: project sibling; redirecting agent-owned storage to ' + str(canonical_storage))
-        config.select_storage(canonical_storage)
-    config.knowledge_directory = canonical_storage
-    s_root = mapped_s_drive_root().resolve()
-    config._s_storage_verified = True
-    kept_roots = [root for root in config.allowed_roots
-                  if Path(root).resolve() == s_root or s_root in Path(root).resolve().parents]
-    if len(kept_roots) != len(config.allowed_roots):
-        system('Removed configured file roots outside the live S: share; C: and unrelated locations are not agent write targets.')
-    if str(s_root) not in kept_roots:
-        kept_roots.append(str(s_root))
-    config.allowed_roots = kept_roots
+    test_workspace = getattr(args, 'isolated_test_workspace', None)
+    if test_workspace is not None:
+        test_workspace = configure_isolated_test_workspace(config, test_workspace)
+        system('Isolated local proof mode: all agent storage and file roots are confined to ' + str(test_workspace))
+    else:
+        from .storage import discoveries_storage
+        canonical_storage = discoveries_storage(config.root)
+        if config.storage_dir.resolve() != canonical_storage.resolve():
+            system('Configured storage is not the canonical S: project sibling; redirecting agent-owned storage to ' + str(canonical_storage))
+            config.select_storage(canonical_storage)
+        config.knowledge_directory = canonical_storage
+        s_root = mapped_s_drive_root().resolve()
+        config._s_storage_verified = True
+        kept_roots = [root for root in config.allowed_roots
+                      if Path(root).resolve() == s_root or s_root in Path(root).resolve().parents]
+        if len(kept_roots) != len(config.allowed_roots):
+            system('Removed configured file roots outside the live S: share; C: and unrelated locations are not agent write targets.')
+        if str(s_root) not in kept_roots:
+            kept_roots.append(str(s_root))
+        config.allowed_roots = kept_roots
     if _UI_UPLOAD_ROOT is not None:
         config._ui_upload_root = Path(_UI_UPLOAD_ROOT).resolve()
     if config.visible is not True:
@@ -311,11 +333,12 @@ async def run(args):
         config.max_corrections = 12
     # Remembered settings may predate the S:-only policy. Reapply it after
     # loading them so persisted C:/OneDrive roots cannot silently return.
-    s_root = mapped_s_drive_root().resolve()
-    config.allowed_roots = [str(Path(root).resolve()) for root in config.allowed_roots
-                            if Path(root).resolve() == s_root or s_root in Path(root).resolve().parents]
-    if str(s_root) not in config.allowed_roots:
-        config.allowed_roots.append(str(s_root))
+    if not getattr(config, '_automation_test_mode', False):
+        s_root = mapped_s_drive_root().resolve()
+        config.allowed_roots = [str(Path(root).resolve()) for root in config.allowed_roots
+                                if Path(root).resolve() == s_root or s_root in Path(root).resolve().parents]
+        if str(s_root) not in config.allowed_roots:
+            config.allowed_roots.append(str(s_root))
     if args.attach_existing:
         config.attach_existing = True
     if args.port:
@@ -347,7 +370,8 @@ async def run(args):
                                                           getattr(config, '_auto_local_drive_root', None)}]
     persist_runtime_settings(config, settings)
     if getattr(args, 'setup_only', False):
-        system('Setup verified. S: Discoveries storage: ' + str(config.storage_dir))
+        system(('Setup verified. Isolated proof storage: ' if getattr(config, '_automation_test_mode', False)
+                else 'Setup verified. S: Discoveries storage: ') + str(config.storage_dir))
         system('Python resource setup verified. Setup.cmd creates the project virtual environment and installs pinned dependencies before this storage step.')
         return
     await choose_browser_endpoint(config, args, settings)
@@ -365,24 +389,34 @@ async def run(args):
     bug_reports = []
     system('Copilot Local Agent — reasoning through Microsoft 365 Copilot web UI')
     from .storage import discoveries_storage_paths
-    storage_paths = discoveries_storage_paths(config.root)
-    system('Agent storage target for every save: ' + storage_paths['s_path'] + ' (resolved UNC filesystem path: ' + storage_paths['unc_path'] + ').')
-    system('Direct reads and new-file/folder creation in Discoveries knowledge are granted for this run; deletion or overwrite requires separate confirmation.')
+    storage_paths = ({'s_path': str(config.storage_dir), 'unc_path': str(config.storage_dir)}
+                     if getattr(config, '_automation_test_mode', False)
+                     else discoveries_storage_paths(config.root))
+    system(('Isolated proof storage target: ' if getattr(config, '_automation_test_mode', False)
+            else 'Agent storage target for every save: ') + storage_paths['s_path'] + ' (resolved filesystem path: ' + storage_paths['unc_path'] + ').')
+    if not getattr(config, '_automation_test_mode', False):
+        system('Direct reads and new-file/folder creation in Discoveries knowledge are granted for this run; deletion or overwrite requires separate confirmation.')
     system('Browser: Visible. Non-visible Copilot operation has not passed acceptance and is unavailable.')
     system('Permitted file roots: ' + ', '.join(Path(root).name for root in config.allowed_roots))
-    system('Agent-owned writes are restricted to the S: share; no C: or OneDrive storage fallback is permitted.')
+    system('Agent-owned writes are restricted to the isolated proof workspace.' if getattr(config, '_automation_test_mode', False)
+           else 'Agent-owned writes are restricted to the S: share; no C: or OneDrive storage fallback is permitted.')
     system('Third-party browser domains: ' + ', '.join(config.allowed_domains))
     system('No files will be deleted. Generated-code execution always requires approval.')
     system('Useful Findings are saved on any valid turn; their file is attached every ten messages.')
     system('File delivery: actual Copilot UI downloads and verified ZIP extraction; no Created-folder monitoring.')
-    confirmed = bool(args.yes_setup) or (await ask('Allow local navigation and verified knowledge saving for this run [Y/n]? ')).strip().lower() in {'', 'y', 'yes'}
+    isolated_proof = getattr(config, '_automation_test_mode', False)
+    confirmed = False if isolated_proof else bool(args.yes_setup) or (await ask('Allow local navigation and verified knowledge saving for this run [Y/n]? ')).strip().lower() in {'', 'y', 'yes'}
     config._local_navigation_confirmed = confirmed
     state.data['visible'] = True
-    if not confirmed:
+    if not confirmed and not isolated_proof:
         state.data['status'] = 'cancelled'
         state.save()
         return
-    config._knowledge_capability = await asyncio.to_thread(check_knowledge_health, {'config': config})
+    if isolated_proof:
+        config._knowledge_capability = {'available': False,
+                                        'statement': 'Persistent knowledge is disabled in isolated proof mode; package execution uses its own exact review.'}
+    else:
+        config._knowledge_capability = await asyncio.to_thread(check_knowledge_health, {'config': config})
     state.data['knowledge_capability'] = config._knowledge_capability
     state.event('knowledge_startup_capability', **config._knowledge_capability)
     state.save()
@@ -583,6 +617,7 @@ def main():
     parser.add_argument('--model', help='Exact currently displayed UI label')
     parser.add_argument('--yes-setup', action='store_true', help='Accept supplied browser settings; does not approve tools or scripts')
     parser.add_argument('--setup-only', action='store_true', help='Verify configured per-user storage and Edge without opening Copilot')
+    parser.add_argument('--isolated-test-workspace', type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
     try:
         asyncio.run(run(args))

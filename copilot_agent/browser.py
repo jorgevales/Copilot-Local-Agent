@@ -440,10 +440,17 @@ class BrowserAdapter:
             self._manager = async_playwright()
             self._playwright = await self._manager.start()
             self.startup_stage = 'cdp_connection'
+            verified_launch_port = None
+            def verify_launched_endpoint():
+                nonlocal verified_launch_port
+                edge.validate_launched_endpoint(self.config.debug_port, profile, self._launched_process)
+                verified_launch_port = self.config.debug_port
             try:
                 self.browser = await edge.connect_bounded(self._playwright, self.endpoint, self.config.startup_timeout,
                                                           process=self._launched_process,
-                                                          initial_payload=payload)
+                                                          initial_payload=payload,
+                                                          endpoint_validator=(verify_launched_endpoint
+                                                                              if self._launched_process is not None else None))
             except edge.EndpointError:
                 self.browser = await self._connect_running_edge_fallback()
                 if self.browser is None:
@@ -453,6 +460,8 @@ class BrowserAdapter:
             if __import__('os').name == 'nt':
                 if getattr(self.config, '_discovered_edge_endpoint', False):
                     await asyncio.to_thread(edge.validate_edge_listener, self.config.debug_port)
+                elif verified_launch_port == self.config.debug_port:
+                    pass  # Ownership was proved before Playwright attached to this endpoint.
                 else:
                     await asyncio.to_thread(edge.validate_launched_endpoint, self.config.debug_port, profile,
                                             self._launched_process)
@@ -460,11 +469,12 @@ class BrowserAdapter:
             self.context = self.browser.contexts[0]
             # Grant this before opening Copilot so Edge never interrupts an
             # exchange with its clipboard permission confirmation dialog.
-            await asyncio.wait_for(
-                self.context.grant_permissions(
-                    ['clipboard-read', 'clipboard-write'],
-                    origin='https://m365.cloud.microsoft'),
-                10)
+            if not getattr(self.config, '_automation_test_mode', False):
+                await asyncio.wait_for(
+                    self.context.grant_permissions(
+                        ['clipboard-read', 'clipboard-write'],
+                        origin='https://m365.cloud.microsoft'),
+                    10)
             await self._claim_chat_page()
             # Website tool tabs are created lazily by browser.open. Starting one
             # here leaves an unexplained blank tab beside every Copilot chat.
