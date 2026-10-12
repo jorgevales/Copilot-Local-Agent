@@ -1,12 +1,20 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from copilot_agent.app import configure_isolated_test_workspace
 from copilot_agent.config import Config
 
 
 class IsolatedProofModeTests(unittest.TestCase):
+    def test_config_load_uses_explicit_proof_storage_without_s_drive_lookup(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp).resolve() / "proof"
+            with patch("copilot_agent.config.default_local_storage", side_effect=AssertionError("S drive lookup")):
+                config = Config.load(storage_override=target)
+            self.assertEqual(target, config.storage_dir)
+
     def test_only_empty_c_drive_project_proof_child_is_allowed(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()

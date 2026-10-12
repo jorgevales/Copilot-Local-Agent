@@ -90,7 +90,7 @@ class Config:
         self.validate()
 
     @classmethod
-    def load(cls, path: Path | None = None) -> 'Config':
+    def load(cls, path: Path | None = None, *, storage_override: Path | None = None) -> 'Config':
         cfg = cls()
         data = {}
         if path and Path(path).exists():
@@ -127,7 +127,11 @@ class Config:
         cfg._profile_explicit = bool(data.get('profile_dir'))
         cfg._configured_profile_dir = Path(data['profile_dir']) if data.get('profile_dir') else None
         cfg._configured_allowed_roots = list(data.get('allowed_roots', ['workspace', 'deliveries']))
-        if cfg.storage_dir is None:
+        if storage_override is not None:
+            # The app's explicitly scoped isolated proof mode supplies its own
+            # storage before normal settings can require a mapped S: drive.
+            cfg.storage_dir = validate_user_storage_directory(storage_override)
+        elif cfg.storage_dir is None:
             cfg.storage_dir = default_local_storage()
         else:
             cfg.storage_dir = validate_user_storage_directory(cfg.storage_dir)

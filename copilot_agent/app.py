@@ -291,8 +291,8 @@ def configure_isolated_test_workspace(config, requested_path):
 async def run(args):
     global _TERMINAL_INPUT, _UI_STEERING_POLL, _UI_TAKE_ATTACHMENTS
     terminal_input = None
-    config = Config.load(args.config)
     test_workspace = getattr(args, 'isolated_test_workspace', None)
+    config = Config.load(args.config, storage_override=test_workspace)
     if test_workspace is not None:
         test_workspace = configure_isolated_test_workspace(config, test_workspace)
         system('Isolated local proof mode: all agent storage and file roots are confined to ' + str(test_workspace))

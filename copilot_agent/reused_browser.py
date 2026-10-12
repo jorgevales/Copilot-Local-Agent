@@ -14,6 +14,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import time
 import urllib.request
 from urllib.parse import urlparse
@@ -304,8 +305,9 @@ def profile_in_use(profile: Path) -> bool:
 
 
 def launch_edge(edge_path: Path, port: int, profile: Path) -> subprocess.Popen:
-    """Start visible Edge with a dedicated profile; never touch ordinary windows."""
+    """Start a detached Playwright owner for a visible, dedicated Edge profile."""
     profile = profile.expanduser().resolve()
+    edge_path = Path(edge_path).expanduser().resolve()
     if remote_debugging_blocked():
         raise EndpointError("Microsoft Edge policy disables remote debugging. Ask your organization to permit it; the agent will not bypass this policy.")
     if profile_in_use(profile):
@@ -313,9 +315,9 @@ def launch_edge(edge_path: Path, port: int, profile: Path) -> subprocess.Popen:
     if port_listening(port):
         raise EndpointError("The selected local debugging port is already in use. Restart the agent to select a free port.")
     profile.mkdir(parents=True, exist_ok=True)
-    command = [str(edge_path), f"--remote-debugging-port={int(port)}",
-               "--remote-debugging-address=127.0.0.1", f"--user-data-dir={profile}",
-               "--no-first-run", "--no-default-browser-check", "--new-window", "about:blank"]
+    owner = Path(__file__).with_name('edge_owner.py').resolve()
+    command = [sys.executable, str(owner), '--port', str(int(port)),
+               '--profile', str(profile), '--edge-executable', str(edge_path)]
     options = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
                "stderr": subprocess.DEVNULL, "close_fds": True}
     if os.name == "nt":

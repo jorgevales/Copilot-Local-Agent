@@ -6,10 +6,11 @@ import socket
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import ANY, AsyncMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, Mock, patch
 import urllib.request
 
 from copilot_agent import reused_browser as edge
+from copilot_agent import edge_owner
 from copilot_agent.browser import BrowserAdapter
 
 
@@ -60,10 +61,10 @@ class EdgeLaunchTests(unittest.TestCase):
                  patch.object(edge.subprocess, 'Popen', return_value=Mock()) as popen:
                 edge.launch_edge(Path('msedge.exe'), 9443, profile)
             args = popen.call_args.args[0]
-            self.assertIn(f'--user-data-dir={profile.resolve()}', args)
-            self.assertIn('--remote-debugging-address=127.0.0.1', args)
-            self.assertIn('--remote-debugging-port=9443', args)
-            self.assertNotIn('--remote-allow-origins=*', args)
+            self.assertTrue(args[1].endswith('edge_owner.py'))
+            self.assertEqual(['--port', '9443'], args[2:4])
+            self.assertEqual(['--profile', str(profile.resolve())], args[4:6])
+            self.assertEqual(['--edge-executable', str(Path('msedge.exe').resolve())], args[6:8])
 
     def test_policy_profile_and_port_conflicts_stop_before_launch(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -265,6 +266,20 @@ class EdgeHandshakeTests(unittest.IsolatedAsyncioTestCase):
             attached = BrowserAdapter(SimpleNamespace())
             await attached.close()
             stop.assert_not_called()
+
+
+class EdgeOwnerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_owner_waits_for_user_to_close_edge_without_default_timeout(self):
+        context = SimpleNamespace(pages=[], wait_for_event=AsyncMock())
+        chromium = SimpleNamespace(launch_persistent_context=AsyncMock(return_value=context))
+        manager = MagicMock()
+        manager.__aenter__ = AsyncMock(return_value=SimpleNamespace(chromium=chromium))
+        manager.__aexit__ = AsyncMock(return_value=False)
+        with tempfile.TemporaryDirectory() as directory, \
+             patch('playwright.async_api.async_playwright', return_value=manager), \
+             patch.object(Path, 'is_file', return_value=True):
+            await edge_owner.own_edge(9443, Path(directory) / 'profile', Path(directory) / 'msedge.exe')
+        context.wait_for_event.assert_awaited_once_with('close', timeout=0)
 
 
 if __name__ == '__main__':
