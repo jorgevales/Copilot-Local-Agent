@@ -328,7 +328,8 @@ class BrowserAdapter:
             return
         import ctypes
         import hashlib
-        profile = str(Path(self.config.profile_dir).resolve()).casefold()
+        profile = (('endpoint:' + str(self.config.debug_port)) if getattr(self.config, '_discovered_edge_endpoint', False)
+                   else str(Path(self.config.profile_dir).resolve()).casefold())
         name = 'Local\\CopilotLocalAgent_' + hashlib.sha256(profile.encode()).hexdigest()[:32]
         kernel = ctypes.WinDLL('kernel32', use_last_error=True)
         kernel.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
@@ -354,6 +355,40 @@ class BrowserAdapter:
             # Continue the separate bounded UI readiness check on this same page.
             print('[System] Copilot navigation is still loading; checking the visible UI before stopping startup.')
 
+    async def _connect_running_edge_fallback(self):
+        """Retry verified running Edge endpoints after a failed selected route."""
+        attempts = set()
+        for round_index in range(3):
+            discovered = await asyncio.to_thread(edge.discover_edge_debugging_endpoints)
+            discovered.sort(key=lambda item: (item['port'] != 9222, item['port']))
+            for item in discovered:
+                port = item['port']
+                if port == self.config.debug_port or port in attempts:
+                    continue
+                attempts.add(port)
+                endpoint = edge.cdp_endpoint(port)
+                payload = await asyncio.to_thread(edge.get_cdp_version, endpoint)
+                if payload is None:
+                    continue
+                try:
+                    edge.validate_endpoint(endpoint, payload)
+                    await asyncio.to_thread(edge.validate_edge_listener, port, item.get('profile'))
+                    browser = await edge.connect_bounded(
+                        self._playwright, endpoint, min(12, self.config.startup_timeout),
+                        initial_payload=payload)
+                except edge.EndpointError:
+                    continue
+                self.config.debug_port = port
+                self.config.attach_existing = True
+                self.config._discovered_edge_endpoint = True
+                if item.get('profile') is not None:
+                    self.config.profile_dir = item['profile']
+                print('[System] Connected to an existing verified Edge window after the initial startup route failed.')
+                return browser
+            if round_index < 2:
+                await asyncio.sleep(.25 * (round_index + 1))
+        return None
+
     @staticmethod
     def _authentication_required(url):
         host = (urlparse(str(url)).hostname or '').casefold().rstrip('.')
@@ -375,7 +410,9 @@ class BrowserAdapter:
                 edge.validate_endpoint(self.endpoint, payload)
                 if not self.config.attach_existing:
                     raise BrowserUIError('This port already has an Edge session. Enable explicit existing-session attachment or choose another port.')
-                if self._launched_process is not None:
+                if getattr(self.config, '_discovered_edge_endpoint', False):
+                    await asyncio.to_thread(edge.validate_edge_listener, self.config.debug_port)
+                elif self._launched_process is not None:
                     await asyncio.to_thread(edge.validate_launched_endpoint, self.config.debug_port, profile,
                                             self._launched_process)
                 else:
@@ -392,14 +429,22 @@ class BrowserAdapter:
             self._manager = async_playwright()
             self._playwright = await self._manager.start()
             self.startup_stage = 'cdp_connection'
-            self.browser = await edge.connect_bounded(self._playwright, self.endpoint, self.config.startup_timeout,
-                                                      process=self._launched_process,
-                                                      initial_payload=payload)
+            try:
+                self.browser = await edge.connect_bounded(self._playwright, self.endpoint, self.config.startup_timeout,
+                                                          process=self._launched_process,
+                                                          initial_payload=payload)
+            except edge.EndpointError:
+                self.browser = await self._connect_running_edge_fallback()
+                if self.browser is None:
+                    raise
             # Prove the fresh listener belongs to this Popen process; fall back to
             # exact profile inspection if Edge handed off to a different process.
             if __import__('os').name == 'nt':
-                await asyncio.to_thread(edge.validate_launched_endpoint, self.config.debug_port, profile,
-                                        self._launched_process)
+                if getattr(self.config, '_discovered_edge_endpoint', False):
+                    await asyncio.to_thread(edge.validate_edge_listener, self.config.debug_port)
+                else:
+                    await asyncio.to_thread(edge.validate_launched_endpoint, self.config.debug_port, profile,
+                                            self._launched_process)
             self.startup_stage = 'page_setup'
             self.context = self.browser.contexts[0]
             # Grant this before opening Copilot so Edge never interrupts an
@@ -465,7 +510,7 @@ class BrowserAdapter:
         # Keep legacy callers working by configuring the dedicated tool page
         # when available; never attach website guards to the Copilot chat page.
         page = (self.tool_page or self.page) if page is None else page
-        if page is None or page.is_closed():
+        if page is None or (callable(getattr(page, 'is_closed', None)) and page.is_closed()):
             raise BrowserUIError('A live owned page is required to configure website tools.')
         from .policy import URLPolicy, PolicyError
 

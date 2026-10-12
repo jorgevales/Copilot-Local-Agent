@@ -80,8 +80,8 @@ def _hidden_command(command: list[str], timeout=8) -> str:
     return subprocess.run(command, **options).stdout
 
 
-def validate_profile_ownership(port: int, profile: Path) -> None:
-    """Fail closed when the exact listener/profile relationship cannot be proven."""
+def _edge_listener_process(port: int) -> dict:
+    """Return the proven Edge listener command without exposing it to callers."""
     if os.name != "nt":
         raise EndpointError("Existing-session profile ownership currently supports Windows only.")
     # Constant PowerShell script, numeric port only; profile never enters shell code.
@@ -100,12 +100,53 @@ def validate_profile_ownership(port: int, profile: Path) -> None:
     if info.get("Name", "").casefold() != "msedge.exe":
         raise EndpointError("The debugging listener is not Microsoft Edge.")
     port_match = re.search(r"--remote-debugging-port(?:=|\s+)(\d+)", line)
-    actual_profile = _profile_argument(line)
-    if not port_match or int(port_match[1]) != int(port) or actual_profile is None:
-        raise EndpointError("Cannot prove the debugging listener's dedicated profile.")
+    if not port_match or int(port_match[1]) != int(port):
+        raise EndpointError("Cannot prove the Edge debugging listener's local port.")
+    return {'command_line': line, 'profile': _profile_argument(line)}
+
+
+def validate_edge_listener(port: int, profile: Path | None = None) -> Path | None:
+    """Prove a local Edge CDP listener, optionally requiring one exact profile."""
+    info = _edge_listener_process(port)
+    actual_profile = info['profile']
+    if profile is None:
+        return actual_profile
+    if actual_profile is None:
+        raise EndpointError("The Edge debugging listener does not expose its profile identity.")
     actual = actual_profile.expanduser().resolve()
     if os.path.normcase(str(actual)) != os.path.normcase(str(profile.expanduser().resolve())):
         raise EndpointError("The debugging port belongs to a different Edge profile.")
+    return actual
+
+
+def validate_profile_ownership(port: int, profile: Path) -> None:
+    """Fail closed when the exact listener/profile relationship cannot be proven."""
+    validate_edge_listener(port, profile)
+
+
+def discover_edge_debugging_endpoints() -> list[dict]:
+    """Discover running Edge instances that explicitly expose loopback CDP."""
+    if os.name != 'nt':
+        return []
+    command = ("Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" "
+               "| Where-Object { $_.CommandLine -match '--remote-debugging-port' } "
+               "| Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress")
+    try:
+        output = _hidden_command(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command])
+        records = json.loads(output) if output.strip() else []
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return []
+    found = {}
+    for record in records if isinstance(records, list) else [records]:
+        line = record.get('CommandLine', '') if isinstance(record, dict) else ''
+        match = re.search(r"--remote-debugging-port(?:=|\s+)(\d+)", line)
+        if not match:
+            continue
+        port = int(match[1])
+        if not 1024 <= port <= 65535:
+            continue
+        found.setdefault(port, {'port': port, 'profile': _profile_argument(line)})
+    return [found[port] for port in sorted(found)]
 
 
 def _profile_argument(command_line: str) -> Path | None:
@@ -243,6 +284,7 @@ async def connect_bounded(playwright, endpoint: str, timeout: float, process=Non
     handshakes = 0
     endpoint_seen = False
     launched_exited = False
+    exit_observed_at = None
     handshake_rejected = False
     first_payload = initial_payload
     started = time.monotonic()
@@ -280,6 +322,11 @@ async def connect_bounded(playwright, endpoint: str, timeout: float, process=Non
                     print('[System] Edge responded, but the first browser handshake did not complete; retrying within the startup limit.')
         elif process is not None and process.poll() is not None:
             launched_exited = True  # Edge may hand off to a child; keep the full startup window.
+            exit_observed_at = exit_observed_at or time.monotonic()
+            # Allow a brief child-process handoff, then let the caller rescan all
+            # running Edge CDP endpoints instead of waiting the entire timeout.
+            if time.monotonic() - exit_observed_at >= min(3.0, max(.05, timeout / 2)):
+                break
         # A new local Edge listener normally appears quickly. Poll tightly at
         # first, then back off while preserving the same bounded startup window.
         elapsed = time.monotonic() - started

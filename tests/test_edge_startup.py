@@ -19,6 +19,19 @@ ENDPOINT = 'http://127.0.0.1:9443'
 
 
 class EdgeLaunchTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Windows Edge process discovery')
+    def test_discovers_all_running_edge_debug_ports_and_profiles(self):
+        records = json.dumps([
+            {'ProcessId': 10, 'CommandLine': 'msedge.exe --remote-debugging-port=9333 "--user-data-dir=C:\\Edge One"'},
+            {'ProcessId': 11, 'CommandLine': 'msedge.exe --remote-debugging-port 9222 --user-data-dir=C:\\EdgeTwo'},
+            {'ProcessId': 12, 'CommandLine': 'msedge.exe --profile-directory=Default'},
+        ])
+        with patch.object(edge, '_hidden_command', return_value=records):
+            found = edge.discover_edge_debugging_endpoints()
+        self.assertEqual([9222, 9333], [item['port'] for item in found])
+        self.assertEqual(Path('C:\\EdgeTwo'), found[0]['profile'])
+        self.assertEqual(Path('C:\\Edge One'), found[1]['profile'])
+
     def test_cdp_http_probe_never_uses_corporate_proxy(self):
         handlers = [handler for handler in edge._LOOPBACK_HTTP.handlers
                     if isinstance(handler, urllib.request.ProxyHandler)]
@@ -123,6 +136,29 @@ class EdgeLaunchTests(unittest.TestCase):
 
 
 class EdgeHandshakeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_failed_initial_route_retries_discovered_running_edge(self):
+        profile = Path('existing-profile')
+        config = SimpleNamespace(debug_port=9443, attach_existing=False,
+                                 profile_dir=Path('agent-profile'), startup_timeout=30)
+        adapter = BrowserAdapter(config)
+        adapter._playwright = SimpleNamespace()
+        browser = SimpleNamespace(is_connected=lambda: True, contexts=[object()])
+        payload = {'Browser': 'Edg/fixture',
+                   'webSocketDebuggerUrl': 'ws://127.0.0.1:9333/devtools/browser/fixture'}
+        with patch.object(edge, 'discover_edge_debugging_endpoints',
+                          return_value=[{'port': 9333, 'profile': profile}]), \
+             patch.object(edge, 'get_cdp_version', return_value=payload), \
+             patch.object(edge, 'validate_endpoint'), \
+             patch.object(edge, 'validate_edge_listener'), \
+             patch.object(edge, 'connect_bounded', new=AsyncMock(return_value=browser)) as connect:
+            result = await adapter._connect_running_edge_fallback()
+        self.assertIs(browser, result)
+        self.assertEqual(9333, config.debug_port)
+        self.assertEqual(profile, config.profile_dir)
+        self.assertTrue(config.attach_existing)
+        self.assertTrue(config._discovered_edge_endpoint)
+        connect.assert_awaited_once()
+
     async def test_authentication_detection_is_limited_to_microsoft_login_hosts(self):
         self.assertTrue(BrowserAdapter._authentication_required('https://login.microsoftonline.com/common/oauth2'))
         self.assertTrue(BrowserAdapter._authentication_required('https://login.live.com/'))

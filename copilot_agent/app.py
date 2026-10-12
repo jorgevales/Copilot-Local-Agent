@@ -133,11 +133,16 @@ async def choose_browser_endpoint(config, args, settings):
     key = machine_key()
     remembered = debug_ports.get(key)
     candidates = []
+    discovered = [] if getattr(args, 'port', None) else await asyncio.to_thread(edge.discover_edge_debugging_endpoints)
+    discovered_by_port = {item['port']: item for item in discovered}
     explicit_port = getattr(args, 'port', None)
     if not explicit_port:
         # Prefer the conventional local agent endpoint when available, while
         # still attaching only after exact Edge/profile ownership validation.
         candidates.append(9222)
+        for item in discovered:
+            if item['port'] not in candidates:
+                candidates.append(item['port'])
         if type(remembered) is int and 1024 <= remembered <= 65535 and remembered not in candidates:
             candidates.append(remembered)
     if config.debug_port not in candidates:
@@ -146,26 +151,38 @@ async def choose_browser_endpoint(config, args, settings):
     endpoints = [edge.cdp_endpoint(port) for port in candidates]
     payloads = await asyncio.gather(*(
         asyncio.to_thread(edge.get_cdp_version, endpoint) for endpoint in endpoints))
+    # Reuse a verified running Edge before selecting any free launch port. This
+    # avoids starting a second browser merely because preferred port 9222 is free.
     for port, endpoint, payload in zip(candidates, endpoints, payloads):
         if payload:
             try:
                 edge.validate_endpoint(endpoint, payload)
-                await asyncio.to_thread(edge.validate_profile_ownership, port, config.profile_dir)
+                discovered_item = discovered_by_port.get(port)
+                if discovered_item is not None:
+                    await asyncio.to_thread(edge.validate_edge_listener, port, discovered_item['profile'])
+                else:
+                    await asyncio.to_thread(edge.validate_profile_ownership, port, config.profile_dir)
             except (edge.EndpointError, OSError, ValueError):
                 # Unknown or mismatched listeners are never attached.
                 pass
             else:
                 selected = port
                 config.attach_existing = True
-                system('Reusing the verified dedicated Edge profile on local port ' + str(port) + '.')
+                if discovered_item is not None:
+                    config._discovered_edge_endpoint = True
+                    if discovered_item['profile'] is not None:
+                        config.profile_dir = discovered_item['profile']
+                system('Reusing a verified running Edge session on local port ' + str(port) + '.')
                 break
-        try:
-            with socket.socket() as probe:
-                probe.bind(('127.0.0.1', port))
-        except OSError:
-            continue
-        selected = port
-        break
+    if selected is None:
+        for port in candidates:
+            try:
+                with socket.socket() as probe:
+                    probe.bind(('127.0.0.1', port))
+            except OSError:
+                continue
+            selected = port
+            break
     if selected is None:
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', 0))

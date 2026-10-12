@@ -36,17 +36,34 @@ class BrowserEndpointTests(unittest.IsolatedAsyncioTestCase):
         return SimpleNamespace(debug_port=port, attach_existing=attach_existing,
                                profile_dir=Path('synthetic-owned-profile'))
 
-    async def exercise(self, config, settings, *, explicit_port=None, busy=(), payload=None, ownership_error=None):
+    async def exercise(self, config, settings, *, explicit_port=None, busy=(), payload=None,
+                       ownership_error=None, discovered=()):
         sockets = FakeSockets(busy)
         with patch('copilot_agent.app.machine_key', return_value='vdi-synthetic'), \
              patch('copilot_agent.app.system'), \
              patch('copilot_agent.app.socket', SimpleNamespace(socket=sockets.socket)), \
+             patch('copilot_agent.app.edge.discover_edge_debugging_endpoints', return_value=list(discovered)), \
              patch('copilot_agent.app.edge.get_cdp_version', side_effect=payload if callable(payload) else None,
                    return_value=None if callable(payload) else payload) as get_version, \
              patch('copilot_agent.app.edge.validate_endpoint') as validate_endpoint, \
+             patch('copilot_agent.app.edge.validate_edge_listener'), \
              patch('copilot_agent.app.edge.validate_profile_ownership', side_effect=ownership_error) as validate_owner:
             result = await choose_browser_endpoint(config, SimpleNamespace(port=explicit_port), settings)
         return result, sockets, get_version, validate_endpoint, validate_owner
+
+    async def test_running_edge_on_discovered_nondefault_port_wins_over_free_9222(self):
+        profile = Path('normal-edge-profile')
+        payload = {'Browser': 'Edg/synthetic',
+                   'webSocketDebuggerUrl': 'ws://127.0.0.1:9333/devtools/browser/test'}
+        config, sockets, get_version, endpoint, owner = await self.exercise(
+            self.config(), {}, discovered=[{'port': 9333, 'profile': profile}],
+            busy=[9333], payload=lambda url: payload if url.endswith(':9333') else None)
+        self.assertTrue(config.attach_existing)
+        self.assertEqual(9333, config.debug_port)
+        self.assertEqual(profile, config.profile_dir)
+        self.assertEqual([], sockets.binds)
+        endpoint.assert_called_once_with('http://127.0.0.1:9333', payload)
+        owner.assert_not_called()
 
     async def test_free_default_port_is_remembered_for_this_machine(self):
         settings = {'debug_ports': {'vdi-other': 9555}}
@@ -60,20 +77,20 @@ class BrowserEndpointTests(unittest.IsolatedAsyncioTestCase):
         endpoint.assert_not_called()
         owner.assert_not_called()
 
-    async def test_default_9222_is_preferred_over_other_running_edge_endpoints(self):
+    async def test_running_remembered_endpoint_is_preferred_over_free_9222(self):
         payload = {'Browser': 'Edg/synthetic', 'webSocketDebuggerUrl': 'ws://127.0.0.1:9555/devtools/browser/test'}
         config = self.config()
         settings = {'debug_ports': {'vdi-synthetic': 9555}}
         result, sockets, get_version, endpoint, owner = await self.exercise(
             config, settings, busy=[9555], payload=lambda url: payload if url.endswith(':9555') else None)
-        self.assertFalse(result.attach_existing)
-        self.assertEqual(9222, result.debug_port)
-        self.assertEqual([('127.0.0.1', 9222)], sockets.binds)
+        self.assertTrue(result.attach_existing)
+        self.assertEqual(9555, result.debug_port)
+        self.assertEqual([], sockets.binds)
         self.assertCountEqual(
             [call.args[0] for call in get_version.call_args_list],
             ['http://127.0.0.1:9222', 'http://127.0.0.1:9555', 'http://127.0.0.1:9443'])
-        endpoint.assert_not_called()
-        owner.assert_not_called()
+        endpoint.assert_called_once_with('http://127.0.0.1:9555', payload)
+        owner.assert_called_once_with(9555, config.profile_dir)
 
     async def test_other_profile_is_not_attached_and_free_port_is_remembered(self):
         settings = {}
