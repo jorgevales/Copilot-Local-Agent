@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import sys
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -69,6 +71,54 @@ def tool_response(message, call_id='read-one', name='synthetic.read', arguments=
 
 
 class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_independent_readonly_file_checks_run_in_parallel_and_record_method(self):
+        root, config, state, _ = make_fixture('parallel-readonly-')
+        gate = threading.Lock()
+        active = 0
+        maximum = 0
+
+        class ParallelRegistry:
+            def definitions(self):
+                return []
+
+            def definition(self, name):
+                return {'approval_policy': 'read_only', 'timeout': 2}
+
+            def validate_call(self, name, arguments, context):
+                return None
+
+            async def execute(self, name, arguments, context):
+                nonlocal active, maximum
+                with gate:
+                    active += 1
+                    maximum = max(maximum, active)
+                await asyncio.sleep(0.05)
+                with gate:
+                    active -= 1
+                return {'ok': True, 'tool': name, 'result': {'path': arguments['path']}}
+
+        calls = [{'call_id': f'parallel-{index}', 'name': name, 'version': '1.0',
+                  'arguments': {'path': str(root / 'workspace' / f'{index}.txt')}}
+                 for index, name in enumerate(('files.exists', 'files.metadata', 'files.hash'))]
+        app = Orchestrator(config, MockBrowser([]), ParallelRegistry(), state, display=lambda text: None)
+        outcomes = await app._parallel_readonly_group(calls, 'request-parallel')
+        self.assertEqual(3, len(outcomes))
+        self.assertGreater(maximum, 1)
+        self.assertTrue(all(result['result']['execution_method'] == 'parallel_thread'
+                            for result in outcomes.values()))
+        self.assertTrue(all(state.data['calls'][call['call_id']]['status'] == 'completed'
+                            for call in calls))
+
+    async def test_effectful_calls_are_never_sent_to_parallel_executor(self):
+        root, config, state, registry = make_fixture('no-parallel-effects-')
+        app = Orchestrator(config, MockBrowser([]), registry, state, display=lambda text: None)
+        calls = [{'call_id': 'write-a', 'name': 'files.create', 'version': '1.0',
+                  'arguments': {'path': str(root / 'workspace' / 'a.txt')}},
+                 {'call_id': 'write-b', 'name': 'files.create', 'version': '1.0',
+                  'arguments': {'path': str(root / 'workspace' / 'b.txt')}}]
+        self.assertIsNone(await app._parallel_readonly_group(calls, 'request-write'))
+        self.assertEqual({}, state.data['calls'])
+
     async def test_tool_usage_has_no_round_count_limit(self):
         root, config, state, registry = make_fixture('unlimited-tool-rounds-')
         responders = [final_response]

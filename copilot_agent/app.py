@@ -227,6 +227,8 @@ def persist_runtime_settings(config, settings):
 
 async def run(args):
     config = Config.load(args.config)
+    if config.visible is not True:
+        raise ValueError('Copilot runs require a visible Microsoft Edge window; invisible operation is disabled.')
     if config.storage_dir is None:
         accounts = getattr(config, '_storage_candidates', None) or discover_onedrive_accounts()
         selected = await choose_account(accounts, ask, system)
@@ -317,8 +319,20 @@ async def run(args):
                                     event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT)
         orchestrator.feedback.color=_TERMINAL.color
         globals()['_UI_PERMISSION_CONTEXT']=orchestrator.base_context
-        await orchestrator.prepare_initialization()
-        models = await browser.discover_models()
+        # Startup attachment transfer and model discovery use separate visible
+        # tabs so neither UI flow can disturb the other's composer/picker state.
+        discover = getattr(browser, 'discover_models_on_auxiliary_page', browser.discover_models)
+        startup_tasks = [asyncio.create_task(orchestrator.prepare_initialization()),
+                         asyncio.create_task(discover())]
+        try:
+            _, models = await asyncio.gather(*startup_tasks)
+        except BaseException:
+            for task in startup_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*startup_tasks, return_exceptions=True)
+            raise
+        browser.models = models
         ranked = model_rank(models)
         enabled = [m for m in ranked if m.get('enabled', True)]
         if not enabled:

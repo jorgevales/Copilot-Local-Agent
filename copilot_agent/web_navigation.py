@@ -419,6 +419,14 @@ async def _candidates(page, strategy, context):
         candidates.append(("text", scope.get_by_text(strategy["text"], exact=True)))
     if strategy.get("css"):
         candidates.append(("css", scope.locator(strategy["css"])))
+    # Once a locator method has succeeded for this exact generic strategy in
+    # this session, try it first. The preference contains only hashes and
+    # method names, so it cannot retain page/customer labels.
+    preferences = context.get("successful_locator_methods", {})
+    key = hashlib.sha256(json.dumps(strategy, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    preferred = preferences.get(key) if isinstance(preferences, dict) else None
+    if preferred:
+        candidates.sort(key=lambda item: item[0] != preferred)
     return candidates
 
 
@@ -433,6 +441,11 @@ async def _resolve(page, strategy, context, retries=0, visible=True):
                 # Ambiguity is a hard stop; never silently choose a weaker locator.
                 raise NavigationStop("ambiguous_locator", "Locator matches multiple elements")
             if count == 1 and (not visible or await locator.is_visible()):
+                preferences = context.get("successful_locator_methods")
+                if isinstance(preferences, dict):
+                    key = hashlib.sha256(json.dumps(strategy, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                    preferences[key] = method
+                    context["successful_locator_methods"] = preferences
                 return locator, method, attempts
         if attempt < retries:
             await asyncio.sleep(.15*(attempt+1))

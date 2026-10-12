@@ -61,6 +61,10 @@ class Orchestrator:
                              'document_catalogues': {}, 'download_manifest_hashes': {},
                              'transferred_attachment_hashes': {},
                              'website_private': True,
+                             # Method ids are hashes of generic locator
+                             # strategies; values are successful semantic
+                             # locator methods only. Persisted per session.
+                             'successful_locator_methods': state.data.setdefault('successful_locator_methods', {}),
                              'cancel_event': self.cancel_event, 'cancelled': self.cancel_event.is_set,
                              'process_registry': self.process_registry,
                              'approved_domains': self.state.data.setdefault('approved_domains', [])}
@@ -74,6 +78,76 @@ class Orchestrator:
         return CodeRunner(self.policy, self.state.directory,
                           {'tool_timeout': self.config.tool_timeout,
                            'max_output_chars': self.config.max_output_chars})
+
+    async def _parallel_readonly_group(self, calls, request_id):
+        """Run only independent, bounded filesystem observations concurrently.
+
+        Browser reads share mutable page state and all approved/effectful tools
+        have ordering semantics, so they stay on the ordinary serial path.
+        These three tools are read-only, have no browser or consent context,
+        and return bounded results without delivery artifacts.
+        """
+        allowed = {'files.exists', 'files.metadata', 'files.hash'}
+        if (len(calls) < 2 or self.cancel_event.is_set()
+                or any(call.get('name') not in allowed for call in calls)):
+            return None
+        contexts = []
+        try:
+            for call in calls:
+                definition = self.registry.definition(call['name'])
+                if definition['approval_policy'] != 'read_only':
+                    return None
+                context = dict(self.base_context)
+                context['source_request_id'] = request_id
+                context['parallel_readonly'] = True
+                self.registry.validate_call(call['name'], call['arguments'], context)
+                contexts.append(context)
+        except Exception:
+            # Keep normal sequential dispatch authoritative for diagnostics.
+            return None
+
+        for call in calls:
+            self.state.begin_call(call, state_changing=False)
+
+        def run_one(call, context):
+            try:
+                # ToolRegistry.execute and its allowlisted local-file path are
+                # coroutine-shaped but perform no event-loop-bound work here.
+                return asyncio.run(self.registry.execute(call['name'], call['arguments'], context))
+            except Exception as error:
+                return {'ok': False, 'tool': call['name'],
+                        'error': {'code': 'operation_failed',
+                                  'message': str(error)[:1000]}}
+
+        tasks = [asyncio.to_thread(run_one, call, context)
+                 for call, context in zip(calls, contexts)]
+        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+        results = {}
+        for call, outcome in zip(calls, outcomes):
+            method = 'parallel_thread'
+            if isinstance(outcome, BaseException):
+                # These operations are strictly read-only, so a worker startup
+                # or marshalling failure can safely fall back to the ordinary
+                # event loop. Never use this retry path for effects or browser
+                # calls, which are excluded above.
+                method = 'serial_fallback'
+                context = dict(self.base_context)
+                context['source_request_id'] = request_id
+                try:
+                    result = await self.registry.execute(call['name'], call['arguments'], context)
+                except Exception as error:
+                    result = {'ok': False, 'tool': call['name'],
+                              'error': {'code': 'operation_failed',
+                                        'message': str(error)[:1000]}}
+            else:
+                result = outcome
+            if isinstance(result, dict):
+                result.setdefault('result', {})
+                if isinstance(result['result'], dict):
+                    result['result'].setdefault('execution_method', method)
+            self.state.finish_call(call['call_id'], result)
+            results[call['call_id']] = result
+        return results
 
     def _live_feedback(self, event):
         request_id = event['request_id']
@@ -644,9 +718,16 @@ class Orchestrator:
                 prepared_plan = {call['call_id']: self._browser_preparation(call)
                                  for call in response['tool_requests']}
             results = []
+            parallel_readonly_results = await self._parallel_readonly_group(
+                response['tool_requests'], response['request_id'])
             for call in response['tool_requests']:
                 if self.cancel_event.is_set():
                     break
+                if parallel_readonly_results is not None:
+                    result = parallel_readonly_results[call['call_id']]
+                    self._emit_tool_result(call['name'], result)
+                    results.append({'call_id': call['call_id'], **result})
+                    continue
                 self.feedback.section('Orchestrator', 'TOOL REQUEST', [
                     ('Tool', call['name']),
                     ('Purpose', call.get('arguments', {}).get('purpose'))])

@@ -1,5 +1,6 @@
 """Offline event/approval contracts; retained fixtures, no cleanup or live UI."""
 import copy
+import asyncio
 import hashlib
 import json
 import os
@@ -8,7 +9,7 @@ from types import SimpleNamespace
 import unittest
 import uuid
 
-from copilot_agent.downloads import DownloadError, DownloadService, validate_download_args
+from copilot_agent.downloads import DownloadError, DownloadService, _wait_for_completed_file, validate_download_args
 from copilot_agent.policy import PathPolicy
 
 
@@ -109,6 +110,24 @@ class ArgumentsTests(unittest.TestCase):
         with self.assertRaises(DownloadError):
             validate_download_args({'expected_name':'good.zip','url':'https://example.com'})
         self.assertEqual(validate_download_args({'expected_name':'good.zip'}), {'expected_name':'good.zip'})
+
+
+class DownloadCompletionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_partial_file_is_not_reported_complete_until_stable(self):
+        root = Path(os.environ.get('COPILOT_TEST_ROOT', str(Path(__file__).resolve().parents[1] / 'runtime' / 'tests'))) / ('download-completion-'+uuid.uuid4().hex)
+        root.mkdir(parents=True)
+        artifact = root / 'report.zip'
+        artifact.write_bytes(b'P')
+
+        async def finish_transfer():
+            await asyncio.sleep(0.04)
+            artifact.write_bytes(b'PK\\x03\\x04completed')
+
+        task = asyncio.create_task(finish_transfer())
+        stat = await _wait_for_completed_file(artifact, 1, poll_interval=0.02)
+        await task
+        self.assertEqual(stat.st_size, len(b'PK\\x03\\x04completed'))
+        self.assertEqual(artifact.read_bytes(), b'PK\\x03\\x04completed')
 
 
 class DownloadTests(unittest.IsolatedAsyncioTestCase):

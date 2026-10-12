@@ -354,6 +354,11 @@ class BrowserAdapter:
             # Continue the separate bounded UI readiness check on this same page.
             print('[System] Copilot navigation is still loading; checking the visible UI before stopping startup.')
 
+    @staticmethod
+    def _authentication_required(url):
+        host = (urlparse(str(url)).hostname or '').casefold().rstrip('.')
+        return host == 'login.microsoftonline.com' or host == 'login.live.com' or host.endswith('.login.microsoftonline.com')
+
     async def start(self):
         if not self.config.visible:
             raise BrowserUIError('This adapter supports visible Edge only; hidden/headless operation is unsupported.')
@@ -418,7 +423,20 @@ class BrowserAdapter:
             print('[System] Edge is open. Complete Microsoft 365 sign-in there if prompted.')
             self.startup_stage = 'copilot_ui_readiness'
             deadline = time.monotonic() + self.config.startup_timeout
-            while time.monotonic() < deadline:
+            auth_deadline = None
+            auth_notice_sent = False
+            while True:
+                if self._authentication_required(self.page.url):
+                    # Keep this exact visible page and profile alive while the user
+                    # completes interactive MFA/sign-in. Never automate credentials.
+                    if auth_deadline is None:
+                        auth_deadline = time.monotonic() + max(900, self.config.startup_timeout)
+                    deadline = auth_deadline
+                    if not auth_notice_sent:
+                        print('[System] Microsoft sign-in is required. Complete sign-in and any MFA in this Edge window; startup will resume here.')
+                        auth_notice_sent = True
+                if time.monotonic() >= deadline:
+                    break
                 editor = await self._editor(required=False)
                 if (urlparse(self.page.url).hostname == 'm365.cloud.microsoft' and editor is not None
                         and await self._visible(edge.PICKER_SELECTOR) is not None):
@@ -427,7 +445,9 @@ class BrowserAdapter:
                     self.startup_stage = 'ready'
                     return self
                 await asyncio.sleep(self.config.poll_interval)
-            raise BrowserUIError('Copilot editor/model picker was not ready before startup_timeout. Complete sign-in and restart setup.')
+            if auth_deadline is not None:
+                raise BrowserUIError('Copilot did not become ready after the interactive sign-in window expired. The Edge profile and session records are preserved; retry setup to resume.')
+            raise BrowserUIError('Copilot editor/model picker was not ready before startup_timeout. Check sign-in/account access, then retry setup.')
         except Exception:
             await self.diagnostics('startup')
             await self.close()
@@ -441,10 +461,16 @@ class BrowserAdapter:
                 if type(exc).__name__ != 'TimeoutError' or attempt == 1: raise
                 await asyncio.sleep(min(.25, self.config.poll_interval))
 
-    async def _configure_tool_context(self, page):
+    async def _configure_tool_context(self, page=None):
+        # Keep legacy callers working by configuring the dedicated tool page
+        # when available; never attach website guards to the Copilot chat page.
+        page = (self.tool_page or self.page) if page is None else page
+        if page is None or page.is_closed():
+            raise BrowserUIError('A live owned page is required to configure website tools.')
         from .policy import URLPolicy, PolicyError
 
-        if page is self.page or page.context is not self.context:
+        owned_contexts = tuple(context for context in (self.context, self.tool_context) if context is not None)
+        if page is self.page or page.context not in owned_contexts:
             raise BrowserUIError('Only a newly owned tool tab may receive website guards.')
         if page in self._tool_pages:
             return
@@ -607,6 +633,31 @@ class BrowserAdapter:
             if self.page:
                 await self.page.keyboard.press('Escape')
                 await self.page.keyboard.press('Escape')
+
+    async def discover_models_on_auxiliary_page(self) -> list[dict]:
+        """Discover the account's model options on a separate owned tab.
+
+        Startup can then upload the initialization attachments in the primary
+        composer at the same time without racing the model picker against the
+        attachment menu or composer contents.
+        """
+        page = await asyncio.wait_for(self.context.new_page(), 10)
+        probe = BrowserAdapter(self.config)
+        probe.page = page
+        try:
+            await page.goto(self.config.copilot_url, wait_until='domcontentloaded',
+                            timeout=int(self.config.startup_timeout * 1000))
+            deadline = time.monotonic() + self.config.startup_timeout
+            while time.monotonic() < deadline:
+                if (urlparse(page.url).hostname == 'm365.cloud.microsoft'
+                        and await probe._editor(required=False) is not None
+                        and await probe._visible(edge.PICKER_SELECTOR) is not None):
+                    return await probe.discover_models()
+                await asyncio.sleep(self.config.poll_interval)
+            raise BrowserUIError('The auxiliary model-discovery tab did not reach the signed-in Copilot model picker.')
+        finally:
+            if not page.is_closed():
+                await page.close()
 
     async def select_model(self, label: str):
         matches = [item for item in self.models if item['label'] == label and item['enabled']]

@@ -123,6 +123,12 @@ class EdgeLaunchTests(unittest.TestCase):
 
 
 class EdgeHandshakeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_authentication_detection_is_limited_to_microsoft_login_hosts(self):
+        self.assertTrue(BrowserAdapter._authentication_required('https://login.microsoftonline.com/common/oauth2'))
+        self.assertTrue(BrowserAdapter._authentication_required('https://login.live.com/'))
+        self.assertFalse(BrowserAdapter._authentication_required('https://m365.cloud.microsoft/'))
+        self.assertFalse(BrowserAdapter._authentication_required('https://evil-login.microsoftonline.com.example/'))
+
     async def _connect(self, *, payload=None, process=None, policy=False, busy=False, handshake=None):
         chromium = SimpleNamespace(connect_over_cdp=handshake or AsyncMock(side_effect=RuntimeError('private path')))
         playwright = SimpleNamespace(chromium=chromium)

@@ -13,6 +13,14 @@ from tests.test_discovery_engine import static_response
 
 
 class KnowledgeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_missing_central_ledger_is_reported_as_empty_knowledge(self):
+        with workspace() as (root, context), patch.dict(os.environ, {'COPILOT_AGENT_EXECUTION_MODE': 'testing'}):
+            self.assertFalse((root / 'device' / 'discovery-v1' / 'ledger.sqlite3').exists())
+            result = await execute_knowledge_tool('discovery.knowledge_lookup', {'origin': ORIGIN}, context)
+            self.assertEqual(result['status'], 'knowledge_missing')
+            self.assertEqual(result['revision'], 0)
+            self.assertTrue(result['requires_new_approved_discovery'])
+
     async def observe_and_save(self, context, expected):
         args = {'manifest': manifest()}
         reviewed = prepare_discovery(args, context)

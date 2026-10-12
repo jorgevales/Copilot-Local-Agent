@@ -56,7 +56,22 @@ class SiteKnowledgeTests(unittest.TestCase):
         return execute_knowledge("site_knowledge.retrieve", {"origin": "https://example.com"}, self.context)
 
     def record(self):
-        return next((self.root / "private-memory").glob("*.json"))
+        return self.root / "private-memory" / "discovery-v1" / "ledger.sqlite3"
+
+    def record_text(self):
+        from contextlib import closing
+        import sqlite3
+        with closing(sqlite3.connect(self.record())) as db:
+            row = db.execute("SELECT payload FROM site_knowledge LIMIT 1").fetchone()
+        return row[0]
+
+    def replace_record_text(self, text):
+        from contextlib import closing
+        import hashlib
+        import sqlite3
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        with closing(sqlite3.connect(self.record())) as db, db:
+            db.execute("UPDATE site_knowledge SET payload=?,hash=?", (text, digest))
 
     def test_failed_save_readback_classifies_no_active_effect(self):
         self.bind()
@@ -162,13 +177,35 @@ class SiteKnowledgeTests(unittest.TestCase):
         summary = execute_knowledge("site_knowledge.export", {"origin": "https://example.com"}, self.context)
         self.assertEqual(summary["summary"]["item_counts"], {"routes": 1})
         self.assertNotIn("knowledge", summary)
-        stored = self.record().read_text(encoding="utf-8")
+        stored = self.record_text()
         for value in ("tenant-a", "private-user", str(self.root)):
             self.assertNotIn(value, stored)
         record = json.loads(stored)
         self.assertEqual(record["consent"]["categories"], ["routes"])
         self.assertEqual(record["consent"]["approval_hash"], "a" * 64)
         self.assertEqual(len(record["consent"]["review_sha256"]), 64)
+
+    def test_legacy_json_is_read_and_promoted_into_shared_ledger_on_approved_save(self):
+        from contextlib import closing
+        import sqlite3
+        from copilot_agent.site_knowledge import _record_path
+        self.bind()
+        self.save()
+        legacy_payload = self.record_text()
+        scope = self.context["site_knowledge_bindings"]["https://example.com"]["scope"]
+        legacy_path = _record_path(self.context, scope)
+        with closing(sqlite3.connect(self.record())) as db:
+            db.execute("DELETE FROM site_knowledge")
+            db.commit()
+        legacy_path.parent.mkdir(parents=True, exist_ok=True)
+        legacy_path.write_text(legacy_payload, encoding="utf-8")
+        self.assertEqual(self.retrieve()["status"], "fresh")
+        revised = deepcopy(self.save_args)
+        revised["knowledge"]["routes"][0]["label"] = "Reviewed search"
+        saved = self.save(revised)
+        self.assertEqual(saved["revision"], 2)
+        self.assertEqual(self.retrieve()["knowledge"], revised["knowledge"])
+        self.assertTrue(legacy_path.exists())  # Migration never deletes user data.
 
     def test_later_save_merges_observed_generic_routes_and_shows_full_preview(self):
         self.bind()
@@ -271,7 +308,7 @@ class SiteKnowledgeTests(unittest.TestCase):
     def test_copied_record_cannot_cross_tenant_namespace(self):
         self.bind()
         self.save()
-        original = self.record().read_bytes()
+        original = self.record_text().encode("utf-8")
         binding = self.bind(tenant="tenant-b")
         (self.root / "private-memory" / (binding["namespace_id"] + ".json")).write_bytes(original)
         with self.assertRaisesRegex(PolicyError, "namespace"):
@@ -387,7 +424,7 @@ class SiteKnowledgeTests(unittest.TestCase):
         self.bind()
         self.save()
         path = self.record()
-        original = path.read_text(encoding="utf-8")
+        original = self.record_text()
         record = json.loads(original)
         samples = ["{broken", original.replace('"schema_version":1', '"schema_version":1,"schema_version":1'),
                    original.replace('"schema_version":1', '"schema_version":NaN')]
@@ -404,10 +441,10 @@ class SiteKnowledgeTests(unittest.TestCase):
         changed["knowledge"]["routes"][0]["label"] = "Jane Smith"
         samples.append(json.dumps(changed))
         for text in samples:
-            path.write_text(text, encoding="utf-8")
+            self.replace_record_text(text)
             with self.assertRaises(PolicyError):
                 self.retrieve()
-        path.write_text(original, encoding="utf-8")
+        self.replace_record_text(original)
         self.assertEqual(self.retrieve()["status"], "fresh")
 
     def test_local_device_storage_not_config_runtime_or_developer_memory(self):

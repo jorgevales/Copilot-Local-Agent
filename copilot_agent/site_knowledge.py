@@ -318,10 +318,17 @@ class KnowledgeValidationError(ValueError):
 
 
 class KnowledgeWriteError(RuntimeError):
-    def __init__(self, uncertain: bool):
+    def __init__(self, uncertain: bool, stage: str = "verification", cause: Exception | None = None):
         self.side_effects_uncertain = uncertain
-        super().__init__('Website knowledge write could not be verified' if uncertain
-                         else 'Website knowledge active record was unchanged after the failed write')
+        self.stage = stage
+        # Exception class is useful for local diagnosis and contains no path,
+        # payload, or site data. Never include the raw exception message.
+        self.cause_type = (getattr(cause, "cause_type", None) or
+                           (type(cause).__name__ if cause is not None else None))
+        state = ('active record may have changed' if uncertain
+                 else 'active record was unchanged')
+        super().__init__(f'Website knowledge write failed at {stage}; {state}' +
+                         (f' ({self.cause_type})' if self.cause_type else ''))
 
 
 def _sanitize_knowledge(args):
@@ -504,17 +511,31 @@ def _digest(value):
 
 
 def _read(context, scope):
-    path = _record_path(context, scope)
-    if not path.exists():
-        return None
-    checked = PathPolicy([path.parent]).resolve(path, True)
-    if not checked.is_file() or checked.stat().st_size > MAX_BYTES:
-        raise PolicyError("The stored website knowledge record is not a bounded regular file")
+    # Both discovery knowledge generations now share the same per-user SQLite
+    # ledger. Read old JSON records only as a migration fallback; a successful
+    # approved save promotes the namespace into the ledger transactionally.
+    from .discovery_store import Store
+    store = None
     try:
-        value = json.loads(checked.read_text(encoding="utf-8"), object_pairs_hook=_json_pairs,
-                           parse_constant=_reject_json_constant)
-    except (ValueError, UnicodeError) as error:
-        raise PolicyError("Stored website knowledge is damaged; replace it after local review") from error
+        store = Store(context, persistent=True, readonly=True, allow_missing=True)
+        value = store.site_knowledge(_hash(scope))
+    except Exception as error:
+        raise PolicyError("The shared website knowledge ledger failed storage or integrity validation") from error
+    finally:
+        if store is not None:
+            store.close()
+    if value is None:
+        path = _record_path(context, scope)
+        if not path.exists():
+            return None
+        checked = PathPolicy([path.parent]).resolve(path, True)
+        if not checked.is_file() or checked.stat().st_size > MAX_BYTES:
+            raise PolicyError("The stored website knowledge record is not a bounded regular file")
+        try:
+            value = json.loads(checked.read_text(encoding="utf-8"), object_pairs_hook=_json_pairs,
+                               parse_constant=_reject_json_constant)
+        except (ValueError, UnicodeError) as error:
+            raise PolicyError("Stored website knowledge is damaged; replace it after local review") from error
     expected = {"schema_version", "namespace_id", "scope_fingerprint", "knowledge", "consent",
                 "provenance", "observed_at", "expires_at", "invalidated_at", "payload_sha256"}
     if (type(value) is not dict or set(value) not in (expected,expected|{'revision'}) or value.get("schema_version") != SCHEMA_VERSION
@@ -568,48 +589,57 @@ def _sources(scope, knowledge):
 
 
 def _write(context, scope, value):
-    path = _record_path(context, scope)
-    encoded = _canonical(value) + "\n"
-    if len(encoded.encode("utf-8")) > MAX_BYTES:
-        raise ValueError("Website knowledge record exceeds the storage limit")
-    # This private app store intentionally has one active bounded record per
-    # namespace; app document/history helpers retain user-file versions forever.
-    path.parent.mkdir(parents=True, exist_ok=True)
-    checked = PathPolicy([path.parent]).resolve(path)
-    temporary = checked.with_name(checked.name + "." + uuid.uuid4().hex + ".pending")
-    temporary = PathPolicy([checked.parent]).resolve(temporary)
+    # The SQLite transaction is the atomic promotion point shared with the
+    # newer discovery knowledge index. The old namespace JSON is read-only
+    # migration input and is never overwritten or deleted.
+    from .discovery_store import Store
+    stage = "central_store_open"
+    store = None
     try:
-        with temporary.open("x", encoding="utf-8", newline="\n") as handle:
-            handle.write(encoded)
-            handle.flush()
-            os.fsync(handle.fileno())
-        PathPolicy([checked.parent]).resolve(checked)
-        os.replace(temporary, checked)
+        store = Store(context, persistent=True)
+        stage = "atomic_database_transaction"
+        revision = value.get("revision", 1)
+        invalidation = value.get("invalidated_at") is not None
+        current = store.site_knowledge(_hash(scope))
+        expected = revision if invalidation and current is not None else revision - 1
+        store.save_site_knowledge(_hash(scope), expected, value,
+                                  allow_invalidate=invalidation)
+    except Exception as error:
+        raise _KnowledgeStageError(stage, error) from error
     finally:
-        if temporary.exists():
-            PathPolicy([checked.parent]).resolve(temporary, True).unlink()
+        if store is not None:
+            store.close()
+
+
+class _KnowledgeStageError(OSError):
+    def __init__(self, stage, cause):
+        self.stage = stage
+        self.cause_type = type(cause).__name__
+        super().__init__(stage)
 
 
 def _verified_write(context, scope, value):
     """Classify failures from an authoritative readback of the active record."""
     before = _read(context, scope)
+    stage = "write"
     try:
         _write(context, scope, value)
     except Exception as error:
+        stage = getattr(error, "stage", "storage_access")
         try:
             after = _read(context, scope)
         except Exception:
-            raise KnowledgeWriteError(True) from error
+            raise KnowledgeWriteError(True, "readback_after_failure", error) from error
         if after == value:  # Replace committed; cleanup or later reporting failed.
             return
-        raise KnowledgeWriteError(after != before) from error
+        raise KnowledgeWriteError(after != before, stage, error) from error
     try:
         if _read(context, scope) != value:
-            raise KnowledgeWriteError(True)
+            raise KnowledgeWriteError(True, "readback_mismatch")
     except KnowledgeWriteError:
         raise
     except Exception as error:
-        raise KnowledgeWriteError(True) from error
+        raise KnowledgeWriteError(True, "readback", error) from error
 
 
 def reconciliation_baseline(args, context, prepared):

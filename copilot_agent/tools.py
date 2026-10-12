@@ -487,8 +487,10 @@ class ToolRegistry:
             return self._limit({"ok":True,"tool":name,"result":result},context)
         except KnowledgeWriteError as error:
             return {'ok':False,'tool':name,'result':{'status':'uncertain' if error.side_effects_uncertain else 'failed_before_commit',
-                    'side_effects_uncertain':error.side_effects_uncertain},
-                    'error':{'code':'knowledge_write_failed','message':str(error)}}
+                    'side_effects_uncertain':error.side_effects_uncertain,
+                    'diagnostic':{'stage':error.stage,'cause_type':error.cause_type}},
+                    'error':{'code':'knowledge_write_failed','message':str(error),
+                             'stage':error.stage,'cause_type':error.cause_type}}
         except DownloadError as error:
             return redact({"ok":False,"tool":name,"result":{"status":"uncertain" if error.side_effects_uncertain else "not_started","side_effects_uncertain":error.side_effects_uncertain},"error":{"code":error.code,"message":str(error)}})
         except DiscoveryError as error:

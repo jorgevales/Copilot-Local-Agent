@@ -48,7 +48,7 @@ def directory(context):
 
 
 class Store:
-    def __init__(self, context, persistent=False, readonly=False):
+    def __init__(self, context, persistent=False, readonly=False, allow_missing=False):
         try:
             import sqlite3
         except ImportError as error:
@@ -61,7 +61,26 @@ class Store:
                 self.folder.mkdir(parents=True, exist_ok=True, mode=0o700)
             path = PathPolicy([self.folder]).resolve('ledger.sqlite3')
             if readonly and not path.is_file():
-                raise DiscoveryError('persistent_evidence_required')
+                if not allow_missing:
+                    raise DiscoveryError('persistent_evidence_required')
+                # A missing central ledger is an empty index, not corrupt
+                # evidence. Expose that state to read-only lookup callers while
+                # keeping all write paths and evidence-dependent operations
+                # fail-closed.
+                self.missing = True
+                self.db = sqlite3.connect(':memory:', isolation_level=None,
+                                          check_same_thread=False)
+                self.db.row_factory = sqlite3.Row
+                self.db.executescript('''
+                    CREATE TABLE knowledge_heads(partition TEXT PRIMARY KEY, revision INTEGER NOT NULL);
+                    CREATE TABLE knowledge(partition TEXT NOT NULL, revision INTEGER NOT NULL,
+                        payload TEXT NOT NULL, hash TEXT NOT NULL, consent TEXT NOT NULL,
+                        created REAL NOT NULL, invalidated INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY(partition,revision));
+                    CREATE TABLE site_knowledge(namespace TEXT PRIMARY KEY, revision INTEGER NOT NULL,
+                        payload TEXT NOT NULL, hash TEXT NOT NULL, updated REAL NOT NULL);
+                ''')
+                return
             for suffix in ('', '-wal', '-shm', '-journal'):
                 reject_path_redirection(Path(str(path) + suffix))
             if path.exists() and path.stat().st_size > MAX_DATABASE_BYTES:
@@ -71,6 +90,7 @@ class Store:
         else:
             self.db = sqlite3.connect(':memory:', isolation_level=None, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
+        self.missing = False
         if readonly:
             if self.db.execute('PRAGMA user_version').fetchone()[0] != 1:
                 self.db.close()
@@ -116,6 +136,9 @@ class Store:
           partition TEXT NOT NULL, revision INTEGER NOT NULL, payload TEXT NOT NULL,
           hash TEXT NOT NULL, consent TEXT NOT NULL, created REAL NOT NULL, invalidated INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY(partition,revision));
+        CREATE TABLE IF NOT EXISTS site_knowledge(
+          namespace TEXT PRIMARY KEY, revision INTEGER NOT NULL,
+          payload TEXT NOT NULL, hash TEXT NOT NULL, updated REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS operation_heads(
           partition TEXT NOT NULL, name TEXT NOT NULL, revision INTEGER NOT NULL,
           PRIMARY KEY(partition,name));
@@ -425,6 +448,74 @@ class Store:
         if digest(value) != row['hash']:
             raise DiscoveryError('knowledge_integrity')
         return dict(row, value=value)
+
+    def site_knowledge(self, namespace):
+        """Read the active legacy site-memory record from the shared ledger."""
+        with self.lock:
+            exists = self.db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='site_knowledge'").fetchone()
+            if not exists:
+                return None
+            row = self.db.execute('SELECT payload,hash FROM site_knowledge WHERE namespace=?',
+                                  (namespace,)).fetchone()
+        if row is None:
+            return None
+        raw = row['payload']
+        if hashlib.sha256(raw.encode('utf-8')).hexdigest() != row['hash']:
+            raise DiscoveryError('knowledge_integrity')
+        def unique_pairs(pairs):
+            value = {}
+            for key, item in pairs:
+                if key in value:
+                    raise ValueError('duplicate key')
+                value[key] = item
+            return value
+        try:
+            value = json.loads(raw, object_pairs_hook=unique_pairs,
+                               parse_constant=lambda value: (_ for _ in ()).throw(ValueError('constant')))
+        except (ValueError, TypeError) as error:
+            raise DiscoveryError('knowledge_integrity') from error
+        if type(value) is not dict:
+            raise DiscoveryError('knowledge_integrity')
+        return value
+
+    def save_site_knowledge(self, namespace, expected, payload, *, allow_invalidate=False):
+        """CAS-save a fully reviewed site-memory payload in one SQLite transaction."""
+        encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
+        if len(encoded.encode('utf-8')) > 131072:
+            raise DiscoveryError('resource_limit')
+        payload_hash = hashlib.sha256(encoded.encode('utf-8')).hexdigest()
+        with self.transaction() as db:
+            row = db.execute('SELECT revision FROM site_knowledge WHERE namespace=?',
+                              (namespace,)).fetchone()
+            current = row[0] if row else None
+            # A JSON migration may carry a revision greater than one. Preserve
+            # that monotonic revision on the first ledger insert; thereafter
+            # enforce an exact compare-and-swap against the active row.
+            valid_new = (current is None and type(expected) is int and expected >= 0
+                         and payload.get('revision') == expected + 1)
+            valid_revision = (current is not None and current == expected
+                              and payload.get('revision') == current + 1)
+            valid_invalidation = False
+            if (allow_invalidate and current is not None and current == expected
+                    and payload.get('revision') == current):
+                existing = db.execute('SELECT payload,hash FROM site_knowledge WHERE namespace=?',
+                                      (namespace,)).fetchone()
+                if hashlib.sha256(existing['payload'].encode('utf-8')).hexdigest() != existing['hash']:
+                    raise DiscoveryError('knowledge_integrity')
+                previous = json.loads(existing['payload'])
+                candidate = dict(payload)
+                candidate['invalidated_at'] = previous.get('invalidated_at')
+                valid_invalidation = (previous.get('invalidated_at') is None
+                                      and isinstance(payload.get('invalidated_at'), str)
+                                      and candidate == previous)
+            if not (valid_new or valid_revision or valid_invalidation):
+                raise DiscoveryError('stale_knowledge_revision')
+            new_revision = payload['revision']
+            db.execute('INSERT INTO site_knowledge(namespace,revision,payload,hash,updated) '
+                       'VALUES(?,?,?,?,?) ON CONFLICT(namespace) DO UPDATE SET '
+                       'revision=excluded.revision,payload=excluded.payload,hash=excluded.hash,updated=excluded.updated',
+                       (namespace, new_revision, encoded, payload_hash, time.time()))
 
     def save_knowledge(self, partition, expected, payload, consent):
         with self.transaction() as db:

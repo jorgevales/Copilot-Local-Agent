@@ -19,6 +19,7 @@ import uuid
 from urllib.parse import urlsplit
 
 from .archives import ArchiveError, verify_file
+from .policy import is_s_drive_path
 
 
 class DownloadError(RuntimeError):
@@ -53,6 +54,44 @@ def validate_download_args(args):
 
 def _canonical(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+
+
+async def _wait_for_completed_file(path, timeout, *, stable_samples=3, poll_interval=0.1):
+    """Require a readable, nonempty file whose size and mtime stay stable.
+
+    Playwright's Download.path() normally resolves only after completion. This
+    extra check covers delayed filesystem visibility on mapped/network drives
+    and prevents treating a newly-created partial file as a completed artifact.
+    """
+    deadline = time.monotonic() + timeout
+    previous = None
+    stable = 0
+    while time.monotonic() < deadline:
+        try:
+            stat = path.stat()
+            if not path.is_file() or stat.st_size <= 0:
+                stable = 0
+            else:
+                current = (stat.st_size, stat.st_mtime_ns)
+                stable = stable + 1 if current == previous else 1
+                previous = current
+                if stable >= stable_samples:
+                    with path.open('rb') as handle:
+                        handle.read(1)
+                    return stat
+        except OSError:
+            stable = 0
+            previous = None
+        await asyncio.sleep(min(poll_interval, max(0, deadline - time.monotonic())))
+    raise asyncio.TimeoutError('download artifact did not become stably readable')
+
+
+def _download_path_identity(policy, path, *, must_exist=False):
+    """Canonicalize mapped S: paths by their current UNC identity."""
+    value = str(path)
+    if is_s_drive_path(value):
+        return os.path.normcase(str(policy.resolve(value, must_exist=must_exist)))
+    return os.path.normcase(str(Path(path).resolve(strict=must_exist)))
 
 
 _SETTINGS = r"""() => {
@@ -303,7 +342,8 @@ class DownloadService:
             original = None
             try:
                 original = Path(await asyncio.wait_for(item.path(), timeout))
-                if original.exists() and original.stat().st_size > ticket.preview['max_bytes']:
+                original_stat = await _wait_for_completed_file(original, timeout)
+                if original_stat.st_size > ticket.preview['max_bytes']:
                     raise DownloadError('size_exceeded', 'The actual downloaded artifact exceeds the reviewed size limit; its original file was preserved.', True)
             except DownloadError:
                 raise
@@ -356,7 +396,11 @@ class DownloadService:
                 raise DownloadError('artifact_invalid', 'The saved artifact failed bounded static format/readability validation. It was preserved and no Python or Office content was executed.', True) from exc
             if validation['sha256'] != actual or validation['size'] != size:
                 raise DownloadError('artifact_changed', 'The delivered artifact changed during verification; all observed artifacts were preserved.', True)
-            default_match = bool(original and original.exists() and os.path.normcase(str(original.parent.resolve())) == os.path.normcase(str(Path(settings['configured_directory']).resolve())))
+            try:
+                default_match = bool(original and _download_path_identity(self.policy, original.parent, must_exist=True) ==
+                                     _download_path_identity(self.policy, settings['configured_directory'], must_exist=True))
+            except (OSError, ValueError):
+                default_match = False
             return {'status':'verified' if args.get('expected_sha256') else 'downloaded',
                     'path':str(destination), 'size':size, 'sha256':actual,
                     'download_event_observed':True, 'source_request_id':ticket.source['request_id'],

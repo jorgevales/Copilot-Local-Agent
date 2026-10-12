@@ -278,7 +278,7 @@ def validate_knowledge_tool(name, args, context=None):
 
 def lookup(context, site_origin, scope=None):
     partition = namespace(context, site_origin)
-    store = Store(context, persistent=True, readonly=True)
+    store = Store(context, persistent=True, readonly=True, allow_missing=True)
     try:
         record = store.knowledge(partition)
         if record is None:
@@ -432,7 +432,7 @@ async def execute_knowledge_tool(name, args, context):
     validate_knowledge_tool(name, args, context)
     if name == 'discovery.knowledge_lookup':
         partition = namespace(context, args['origin'])
-        inspection = Store(context, persistent=True, readonly=True)
+        inspection = Store(context, persistent=True, readonly=True, allow_missing=True)
         try:
             revision = inspection.knowledge_revision(partition)
         finally:

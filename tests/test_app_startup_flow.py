@@ -24,6 +24,10 @@ class StartupBrowser:
             {'label': 'Alternate model', 'enabled': True, 'provider': 'OpenAI'},
         ]
 
+    async def discover_models_on_auxiliary_page(self):
+        self.events.append('browser:discover-aux')
+        return await self.discover_models()
+
     async def select_model(self, label):
         self.events.append('browser:select:' + label)
         self.model_label = label
@@ -105,6 +109,7 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
         user_prompt = next(item for item in events if item == 'ask:You: ')
 
         self.assertLess(events.index('orchestrator:preload'), events.index('browser:discover'))
+        self.assertIn('browser:discover-aux', events)
         self.assertLess(events.index('browser:select:GPT-6 Sol'), events.index(model_prompt))
         self.assertEqual(1, events.count('browser:select:GPT-6 Sol'))
         self.assertLess(events.index('orchestrator:initialize'),
