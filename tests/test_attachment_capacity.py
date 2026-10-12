@@ -72,7 +72,7 @@ class AssembledCapacityTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_twenty_first_file_blocks_before_transport_intent_or_count(self):
         root,state,browser,engine,extras = self.fixture(12)
-        with patch('builtins.print'),self.assertRaisesRegex(PolicyError,'20-attachment limit'):
+        with patch('builtins.print'),self.assertRaisesRegex(PolicyError,'contains 21 attachments.*Copilot allows 20.*Remove 1'):
             await engine._send('initialize','Synthetic oversized assembled boundary.',extras)
         self.assertEqual(browser.sent,[])
         self.assertEqual(state.message_count,9)

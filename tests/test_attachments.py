@@ -42,19 +42,25 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(removed['path'],str(outside_tools));self.assertTrue(outside_tools.exists())
         self.queue.clear();self.assertEqual(self.queue.paths(),[]);self.assertTrue(code.exists())
 
-    def test_duplicate_paths_and_case_basename_upload_collisions(self):
+    def test_duplicate_paths_different_directories_get_distinct_upload_names(self):
         code=self.file('one/main.py');self.queue.add([code,code])
         self.assertEqual(len(self.queue.records()),1)
-        for path in [self.file('two/main.py'),self.file('three/main.py.txt')]:
-            with self.assertRaisesRegex(AttachmentError,'same filename'): self.queue.add([path])
-        self.assertEqual(len(self.queue.records()),1)
+        other=self.file('two/main.py')
+        adjacent=self.file('three/main.py.txt')
+        records=self.queue.add([other,adjacent])
+        self.assertEqual(len(records),3)
+        self.assertEqual([record['name'] for record in records],['main.py','main.py','main.py.txt'])
+        self.assertEqual([record['upload_name'] for record in records],
+                         ['main.py.txt','main (2).py.txt','main.py (2).txt'])
+        self.assertEqual([record['upload_name'] for record in self.queue.verify()],
+                         ['main.py.txt','main (2).py.txt','main.py (2).txt'])
 
     def test_add_transactional_on_later_failure_and_count_cap(self):
         initial=self.file('initial.txt');self.queue.add([initial])
         good=self.file('good.txt');bad=self.file('bad.exe',b'synthetic')
         with self.assertRaises(AttachmentError): self.queue.add([good,bad])
         self.assertEqual(self.queue.paths(),[initial])
-        self.assertEqual(MAX_USER_FILES,10)
+        self.assertEqual(MAX_USER_FILES,20)
         paths=[self.file(f'safe{number}.txt') for number in range(MAX_USER_FILES)]
         with self.assertRaisesRegex(AttachmentError,str(MAX_USER_FILES)): self.queue.add(paths)
         self.assertEqual(self.queue.paths(),[initial])

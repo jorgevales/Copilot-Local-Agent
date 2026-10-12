@@ -36,11 +36,11 @@ class BrowserPlanExtensionTests(unittest.TestCase):
                 registry.validate_call('browser.open', {'url': 'https://example.com', 'allowed_domains': [host]}, self.context)
         registry.validate_call('browser.open', {'url': 'https://example.com', 'allowed_domains': ['cdn.example.com']}, self.context)
 
-    def test_browser_approval_is_explicit_about_isolated_unauthenticated_profile(self):
+    def test_browser_approval_uses_the_verified_shared_session(self):
         prepared = Orchestrator._browser_preparation({
             'name': 'browser.open', 'arguments': {'url': 'https://example.com'}})
-        self.assertTrue(prepared['isolated_profile'])
-        self.assertNotIn('shared_authenticated_profile', prepared)
+        self.assertTrue(prepared['shared_verified_profile'])
+        self.assertIn('existing site sign-ins are shared', prepared['limitations'])
         self.assertEqual('example.com', prepared['website_domain'])
 
     def test_approval_manager_accepts_only_complete_unique_browser_plan(self):

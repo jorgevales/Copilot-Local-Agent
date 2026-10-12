@@ -12,7 +12,7 @@ from pathlib import Path, PureWindowsPath
 from .logging_utils import SENSITIVE
 from .policy import PathPolicy, PolicyError, config_value, reject_path_redirection
 
-MAX_USER_FILES=10
+MAX_USER_FILES=20
 MAX_FILE_BYTES=20*1024*1024
 TEXT_EXTENSIONS=frozenset({'.txt','.md','.json','.csv','.py','.js','.ts','.jsx','.tsx','.css','.html','.htm','.xml','.svg','.yaml','.yml','.toml','.ini','.cfg','.sql','.ps1','.bat','.cmd','.sh'})
 OFFICE_EXTENSIONS=frozenset({'.docx','.xlsx','.pptx'})
@@ -127,14 +127,32 @@ class AttachmentQueue:
         by_path={self._key(item['path']):item for item in proposed}
         by_name={item['upload_name'].casefold():item for item in proposed}
         source_names={item['name'].casefold() for item in proposed}
+        selected=[]
+        selected_keys=set()
         for path in paths:
             resolved=self._resolve(path);key=self._key(resolved)
-            if key in by_path: continue
-            if upload_name(resolved).casefold() in by_name or resolved.name.casefold() in source_names:
-                raise AttachmentError('Two attachments have the same filename: '+resolved.name+'. Rename one before selecting both.')
-            if len(proposed)>=MAX_USER_FILES:
-                raise AttachmentError('At most '+str(MAX_USER_FILES)+' user files can be queued; '+str(20-MAX_USER_FILES)+' attachment slots are reserved for startup guidance, findings and context')
+            if key in by_path or key in selected_keys: continue
+            selected_keys.add(key)
+            selected.append(resolved)
+        proposed_count=len(proposed)+len(selected)
+        if proposed_count>MAX_USER_FILES:
+            raise AttachmentError('Selected '+str(proposed_count)+' files; the per-message limit is '
+                                  +str(MAX_USER_FILES)+'. Remove '+str(proposed_count-MAX_USER_FILES)
+                                  +' file(s) or move them to another message.')
+        for resolved in selected:
+            key=self._key(resolved)
             record=self._record(resolved)
+            preferred=record['upload_name']
+            candidate=preferred
+            index=2
+            while candidate.casefold() in by_name:
+                converted=preferred==resolved.name+'.txt'
+                tail='.txt' if converted else ''
+                candidate=resolved.stem+' ('+str(index)+')'+resolved.suffix+tail
+                index+=1
+            # Keep the user's original display name while assigning a unique,
+            # deterministic upload name for same-basename files from folders.
+            record['upload_name']=candidate
             proposed.append(record);by_path[key]=record;by_name[record['upload_name'].casefold()]=record;source_names.add(record['name'].casefold())
         self._records=proposed
         return self.records()
@@ -159,5 +177,6 @@ class AttachmentQueue:
             checked=self._record(record['path'])
             if any(checked[key]!=record[key] for key in ('path','size','sha256','extension')):
                 raise AttachmentError('Queued attachment changed; remove and select it again: '+record['name'])
+            checked['upload_name']=record['upload_name']
             current.append(checked)
         return current

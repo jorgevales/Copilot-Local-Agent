@@ -5,6 +5,9 @@ import asyncio
 from queue import Empty, Queue
 import re
 import threading
+import time
+import uuid
+from collections import deque
 from types import SimpleNamespace
 
 
@@ -16,6 +19,7 @@ class PromptBroker:
         self.prompts = Queue()
         self.lock = threading.RLock()
         self.active_reply = None
+        self.active_prompt = None
         self.previous_completion = None
         self.closed = False
 
@@ -28,11 +32,13 @@ class PromptBroker:
                 return ':exit'
             reply = Queue(maxsize=1)
             self.active_reply = reply
+            self.active_prompt = str(prompt)
             self.emit('status', {'state': 'awaiting_input', 'summary': prompt})
             self.prompts.put(reply)
         text, completed = reply.get()
         with self.lock:
             self.active_reply = None
+            self.active_prompt = None
             self.previous_completion = completed
         return text
 
@@ -50,6 +56,19 @@ class PromptBroker:
             raise RuntimeError('The agent session has ended; restart the UI launcher.')
         reply.put((text, completed))
         completed.wait()
+
+    def submit_if_waiting(self, text, before_reply=None):
+        """Answer the currently displayed prompt, without waiting for a future one."""
+        with self.lock:
+            reply = self.active_reply
+            if reply is None or reply.full():
+                return False
+            if before_reply is not None:
+                before_reply(self.active_prompt)
+            completed = threading.Event()
+            reply.put((text, completed))
+        completed.wait()
+        return True
 
     def close(self):
         with self.lock:
@@ -76,6 +95,17 @@ class AgentRuntime:
         self.cancel_event = threading.Event()
         self.action_lock = threading.Lock()
         self.action_queue = Queue()
+        self._steering_lock = threading.RLock()
+        self._steering_queue = deque()
+        self._steering_attachment_ids = {}
+        self._steering_sequence = 0
+        self._run_state_lock = threading.RLock()
+        self._active_user_turn = False
+        self._user_turn_generation = 0
+        self._active_user_turn_generation = 0
+        self._active_run_id = None
+        self._submitted_attachments_lock = threading.Lock()
+        self._submitted_attachments = deque()
         self.action_thread = threading.Thread(target=self._dispatch_actions, daemon=True)
         self.action_thread.start()
         self.capabilities = {'stop': True, 'new_session': True, 'attach': True,
@@ -93,6 +123,11 @@ class AgentRuntime:
         old_terminal, old_ask = app._TERMINAL, app._UI_ASK
         old_approval, old_events = app._UI_APPROVAL_DECIDER, app._UI_EVENT_SINK
         old_cancel = app._UI_CANCEL_EVENT
+        old_steering_poll = getattr(app, '_UI_STEERING_POLL', None)
+        old_take_attachments = getattr(app, '_UI_TAKE_ATTACHMENTS', None)
+        old_steering_complete = getattr(app, '_UI_STEERING_COMPLETE', None)
+        old_active_run_id = getattr(app, '_UI_ACTIVE_RUN_ID', None)
+        old_upload_root = getattr(app, '_UI_UPLOAD_ROOT', None)
 
         def terminal_sink(message):
             text = str(message)
@@ -117,6 +152,13 @@ class AgentRuntime:
         app._UI_APPROVAL_DECIDER = approve
         app._UI_EVENT_SINK = self.emit
         app._UI_CANCEL_EVENT = self.cancel_event
+        app._UI_STEERING_POLL = self.poll_steering
+        app._UI_TAKE_ATTACHMENTS = self.take_submitted_attachments
+        app._UI_STEERING_COMPLETE = self.complete_steering
+        app._UI_ACTIVE_RUN_ID = self.active_run_id
+        workspace = getattr(self.emit, '__self__', None)
+        upload_store = getattr(workspace, 'uploads', None)
+        app._UI_UPLOAD_ROOT = getattr(upload_store, 'storage_root', None)
         args = SimpleNamespace(config=None, resume=None, attach_existing=False, port=None,
                                profile=None, model=None, yes_setup=False, setup_only=False)
         try:
@@ -129,10 +171,132 @@ class AgentRuntime:
             app._TERMINAL, app._UI_ASK = old_terminal, old_ask
             app._UI_APPROVAL_DECIDER, app._UI_EVENT_SINK = old_approval, old_events
             app._UI_CANCEL_EVENT = old_cancel
+            app._UI_STEERING_POLL = old_steering_poll
+            app._UI_TAKE_ATTACHMENTS = old_take_attachments
+            app._UI_STEERING_COMPLETE = old_steering_complete
+            app._UI_ACTIVE_RUN_ID = old_active_run_id
+            app._UI_UPLOAD_ROOT = old_upload_root
             self.emit('connection', {'state': 'disconnected', 'summary': 'Agent session ended.'})
 
-    def submit(self, text):
-        self.broker.submit(text)
+    def submit(self, text, attachments=()):
+        """Answer a live prompt, or queue the text as steering for the active turn."""
+        attachments = tuple(attachments or ())
+        submitted_generation = []
+
+        def attach_to_prompt(prompt):
+            is_user_prompt = isinstance(prompt, str) and re.search(r'\]\s*You:\s*$', prompt)
+            if attachments and not is_user_prompt:
+                raise ValueError('Attachments can only be submitted with a new user request.')
+            with self._submitted_attachments_lock:
+                self._submitted_attachments.append(attachments)
+            with self._run_state_lock:
+                self._active_user_turn = bool(is_user_prompt)
+                if is_user_prompt:
+                    self._user_turn_generation += 1
+                    self._active_user_turn_generation = self._user_turn_generation
+                    self._active_run_id = uuid.uuid4().hex
+                    submitted_generation.append(self._user_turn_generation)
+
+        if self.broker.submit_if_waiting(text, attach_to_prompt):
+            with self._run_state_lock:
+                if (submitted_generation and self._active_user_turn_generation == submitted_generation[0]):
+                    self._active_user_turn = False
+                    self._active_run_id = None
+            return {'status': 'submitted'}
+        return self.steer(text, attachments)
+
+    def take_submitted_attachments(self):
+        """Return file paths delivered with the current normal user prompt, once."""
+        with self._submitted_attachments_lock:
+            return list(self._submitted_attachments.popleft()) if self._submitted_attachments else []
+
+    def active_run_id(self):
+        with self._run_state_lock:
+            return self._active_run_id
+
+    def steer(self, text, attachments=(), *, attachment_ids=()):
+        if not isinstance(text, str) or not text.strip() or len(text) > 100000:
+            raise ValueError('Enter a request of at most 100,000 characters')
+        if not isinstance(attachments, (list, tuple)) or len(attachments) > 20:
+            raise ValueError('A steering message can contain at most 20 uploaded files')
+        if not isinstance(attachment_ids, (list, tuple)) or len(attachment_ids) > 20:
+            raise ValueError('Invalid steering attachment references')
+        if self.closed:
+            raise RuntimeError('The agent session has ended; restart the UI launcher.')
+        if self.cancel_event.is_set():
+            raise RuntimeError('The active run is cancelling; this message was not queued.')
+        with self._run_state_lock:
+            if not self._active_user_turn:
+                raise RuntimeError('There is no active user request to steer.')
+            active_run_id = self._active_run_id
+        with self._steering_lock:
+            if self.closed or self.cancel_event.is_set():
+                raise RuntimeError('The active run is ending; this message was not queued.')
+            with self._run_state_lock:
+                if not self._active_user_turn or self._active_run_id != active_run_id:
+                    raise RuntimeError('The active user request has finished; this message was not queued.')
+            self._steering_sequence += 1
+            item = {
+                'message_id': uuid.uuid4().hex,
+                'text': text,
+                'attachments': tuple(attachments or ()),
+                'attachment_ids': tuple(attachment_ids or ()),
+                'submitted_at': time.time(),
+                'sequence': self._steering_sequence,
+                'active_run_id': active_run_id,
+            }
+            # Publish the accepted receipt before making the item visible to a
+            # polling checkpoint. If event persistence fails, no work is queued.
+            self.emit('steering', {'message_id': item['message_id'],
+                                   'sequence': item['sequence'],
+                                   'active_run_id': active_run_id,
+                                   'status': 'queued'})
+            self._steering_queue.append(item)
+            self._steering_attachment_ids[item['message_id']] = item['attachment_ids']
+        return {'status': 'queued', 'message_id': item['message_id'],
+                'sequence': item['sequence'], 'active_run_id': active_run_id}
+
+    def complete_steering(self, message_ids):
+        """Release staged files when orchestration reaches a terminal item state."""
+        if isinstance(message_ids, str):
+            message_ids = [message_ids]
+        if not isinstance(message_ids, (list, tuple)):
+            return
+        attachment_ids = []
+        with self._steering_lock:
+            for message_id in message_ids:
+                attachment_ids.extend(self._steering_attachment_ids.pop(message_id, ()))
+        workspace = getattr(self.emit, '__self__', None)
+        upload_store = getattr(workspace, 'uploads', None)
+        if upload_store is not None and attachment_ids:
+            upload_store.discard(attachment_ids)
+
+    def poll_steering(self):
+        """Atomically consume queued steering in submission order at a safe point."""
+        with self._steering_lock:
+            if self.cancel_event.is_set():
+                self._cancel_pending_steering_locked('Run cancelled before incorporation')
+                return []
+            items = list(self._steering_queue)
+            self._steering_queue.clear()
+        return items
+
+    def _cancel_pending_steering_locked(self, reason):
+        while self._steering_queue:
+            item = self._steering_queue.popleft()
+            attachment_ids = self._steering_attachment_ids.pop(item['message_id'], ())
+            workspace = getattr(self.emit, '__self__', None)
+            upload_store = getattr(workspace, 'uploads', None)
+            if upload_store is not None and attachment_ids:
+                upload_store.discard(attachment_ids)
+            self.emit('steering', {'message_id': item['message_id'],
+                                   'sequence': item['sequence'],
+                                   'active_run_id': item['active_run_id'],
+                                   'status': 'cancelled', 'summary': reason})
+
+    def _cancel_pending_steering(self, reason):
+        with self._steering_lock:
+            self._cancel_pending_steering_locked(reason)
 
     def permission_context(self):
         from copilot_agent import app
@@ -166,6 +330,7 @@ class AgentRuntime:
     def action(self, name, value=None):
         if name == 'stop':
             self.cancel_event.set()
+            self._cancel_pending_steering('Run cancelled before incorporation')
             self.emit('status', {'state': 'cancelling', 'summary': 'Cancellation requested; already submitted effects are preserved.'})
             return
         if name not in {'new_session', 'attach'}:
@@ -200,10 +365,12 @@ class AgentRuntime:
             return
         self.closed = True
         self.cancel_event.set()
+        self._cancel_pending_steering('Agent session closed before incorporation')
         self.action_queue.put(None)
         self.broker.close()
         if self.thread is not None:
             self.thread.join(timeout=8)
+        self.complete_steering(list(self._steering_attachment_ids))
 
 
 def create_runtime(emit, request_approval):

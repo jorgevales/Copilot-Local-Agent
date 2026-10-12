@@ -1,5 +1,6 @@
 """Synthetic local tests only; no real agent, browser automation or model call."""
 import importlib.util
+import base64
 import json
 import secrets
 import sys
@@ -7,6 +8,7 @@ import threading
 import time
 import tempfile
 import unittest
+from unittest.mock import Mock
 from pathlib import Path
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
@@ -77,15 +79,21 @@ class WorkspaceTests(unittest.TestCase):
         while not ws.snapshot()['approvals'] and time.monotonic()<deadline: time.sleep(.01)
         ws.close();thread.join(2);self.assertEqual(['deny'],result)
 
-    def test_busy_blocks_duplicate_turn(self):
-        ws=module.Workspace();gate=threading.Event();calls=[]
+    def test_busy_submit_queues_steering_instead_of_starting_an_independent_turn(self):
+        ws=module.Workspace();gate=threading.Event();calls=[];steering=[]
         class Runtime:
-            def submit(self,text): calls.append(text);gate.wait(2)
+            def submit(self,text,attachments=()): calls.append(text);gate.wait(2)
+            def steer(self,text,attachments=(),*,attachment_ids=()):
+                steering.append((text,attachments,attachment_ids))
+                return {'status':'queued','message_id':'steer-1'}
         ws.runtime=Runtime();ws.submit('Synthetic first')
-        with self.assertRaises(ValueError): ws.submit('Synthetic duplicate')
+        result=ws.submit('Continue the existing request')
+        self.assertEqual({'status':'queued','message_id':'steer-1'},result)
         gate.set();deadline=time.monotonic()+2
         while ws.busy and time.monotonic()<deadline: time.sleep(.01)
         self.assertEqual(['Synthetic first'],calls)
+        self.assertEqual([('Continue the existing request',[],[])],steering)
+        ws.close()
 
 class HTTPTests(unittest.TestCase):
     def setUp(self):
@@ -118,6 +126,35 @@ class HTTPTests(unittest.TestCase):
     def test_live_submit_disabled(self):
         status,data,_=self.request('/api/submit','POST',{'text':'Synthetic'})
         self.assertEqual(400,status);self.assertIn(b'No prompt was sent',data)
+    def test_attachment_route_returns_flat_path_free_metadata(self):
+        content=b'uploaded fixture'
+        status,data,_=self.request('/api/attachments','POST',{
+            'name':'fixture.txt','type':'text/plain','size':len(content),
+            'content_base64':base64.b64encode(content).decode(),
+            'client_message_id':'message-1:0'})
+        result=json.loads(data)
+        self.assertEqual(200,status)
+        self.assertTrue(result['ok'])
+        self.assertEqual(('fixture.txt','text/plain',len(content)),
+                         (result['name'],result['type'],result['size']))
+        self.assertIn('attachment_id',result)
+        self.assertNotIn('path',result)
+    def test_busy_submit_enqueues_steering_and_retries_idempotently(self):
+        ws=self.server.workspace
+        ws.busy=True
+        runtime=Mock()
+        runtime.steer.return_value={'status':'queued','message_id':'steering-1'}
+        ws.runtime=runtime
+        body={'text':'Continue the active request','attachment_ids':[],
+              'client_message_id':'stable-message-1'}
+        first=self.request('/api/submit','POST',body)
+        retry=self.request('/api/submit','POST',body)
+        self.assertEqual((200,200),(first[0],retry[0]))
+        runtime.steer.assert_called_once_with('Continue the active request',[],attachment_ids=[])
+        conflict=self.request('/api/submit','POST',{
+            'text':'A different request','attachment_ids':[],
+            'client_message_id':'stable-message-1'})
+        self.assertEqual(400,conflict[0])
     def test_unsupported_action_disabled(self):
         self.assertEqual(400,self.request('/api/action','POST',{'action':'stop'})[0])
     def test_no_path_traversal(self):

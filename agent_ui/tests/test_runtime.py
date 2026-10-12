@@ -1,6 +1,7 @@
 import threading
 import time
 import unittest
+from collections import deque
 
 from agent_ui.runtime import AgentRuntime, PromptBroker
 
@@ -41,6 +42,9 @@ class RuntimeCancellationTests(unittest.TestCase):
     def test_stop_sets_shared_event_without_launching_or_queuing_another_command(self):
         runtime = AgentRuntime.__new__(AgentRuntime)
         runtime.cancel_event = threading.Event()
+        runtime._steering_lock = threading.RLock()
+        runtime._steering_queue = deque()
+        runtime._steering_attachment_ids = {}
         events = []
         runtime.emit = lambda kind, payload: events.append((kind, payload))
         runtime.action('stop')

@@ -27,6 +27,7 @@ class WebTransportTests(unittest.IsolatedAsyncioTestCase):
         registry = registry or ToolRegistry()
         engine = Orchestrator(config, browser, registry, state, approval_decider=lambda preview: "once",
                               display=lambda message: None, cancel_event=stop)
+        engine.base_context['local_navigation_grant'].confirm()
         return root, config, state, registry, browser, engine
 
     async def queue_file(self, root, registry, engine):

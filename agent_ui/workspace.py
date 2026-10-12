@@ -1,6 +1,7 @@
 """Local authenticated workspace. No model API, telemetry, or execution bypass."""
 from __future__ import annotations
 import argparse
+import hashlib
 import importlib
 import json
 import os
@@ -12,9 +13,21 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
+from agent_ui.uploads import MAX_UPLOAD_REQUEST_BYTES, UploadStore
 
 ROOT = Path(__file__).resolve().parent
 MAX_BODY = 1024 * 1024
+
+def _public_file_metadata(value, in_file_collection=False):
+    """Remove local paths from attachment metadata crossing the UI boundary."""
+    if isinstance(value, list):
+        return [_public_file_metadata(item, in_file_collection) for item in value]
+    if isinstance(value, dict):
+        return {key: _public_file_metadata(item, key in {'attachments', 'files'})
+                for key, item in value.items()
+                if not (in_file_collection and key == 'path')}
+    return value
+
 
 class Workspace:
     def __init__(self, history_directory=None):
@@ -22,7 +35,9 @@ class Workspace:
         self.events = []
         self.sequence = 0
         self.pending = {}
+        self.submitted_messages = {}
         self.runtime = None
+        self.uploads = UploadStore()
         self.busy = False
         self.capabilities = {}
         self.journal = None
@@ -46,11 +61,15 @@ class Workspace:
 
     def emit(self, kind, payload):
         # Runtime supplies safe, redacted UI content. Raw private reasoning is not accepted.
-        if kind not in {'user','copilot','system','warning','error','status','plan','tool','context','model','artifact','session','connection','exchange','action'}:
+        if kind not in {'user','steering','copilot','system','warning','error','status','plan','tool','context','model','artifact','session','connection','exchange','action'}:
             raise ValueError('Unsupported event type')
         if not isinstance(payload, dict):
             raise ValueError('Event payload must be an object')
         value = json.loads(json.dumps(payload, ensure_ascii=False, allow_nan=False))
+        if kind == 'user':
+            for key in ('attachments', 'files'):
+                if key in value:
+                    value[key] = _public_file_metadata(value[key], in_file_collection=True)
         if len(json.dumps(value)) > MAX_BODY:
             raise ValueError('UI event exceeds size limit')
         with self.lock:
@@ -74,7 +93,9 @@ class Workspace:
         ticket = secrets.token_urlsafe(24)
         gate = threading.Event()
         with self.lock:
-            self.pending[ticket] = {'preview': snapshot, 'gate': gate, 'decision': None}
+            self.pending[ticket] = {'preview': snapshot,
+                                    'public_preview': _public_file_metadata(snapshot),
+                                    'gate': gate, 'decision': None}
         self.emit('status', {'state': 'awaiting_approval', 'summary': 'Review the exact pending execution.'})
         # No automatic approval or timeout acceptance.
         gate.wait()
@@ -96,38 +117,143 @@ class Workspace:
 
     def snapshot(self, after=0):
         with self.lock:
-            approvals = [{'ticket': key, 'preview': item['preview']} for key,item in self.pending.items() if item['decision'] is None]
+            approvals = [{'ticket': key, 'preview': item['public_preview']}
+                         for key,item in self.pending.items() if item['decision'] is None]
             return {'events': [e for e in self.events if e['id'] > after],
                     'cursor': self.sequence, 'approvals': approvals, 'busy': self.busy,
                     'capabilities': self.capabilities, 'runtime_connected': self.runtime is not None}
 
-    def submit(self, text):
+    def submit(self, text, attachment_ids=None, client_message_id=None):
         if not isinstance(text,str) or not text.strip() or len(text) > 100000:
             raise ValueError('Enter a request of at most 100,000 characters')
+        if attachment_ids is None:
+            attachment_ids = []
+        if not isinstance(attachment_ids, list) or len(attachment_ids) > 20:
+            raise ValueError('A message can contain at most 20 uploaded files')
+        if client_message_id is not None and (not isinstance(client_message_id, str)
+                                              or not 1 <= len(client_message_id) <= 128
+                                              or not all(ch.isalnum() or ch in '_-:' for ch in client_message_id)):
+            raise ValueError('Invalid message identity')
+        digest = self._message_digest(text, attachment_ids)
         with self.lock:
             if self.runtime is None:
                 raise ValueError('Live runtime is not connected. No prompt was sent.')
+            existing = self._existing_message_locked(client_message_id, digest)
+            if existing is not None:
+                return existing
             if self.busy:
-                raise ValueError('A turn is active; preserve your draft until it completes.')
-            self.busy = True
-        self.emit('user', {'text':text})
+                busy = True
+                attachments = None
+            else:
+                busy = False
+                attachments = self.uploads.resolve_paths(attachment_ids)
+                self.busy = True
+                receipt = {'status':'submitted', 'client_message_id':client_message_id}
+                if client_message_id is not None:
+                    self.submitted_messages[client_message_id] = {'digest':digest, 'receipt':receipt}
+        if busy:
+            return self.steer(text, attachment_ids, client_message_id)
+        records = self.uploads.records(attachment_ids)
+        try:
+            self.emit('user', {'text':text, 'client_message_id':client_message_id,
+                               'attachments':records})
+        except Exception:
+            with self.lock:
+                self.busy = False
+                if client_message_id is not None:
+                    self.submitted_messages.pop(client_message_id, None)
+            raise
         def run():
             try:
-                self.runtime.submit(text)
+                self.runtime.submit(text, attachments)
             except Exception:
                 # Never expose raw exception paths, secrets, or browser URLs.
                 self.emit('error', {'summary':'The runtime reported an error.',
                     'details':'Inspect the retained backend diagnostic report. No automatic replay was requested.'})
             finally:
+                self.uploads.discard(attachment_ids)
                 with self.lock:
                     self.busy = False
         threading.Thread(target=run,daemon=True).start()
+        return receipt
+
+    def steer(self, text, attachment_ids=None, client_message_id=None):
+        if not isinstance(text, str) or not text.strip() or len(text) > 100000:
+            raise ValueError('Enter a request of at most 100,000 characters')
+        if client_message_id is not None and (not isinstance(client_message_id, str)
+                                              or not 1 <= len(client_message_id) <= 128
+                                              or not all(ch.isalnum() or ch in '_-:' for ch in client_message_id)):
+            raise ValueError('Invalid message identity')
+        if attachment_ids is None:
+            attachment_ids = []
+        if not isinstance(attachment_ids, list) or len(attachment_ids) > 20:
+            raise ValueError('A message can contain at most 20 uploaded files')
+        digest = self._message_digest(text, attachment_ids)
+        with self.lock:
+            if self.runtime is None:
+                raise ValueError('Live runtime is not connected. No prompt was sent.')
+            if not self.busy:
+                raise ValueError('There is no active request to steer.')
+            enqueue = getattr(self.runtime, 'steer', None)
+            if not callable(enqueue):
+                raise ValueError('The connected runtime does not support live steering.')
+            existing = self._existing_message_locked(client_message_id, digest)
+            if existing is not None:
+                return existing
+            attachments = self.uploads.resolve_paths(attachment_ids)
+            try:
+                result = enqueue(text, attachments, attachment_ids=attachment_ids)
+            except Exception:
+                # A rejected steering message was never accepted by the run;
+                # release its staged bytes so retries cannot exhaust the cap.
+                self.uploads.discard(attachment_ids)
+                raise
+            receipt = dict(result) if isinstance(result, dict) else {'status':'queued'}
+            if client_message_id is not None:
+                self.submitted_messages[client_message_id] = {'digest':digest, 'receipt':receipt}
+        self.emit('user', {'text':text, 'client_message_id':client_message_id,
+                           'message_id':result.get('message_id') if isinstance(result, dict) else None,
+                           'active_run_id':result.get('active_run_id') if isinstance(result, dict) else None,
+                           'sequence':result.get('sequence') if isinstance(result, dict) else None,
+                           'source':'steering', 'attachments':self.uploads.records(attachment_ids or [])
+                           })
+        return receipt
+
+    @staticmethod
+    def _message_digest(text, attachment_ids):
+        encoded = json.dumps({'text':text, 'attachment_ids':attachment_ids},
+                             ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _existing_message_locked(self, client_message_id, digest):
+        if client_message_id is None:
+            return None
+        previous = self.submitted_messages.get(client_message_id)
+        if previous is None:
+            return None
+        if previous['digest'] != digest:
+            raise ValueError('Message identity was reused for different text or attachments')
+        return dict(previous['receipt'])
+
+    def upload(self, body):
+        if not isinstance(body, dict):
+            raise ValueError('Upload request must be an object')
+        record = self.uploads.add(
+            name=body.get('name'), content_type=body.get('type', body.get('content_type', '')),
+            declared_size=body.get('size'), content_base64=body.get('content_base64'),
+            client_message_id=body.get('client_message_id'))
+        self.emit('artifact', {'action': 'uploaded', 'attachment': record})
+        return {'attachment_id':record['attachment_id'], 'name':record['name'],
+                'type':body.get('type', body.get('content_type', '')),
+                'size':record['size'], 'sha256':record['sha256'],
+                'kind':record['kind']}
 
     def close(self):
         with self.lock:
             for item in self.pending.values():
                 if item['decision'] is None:
                     item['decision']='deny'; item['gate'].set()
+        self.uploads.close()
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self,*args):
@@ -190,14 +316,28 @@ class Handler(BaseHTTPRequestHandler):
                 self.connection.settimeout(previous_timeout)
             return self.reply(403,{'error':'Unauthorized request'})
         try:
+            route=urlsplit(self.path).path
+            max_body = MAX_UPLOAD_REQUEST_BYTES if route in {'/api/upload', '/api/attachments'} else MAX_BODY
             size=int(self.headers.get('Content-Length','0'))
-            if not 0<size<=MAX_BODY: raise ValueError('Invalid request size')
+            if not 0<size<=max_body: raise ValueError('Invalid request size')
             if self.headers.get('Content-Type','').split(';')[0]!='application/json': raise ValueError('JSON required')
             body=json.loads(self.rfile.read(size))
             if not isinstance(body,dict): raise ValueError('Object required')
-            route=urlsplit(self.path).path
             ws=self.server.workspace
-            if route=='/api/submit': ws.submit(body.get('text'))
+            if route in {'/api/upload', '/api/attachments'}:
+                result=ws.upload(body)
+                return self.reply(200,{'ok':True, **result})
+            elif route=='/api/submit':
+                if 'attachments' in body or 'paths' in body:
+                    raise ValueError('Use uploaded attachment IDs; filesystem paths are not accepted by the workspace API')
+                ws.submit(body.get('text'), body.get('attachment_ids', []),
+                          body.get('client_message_id'))
+            elif route=='/api/steer':
+                if 'attachments' in body or 'paths' in body:
+                    raise ValueError('Use uploaded attachment IDs; filesystem paths are not accepted by the workspace API')
+                result=ws.steer(body.get('text'), body.get('attachment_ids', []),
+                                body.get('client_message_id'))
+                return self.reply(200,{'ok':True, **(result if isinstance(result,dict) else {})})
             elif route=='/api/approval': ws.decide(body.get('ticket'),body.get('decision'),body.get('plan_hash'),body.get('call_hash'))
             elif route=='/api/permissions/manage':
                 if ws.runtime is None: raise ValueError('Agent runtime is unavailable')
@@ -252,9 +392,9 @@ def main():
     try: server.serve_forever()
     except KeyboardInterrupt: pass
     finally:
-        ws.close()
         if ws.runtime is not None and callable(getattr(ws.runtime,'close',None)):
             ws.runtime.close()
+        ws.close()
         server.server_close()
 
 if __name__=='__main__': main()

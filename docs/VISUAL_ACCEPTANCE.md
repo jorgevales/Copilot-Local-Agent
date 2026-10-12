@@ -51,7 +51,7 @@ For each step record UTC timestamp, submitted-message ordinal where applicable, 
 - Verify a harmless `.py` source is uploaded as its original filename plus `.txt`. Compare the staged and original bytes and hashes, including synthetic BOM/CRLF/no-final-newline cases, and verify no code executed.
 - Change a selected source after queuing in a retained synthetic fixture. Verify sending is refused until that entry is removed and selected again for review.
 - Select a ZIP archive and a ZIP renamed to a supported non-Office extension. Verify both are denied without upload. Separately verify a structurally valid synthetic native Office document is treated as that document type.
-- Queue 10 distinct supported synthetic user files; verify an eleventh is refused. In the automated boundary test, combine 10 user files with eight startup references, one findings snapshot and one context snapshot; verify 20 is permitted and a 21st physical attachment blocks the send. Record any actual UI limit rejection separately. These tests concern per-message limits, not a cumulative chat limit.
+- Queue 20 distinct supported synthetic user files; verify a 21st is refused by both terminal and workspace upload paths. The final send guard independently checks user files plus startup references and any due automatic context against the 20-file Copilot ceiling. Record any actual UI limit rejection separately. These tests concern per-message limits, not a cumulative chat limit.
 - After an approved upload, verify the browser confirms the exact intended filenames before submission. A picker selection or staged file alone is insufficient evidence.
 - Start `:new` and confirm an empty pending queue, new session identity and retained prior source/session files.
 

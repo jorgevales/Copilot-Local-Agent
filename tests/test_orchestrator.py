@@ -119,6 +119,111 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await app._parallel_readonly_group(calls, 'request-write'))
         self.assertEqual({}, state.data['calls'])
 
+    async def test_steering_supersedes_unexecuted_plan_and_preserves_order(self):
+        root, config, state, registry = make_fixture('orchestrator-steering-')
+        queued = []
+        poll_count = []
+
+        def poll():
+            poll_count.append(len(queued))
+            items = list(queued)
+            queued.clear()
+            return items
+
+        def confirm_steering(message):
+            self.assertEqual('steering', message['kind'])
+            self.assertEqual(1, len(message['content']['steering_messages']))
+            self.assertIn(message['content']['steering_messages'][0]['text'],
+                          {'Correction one.', 'Additional detail two.'})
+            return final_response(message)
+
+        class SteeringBrowser(MockBrowser):
+            async def exchange(self, text, request_id, attachments=(), on_submitted=None):
+                result = await super().exchange(text, request_id, attachments, on_submitted)
+                if self.sent[-1]['message']['kind'] == 'user_turn':
+                    queued.extend([
+                        {'message_id': 'steer-1', 'sequence': 1, 'text': 'Correction one.', 'attachments': []},
+                        {'message_id': 'steer-2', 'sequence': 2, 'text': 'Additional detail two.', 'attachments': []},
+                    ])
+                return result
+
+        browser = SteeringBrowser([final_response, tool_response, confirm_steering, confirm_steering])
+        app = Orchestrator(config, browser, registry, state, display=lambda text: None,
+                           steering_poll=poll)
+        await app.initialize()
+        response = await app.turn('Original active request.')
+        self.assertEqual('complete', response['completion_status'])
+        self.assertEqual([], registry.calls, 'The previous unexecuted tool plan must be discarded.')
+        steering = [item for item in state.data['messages'] if item.get('source') == 'steering']
+        self.assertEqual(['steer-1', 'steer-2'], [item['message_id'] for item in steering])
+        self.assertTrue(all(item['incorporated'] for item in steering))
+        self.assertIn(2, poll_count)
+
+    async def test_rapid_steering_keeps_each_full_attachment_allowance_separate(self):
+        _, config, state, registry = make_fixture('orchestrator-steering-files-')
+        first_files = [f'C:/staging/first-{index}.txt' for index in range(20)]
+        second_files = [f'C:/staging/second-{index}.txt' for index in range(20)]
+        queued = [
+            {'message_id': 'files-1', 'sequence': 1, 'text': 'First file batch', 'attachments': first_files},
+            {'message_id': 'files-2', 'sequence': 2, 'text': 'Second file batch', 'attachments': second_files},
+        ]
+        def poll():
+            items = list(queued)
+            queued.clear()
+            return items
+
+        app = Orchestrator(config, MockBrowser([]), registry, state, display=lambda text: None,
+                           steering_poll=poll)
+        from unittest.mock import AsyncMock
+        app._prepare_user_attachments = AsyncMock(side_effect=lambda paths: list(paths))
+
+        first = await app._take_steering('Original request')
+        second = await app._take_steering('Original request')
+
+        self.assertEqual(first_files, [str(path) for path in first['attachments']])
+        self.assertEqual(second_files, [str(path) for path in second['attachments']])
+        self.assertEqual(['files-1'], first['message_ids'])
+        self.assertEqual(['files-2'], second['message_ids'])
+
+    async def test_stale_run_steering_is_failed_and_its_uploads_are_released(self):
+        _, config, state, registry = make_fixture('orchestrator-stale-steering-')
+        released, events = [], []
+        app = Orchestrator(config, MockBrowser([]), registry, state, display=lambda text: None,
+                           steering_poll=lambda: [{'message_id':'stale-1','sequence':1,
+                               'active_run_id':'old-run','text':'Use this stale file',
+                               'attachments':['C:/private/stale.txt']}],
+                           steering_complete=released.extend, event_sink=lambda *event: events.append(event))
+        app._active_turn_run_id = 'current-run'
+
+        self.assertIsNone(await app._take_steering('Current goal'))
+        self.assertEqual(['stale-1'], released)
+        self.assertEqual('failed', events[0][1]['status'])
+        self.assertEqual([], [item for item in state.data['messages'] if item.get('source') == 'steering'])
+
+    async def test_unavailable_steering_file_does_not_abort_original_goal_or_claim_review(self):
+        _, config, state, registry = make_fixture('orchestrator-unavailable-steering-file-')
+        events, released = [], []
+        item = {'message_id':'missing-file', 'sequence':1, 'active_run_id':'run-1',
+                'text':'Review this local evidence', 'attachments':['S:/offline/evidence.txt']}
+        app = Orchestrator(config, MockBrowser([]), registry, state, display=lambda text: None,
+                           steering_poll=lambda: [item], steering_complete=released.extend,
+                           event_sink=lambda kind, payload: events.append((kind, payload)))
+        async def unavailable(_paths):
+            raise PolicyError('The S: file is unavailable')
+        app._prepare_user_attachments = unavailable
+        app._active_turn_run_id = 'run-1'
+
+        result = await app._take_steering('Original goal')
+
+        self.assertEqual([], result['attachments'])
+        self.assertEqual('Review this local evidence', result['content']['steering_messages'][0]['text'])
+        self.assertIn('could not be read or validated', result['content']['steering_messages'][0]['attachment_error'])
+        saved = next(message for message in state.data['messages'] if message.get('source') == 'steering')
+        self.assertEqual('failed', saved['attachment_status'])
+        self.assertEqual(0, saved['attachment_count'])
+        self.assertEqual(['missing-file'], released)
+        self.assertNotIn('S:/offline/evidence.txt', json.dumps(events))
+
     async def test_tool_usage_has_no_round_count_limit(self):
         root, config, state, registry = make_fixture('unlimited-tool-rounds-')
         responders = [final_response]

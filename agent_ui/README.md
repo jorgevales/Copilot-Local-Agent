@@ -19,10 +19,13 @@ The launcher asks which project version to run, then starts an authenticated loc
 - Backend event inspector, reported timings, model verification indicator.
 - Explicit immutable approval review, with exact backend plan/call hash checks.
 - Multiline draft composer, templates, search, in-memory bookmarks, command palette.
+- The composer stays active during an agent run. Messages enter a FIFO outbox, keep stable message IDs across retries, and show waiting, upload, received, incorporated or failed/retry states. A message sent during execution steers the existing run.
+- Browser-local file attachments work on the initial request, later messages and steering. The picker accepts multiple files; drag-and-drop and paste are supported. File name/type/size and per-file removal are shown before send. A whole-message precheck blocks more than 20 files before any upload; the backend independently enforces the limit.
+- Selected file bytes are read through the browser File API and uploaded to the authenticated loopback workspace. The browser does not expose or send local source paths. Uploads are tied to stable message IDs for safe retry; attachment content remains untrusted review material and is never run by the UI.
 - Export review for visible UI transcript; clear-view does not clear backend context.
 - Keyboard focus, reduced-motion and high-contrast support.
 - Local bearer authentication, Host/Origin checks, no external assets or telemetry.
-- New-session and native attachment-picker actions use the existing agent commands. Stop requests the backend's supported cancellation; model switching and resume remain unavailable. Voice is unavailable.
+- New-session uses the existing agent command. Stop requests the backend's supported cancellation; model switching and resume remain unavailable. Voice is unavailable.
 
 ## Limitations
 - Backend conversation history, pinned sessions, durable bookmarks or saved workflows.
@@ -59,4 +62,4 @@ python -B -m unittest discover -s agent_ui\tests -v
 
 Tests use synthetic inputs and a local fake runtime only. They do not establish target-VDI acceptance or production accessibility. The UI keeps up to 5,000 events in memory; authoritative long-term history remains the backend's responsibility.
 
-The launch presentation tests use the existing Playwright dependency and installed Microsoft Edge in headless mode. They check exact confirmation payloads, keyboard activation, retained drafts, duplicate prevention, error/cancel/disconnection states, reduced motion, and layouts down to 320 pixels. Review screenshots remain under ignored `runtime/ui-design/`. The reference ZIP is ignored and is never a build input.
+The launch presentation tests use the existing Playwright dependency and installed Microsoft Edge in headless mode. They check exact confirmation payloads, keyboard activation, retained drafts, steering availability during a run, file batches up to 20, rejection of 21 files, message/attachment payloads, error/cancel/disconnection states, reduced motion, and layouts down to 320 pixels. Review screenshots remain under ignored `runtime/ui-design/`. The reference ZIP is ignored and is never a build input.

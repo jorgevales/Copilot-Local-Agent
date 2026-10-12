@@ -31,7 +31,13 @@ _UI_ASK = None
 _UI_APPROVAL_DECIDER = None
 _UI_EVENT_SINK = None
 _UI_CANCEL_EVENT = None
+_UI_STEERING_POLL = None
+_UI_STEERING_COMPLETE = None
+_UI_ACTIVE_RUN_ID = None
+_UI_TAKE_ATTACHMENTS = None
+_UI_UPLOAD_ROOT = None
 _UI_PERMISSION_CONTEXT = None
+_TERMINAL_INPUT = None
 
 def system(message):
     _TERMINAL.emit('System', message)
@@ -44,6 +50,8 @@ def error(message):
 async def ask(prompt: str) -> str:
     if _UI_ASK is not None:
         return await _UI_ASK(_TERMINAL.prompt('User', prompt))
+    if _TERMINAL_INPUT is not None:
+        return await _TERMINAL_INPUT.ask(_TERMINAL.prompt('User', prompt))
     return await asyncio.to_thread(input, _TERMINAL.prompt('User', prompt))
 
 
@@ -204,6 +212,8 @@ async def start_new_session(config, previous, model_label, registry=None):
     owned_process = getattr(previous.browser, '_launched_process', None)
     await previous.close(preserve_browser_process=True)
     fresh_config = replace(config, attach_existing=True, model=model_label)
+    if hasattr(config, '_ui_upload_root'):
+        fresh_config._ui_upload_root = config._ui_upload_root
     fresh_config._local_navigation_confirmed = bool(getattr(config, '_local_navigation_confirmed', False))
     directory = config.runtime_dir / 'sessions' / uuid.uuid4().hex
     state = SessionState(directory)
@@ -218,7 +228,9 @@ async def start_new_session(config, previous, model_label, registry=None):
         await browser.start()
         engine = Orchestrator(fresh_config, browser, registry or ToolRegistry(), state,
                               approval_decider=_UI_APPROVAL_DECIDER, display=_TERMINAL.sink,
-                              event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT)
+                              event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT,
+                              steering_poll=_UI_STEERING_POLL,
+                              steering_complete=_UI_STEERING_COMPLETE)
         engine.feedback.color=_TERMINAL.color
         globals()['_UI_PERMISSION_CONTEXT']=engine.base_context
         # Keep model discovery and initialization on the one owned Copilot tab.
@@ -254,7 +266,11 @@ def persist_runtime_settings(config, settings):
 
 
 async def run(args):
+    global _TERMINAL_INPUT, _UI_STEERING_POLL, _UI_TAKE_ATTACHMENTS
+    terminal_input = None
     config = Config.load(args.config)
+    if _UI_UPLOAD_ROOT is not None:
+        config._ui_upload_root = Path(_UI_UPLOAD_ROOT).resolve()
     if config.visible is not True:
         raise ValueError('Copilot runs require a visible Microsoft Edge window; invisible operation is disabled.')
     if config.storage_dir is None:
@@ -348,9 +364,17 @@ async def run(args):
                 return
             state.reconcile_submission(answer == 'sent')
         await browser.start()
+        if _UI_ASK is None:
+            from .terminal_input import TerminalInputBroker
+            terminal_input = TerminalInputBroker()
+            _TERMINAL_INPUT = terminal_input
+            _UI_STEERING_POLL = terminal_input.poll_steering
+            _UI_TAKE_ATTACHMENTS = terminal_input.take_attachments
         orchestrator = Orchestrator(config, browser, ToolRegistry(), state,
                                     approval_decider=_UI_APPROVAL_DECIDER, display=_TERMINAL.sink,
-                                    event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT)
+                                    event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT,
+                                    steering_poll=_UI_STEERING_POLL,
+                                    steering_complete=_UI_STEERING_COMPLETE)
         orchestrator.feedback.color=_TERMINAL.color
         globals()['_UI_PERMISSION_CONTEXT']=orchestrator.base_context
         # Use the single owned Copilot tab throughout startup. Opening and then
@@ -402,11 +426,22 @@ async def run(args):
         await orchestrator.initialize()
         await browser.verify_interaction_ready(chosen['label'])
         system('Type your request and press Enter. For files, type :attach to open Choose files, then type your request.')
-        system('Commands: :new [first message], :attach, :files, :remove <number>, :clear, :status, :exit. Advanced: :attach <path>')
+        system('Commands: :new [first message], :attach, :files, :remove <number>, :clear, :status, :exit. While the agent is running, type steering normally or use :steer <text>; :attach opens the local picker and :attach "path with spaces" adds a file (up to 20).')
         pending_files = orchestrator.attachment_queue()
+        if terminal_input is not None:
+            terminal_input.attach_picker = lambda: select_files(pending_files.account_root)
+        async def run_user_turn(text, paths=()):
+            active_run_id = _UI_ACTIVE_RUN_ID() if callable(_UI_ACTIVE_RUN_ID) else uuid.uuid4().hex
+            if terminal_input is not None:
+                terminal_input.set_active(active_run_id, orchestrator.cancel_event)
+            try:
+                return await orchestrator.turn(text, attachments=paths, active_run_id=active_run_id)
+            finally:
+                if terminal_input is not None:
+                    terminal_input.set_active()
         def show_files():
             records = pending_files.records()
-            system('Files for your next request: ' + str(len(records)) + '/' + str(MAX_USER_FILES) + '. Ten of Copilot\'s 20 slots are reserved for startup guidance, findings and context.')
+            system('Files for your next request: ' + str(len(records)) + '/' + str(MAX_USER_FILES) + '. Final automatic context files are included in the same 20-file send limit and checked before upload.')
             for index, record in enumerate(records, 1):
                 conversion = ' (sent as ' + record['upload_name'] + ', identical bytes)' if record['requires_text_conversion'] else ''
                 system(str(index) + '. ' + record['name'] + ' — ' + str(record['size']) + ' bytes' + conversion)
@@ -427,7 +462,8 @@ async def run(args):
                     pending_files = orchestrator.attachment_queue()
                     system('New independent session started; its records are kept in the configured user storage.')
                     if first_message:
-                        await orchestrator.turn(first_message)
+                        initial_attachments = _UI_TAKE_ATTACHMENTS() if _UI_TAKE_ATTACHMENTS else ()
+                        await run_user_turn(first_message, initial_attachments)
                     continue
                 if text == ':status':
                     system(json.dumps({'session_id': state.session_id, 'message_count': state.message_count,
@@ -461,7 +497,8 @@ async def run(args):
                     continue
                 pending_files.verify()
                 before_send = state.message_count
-                await orchestrator.turn(text, attachments=pending_files.paths())
+                submitted_attachments = _UI_TAKE_ATTACHMENTS() if _UI_TAKE_ATTACHMENTS else ()
+                await run_user_turn(text, [*pending_files.paths(), *submitted_attachments])
                 if state.message_count > before_send:
                     pending_files.clear()
             except CaptureTimeoutError as exc:
@@ -498,6 +535,11 @@ async def run(args):
         except Exception as exc:
             _record_bug_fix(state, config, exc, 'Agent shutdown', 'shutdown', bug_reports)
         _show_bug_handoff(bug_reports)
+        if terminal_input is not None:
+            terminal_input.close()
+            _TERMINAL_INPUT = None
+            _UI_STEERING_POLL = None
+            _UI_TAKE_ATTACHMENTS = None
 
 
 def main():
