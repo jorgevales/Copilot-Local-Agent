@@ -25,6 +25,7 @@ from .policy import PolicyError
 from .storage import default_local_storage, machine_key, read_user_settings, save_user_settings, validate_user_storage_directory
 from . import reused_browser as edge
 from .setup_resources import choose_edge
+from .temp_storage import configure_temp_directory
 
 _TERMINAL = Feedback()
 _UI_ASK = None
@@ -275,6 +276,10 @@ async def run(args):
         raise ValueError('Copilot runs require a visible Microsoft Edge window; invisible operation is disabled.')
     if config.storage_dir is None:
         config.select_storage(default_local_storage())
+    # Select a separately writable temp volume before settings, Edge, Playwright,
+    # or uploads initialize. Persistent runtime storage can be synced or quota
+    # limited, so it is never used as the temporary directory.
+    temp_directory = configure_temp_directory()
     settings = read_runtime_settings(config)
     if args.config is None and isinstance(settings.get('config'), dict):
         personal = settings['config']
@@ -302,11 +307,8 @@ async def run(args):
     validate_user_storage_directory(config.storage_dir)
     if not config.profile_dir.is_relative_to(config.storage_dir) and not (config.attach_existing and config.root.drive.upper() != 'S:'):
         raise ValueError('The persistent Edge profile must be inside the configured user storage.')
-    transient = config.runtime_dir / 'temp'
-    transient.mkdir(parents=True, exist_ok=True)
-    os.environ['TEMP'] = str(transient)
-    os.environ['TMP'] = str(transient)
     os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+    system('Verified temporary workspace: ' + str(temp_directory))
     await choose_edge(config, settings, ask, system, force=getattr(args, 'setup_only', False))
     settings['python_executable'] = sys.executable
     settings['config'] = {key: value for key, value in config.as_dict().items() if key in {

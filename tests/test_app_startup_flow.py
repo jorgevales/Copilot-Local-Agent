@@ -89,7 +89,9 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
              patch('copilot_agent.app.validate_user_storage_directory', side_effect=lambda path: Path(path)), \
              patch('copilot_agent.app.read_user_settings', return_value={}), \
              patch('copilot_agent.app.save_user_settings'), \
-             patch('copilot_agent.app.choose_edge', new=AsyncMock()), \
+             patch('copilot_agent.app.configure_temp_directory',
+                   side_effect=lambda: events.append('temp:verified') or root / 'verified-temp'), \
+             patch('copilot_agent.app.choose_edge', new=AsyncMock(side_effect=lambda *a, **k: events.append('edge:choose'))), \
              patch('copilot_agent.app.choose_browser_endpoint', new=AsyncMock()), \
              patch('copilot_agent.app.BrowserAdapter', return_value=browser), \
              patch('copilot_agent.app.Orchestrator', StartupOrchestrator), \
@@ -104,6 +106,7 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
         user_prompt = next(item for item in events if item == 'ask:You: ')
 
         self.assertLess(events.index('browser:discover'), events.index('orchestrator:preload'))
+        self.assertLess(events.index('temp:verified'), events.index('edge:choose'))
         self.assertFalse(any(item == 'browser:discover-aux' for item in events))
         self.assertLess(events.index('browser:select:GPT-6 Sol'), events.index(model_prompt))
         self.assertEqual(1, events.count('browser:select:GPT-6 Sol'))
