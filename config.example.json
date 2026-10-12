@@ -1,6 +1,7 @@
 {
   "debug_port": 9443,
   "attach_existing": false,
+  "knowledge_directory": null,
   "visible": true,
   "allowed_roots": [
     "workspace",

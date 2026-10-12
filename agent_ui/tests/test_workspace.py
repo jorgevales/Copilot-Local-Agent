@@ -5,6 +5,7 @@ import secrets
 import sys
 import threading
 import time
+import tempfile
 import unittest
 from pathlib import Path
 from http.client import HTTPConnection
@@ -14,6 +15,19 @@ spec=importlib.util.spec_from_file_location('workspace',Path(__file__).resolve()
 module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
 
 class WorkspaceTests(unittest.TestCase):
+    def test_all_run_outcomes_survive_workspace_restart(self):
+        with tempfile.TemporaryDirectory() as folder:
+            ws = module.Workspace(folder)
+            for state in ('completed', 'failed', 'cancelled', 'blocked', 'recovered'):
+                ws.emit('status', {'state': state, 'summary': state})
+            restored = module.Workspace(folder)
+            self.assertEqual(['completed', 'failed', 'cancelled', 'blocked', 'recovered'],
+                             [e['payload']['state'] for e in restored.snapshot()['events']])
+            self.assertEqual([], restored.snapshot()['approvals'])
+            restored.emit('system', {'text': 'next launch'})
+            self.assertEqual(6, len(module.Workspace(folder).snapshot()['events']))
+
+
     def test_delivered_process_and_orchestrator_exchanges_are_visible(self):
         ws = module.Workspace()
         ws.emit('exchange', {'actor': 'Copilot', 'label': 'Copilot process summary (delivered)',

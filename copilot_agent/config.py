@@ -26,6 +26,7 @@ def documents_directory() -> Path:
 class Config:
     root: Path = PROJECT_ROOT
     storage_dir: Path | None = None
+    knowledge_directory: Path | None = None
     copilot_url: str = 'https://m365.cloud.microsoft/chat'
     debug_port: int = 9443
     profile_dir: Path | None = None
@@ -94,7 +95,7 @@ class Config:
             if unknown:
                 raise ValueError('Unknown configuration fields: ' + ', '.join(sorted(unknown)))
             for key, value in data.items():
-                if key in {'root', 'storage_dir', 'profile_dir', 'created_dir'}:
+                if key in {'root', 'storage_dir', 'profile_dir', 'created_dir', 'knowledge_directory'}:
                     if value is not None:
                         value = Path(value).expanduser()
                         if key == 'root' and not value.is_absolute():
@@ -195,6 +196,6 @@ class Config:
 
     def as_dict(self) -> dict:
         data = asdict(self)
-        for key in ('root', 'storage_dir', 'profile_dir', 'created_dir'):
+        for key in ('root', 'storage_dir', 'profile_dir', 'created_dir', 'knowledge_directory'):
             data[key] = str(data[key]) if data[key] is not None else None
         return data

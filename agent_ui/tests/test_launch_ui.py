@@ -38,7 +38,7 @@ class LaunchUITests(unittest.TestCase):
         self.ws.runtime = Runtime()
         self.ws.capabilities = {'stop': True, 'attach': True, 'new_session': True}
         self.ws.emit('status', {'state': 'awaiting_input',
-                               'summary': '[User] Start this visible run [Y/n]? '})
+                               'summary': '[User] Allow local navigation and verified knowledge saving for this run [Y/n]? '})
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         self.server.workspace = self.ws
         self.server.token = secrets.token_urlsafe(32)

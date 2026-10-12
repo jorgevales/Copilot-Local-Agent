@@ -43,7 +43,9 @@ class WebsiteIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.browser = BrowserAdapter(SimpleNamespace(allowed_domains=['fixture.test']))
         self.browser.browser = self.native
         self.browser.tool_context = await self.native.new_context(accept_downloads=True, service_workers='block')
-        await self.browser._configure_tool_context()
+        self.browser.context = self.browser.tool_context
+        self.browser.tool_page = await self.browser.tool_context.new_page()
+        await self.browser._configure_tool_context(self.browser.tool_page)
         async def serve(route):
             path = route.request.url.removeprefix(ORIGIN).split('?')[0]
             if path in {'/first.txt', '/second.txt', '/bad.pdf'}:
@@ -53,7 +55,13 @@ class WebsiteIntegrationTests(unittest.IsolatedAsyncioTestCase):
             else:
                 await route.fulfill(status=200, content_type='text/html', body=PAGES.get(path, '<h1>Missing page</h1>'))
         await self.browser.tool_context.route(ORIGIN + '/**', serve)
-        self.browser.tool_page = await self.browser.tool_context.new_page()
+        await self.browser.tool_page.route(ORIGIN + '/**', serve)
+        new_owned_page = self.browser.new_tool_page
+        async def fixture_page():
+            page = await new_owned_page()
+            await page.route(ORIGIN + '/**', serve)
+            return page
+        self.browser.new_tool_page = fixture_page
         await self.browser.tool_page.goto(ORIGIN + '/')
         self.config = {'allowed_domains': ['fixture.test'], 'allowed_roots': [str(self.root)],
                        'storage_dir': str(self.root), 'max_tool_tabs': 6, 'max_output_chars': 12000}
@@ -97,11 +105,13 @@ class WebsiteIntegrationTests(unittest.IsolatedAsyncioTestCase):
             'locator': {'testid': 'chosen-profile'}, 'effect': 'navigation',
             'expect': [{'kind': 'url', 'value': ORIGIN + '/profile'}]}],
             'success': [{'kind': 'text', 'locator': {'testid': 'customer-id'}, 'value': 'SYNTHETIC-1'}]})
-        summary = await self.call('browser.customer_summary', {'task_id': 'lookup', 'customer_key': 'one',
+        summary = await self.registry.execute('browser.customer_summary', {'task_id': 'lookup', 'customer_key': 'one',
             'identity': [{'locator': {'testid': 'customer-id'}, 'value': 'SYNTHETIC-1'}],
-            'fields': [{'name': 'status', 'locator': {'testid': 'status'}}]})
-        self.assertEqual(summary['facts'][0]['value'], 'Active')
-        self.assertEqual(summary['facts'][0]['evidence'], 'observed')
+            'fields': [{'name': 'status', 'locator': {'testid': 'status'}}]}, self.context)
+        # Navigation confirmation does not grant customer-data research.
+        self.assertFalse(summary['ok'])
+        self.assertEqual('policy_denied', summary['error']['code'])
+        self.assertNotIn('facts', summary.get('result', {}))
 
     async def test_real_download_batch_integrity_manifest_and_transfer_queue(self):
         await self.browser.tool_page.goto(ORIGIN + '/documents')

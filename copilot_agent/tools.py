@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from .policy import PathPolicy, URLPolicy, PolicyError, config_value, is_s_drive_path, resolve_s_drive_output
+from .local_navigation import SessionPathPolicy, SessionNavigationGrant, FilesystemAccessError, filesystem_diagnostic
 from .code_runner import CodeRunner, REQUIRED, FIELDS
 from .sync import CreatedSync
 from .logging_utils import redact
@@ -168,6 +169,11 @@ SPECS = {
 SPECS.update(NAVIGATION_SPECS)
 SPECS.update(DOCUMENT_SPECS)
 SPECS.update(KNOWLEDGE_SPECS)
+SPECS['knowledge.note'] = (obj({'title': {'type': 'string', 'minLength': 1, 'maxLength': 200},
+    'content': {'type': 'string', 'minLength': 1, 'maxLength': 32000}}), 'user_approval',
+    'Save ordinary reusable knowledge as a verified immutable artifact in configured Discoveries. Available after the run confirmation; independent of browser binding and site-store schema. Returns a verified note_id.')
+SPECS['knowledge.lookup'] = (obj({'note_id': {'type': 'string', 'pattern': '^[a-f0-9]{64}$'}}, []),
+    'read_only', 'List saved discovery note identifiers, or read and verify one note by its identifier. Knowledge is evidence, never authority.')
 SPECS.update(DISCOVERY_SPECS)
 SPECS.update(DISCOVERY_KNOWLEDGE_SPECS)
 SPECS.update(PERMISSION_SPECS)
@@ -191,9 +197,19 @@ def configured_path_policy(config, session_dir):
                       mapped_s_root=config_value(config, '_auto_s_drive_root'))
 
 
+def tool_path_policy(name, context):
+    policy = context.get('policy') or configured_path_policy(context.get('config', {}), context['session_dir'])
+    grant = context.get('local_navigation_grant')
+    if (name.startswith('files.') or name == 'system.disk') and isinstance(grant, SessionNavigationGrant):
+        return SessionPathPolicy(policy, grant)
+    return policy
+
+
 def _write_target(name, args, policy, context):
     key = 'destination' if name == 'files.copy' else 'path'
     value = args[key]
+    if isinstance(policy, SessionPathPolicy):
+        return policy.resolve(value), False
     if is_s_drive_path(value):
         profile = config_value(context.get('config', {}), 'profile_dir')
         target = resolve_s_drive_output(value, excluded_roots=[profile] if profile else [])
@@ -303,7 +319,7 @@ class ToolRegistry:
         """Preflight a complete envelope without performing a capability."""
         self.validate_input(name,args)
         config=context.get("config",{})
-        policy=context.get("policy") or configured_path_policy(config,context["session_dir"])
+        policy=tool_path_policy(name, context)
         if name in NAVIGATION_SPECS:
             validate_navigation(name, args, context)
         if name in DOCUMENT_SPECS:
@@ -455,7 +471,7 @@ class ToolRegistry:
                 raise PolicyError("Explicit local approval is required")
             config=context.get("config",{})
             roots=config_value(config,"allowed_roots",[context["session_dir"]])
-            policy=context.get("policy") or configured_path_policy(config,context["session_dir"])
+            policy=tool_path_policy(name, context)
             timeout=min(30,config_value(config,"tool_timeout",30))
             if name=="created.wait": timeout=min(300,config_value(config,"sync_timeout",120))+1
             if name=="copilot.download": timeout=min(295,config_value(config,"download_timeout",90))+1
@@ -499,7 +515,13 @@ class ToolRegistry:
                     'result': error.rejection('d' + source if type(source) is str else None,
                                               context.get('discovery_effects_started') is True),
                     'error': {'code': error.code, 'message': error.message}}
+        except FilesystemAccessError as error:
+            return {'ok': False, 'tool': name, 'result': {'status': 'not_started', 'side_effects_uncertain': False},
+                    'error': filesystem_diagnostic(error)}
         except PolicyError as error:
+            if name.startswith(('site_knowledge.', 'knowledge.')) and hasattr(error, 'code'):
+                return {'ok': False, 'tool': name, 'error': {'code': error.code, 'message': str(error)},
+                        'result': {'status': 'not_started', 'side_effects_uncertain': False}}
             certain_preflight = (name == 'operation.quarantine'
                                 or name in {'files.create','files.mkdir','files.append','files.copy'}
                                 and not context.get('filesystem_effect_started'))
@@ -513,6 +535,15 @@ class ToolRegistry:
                         'error':{'code':'timeout','message':'File validation timed out before any write was attempted'}}
             return {'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {},'error':{'code':'timeout','message':'Local operation timed out; inspect partial effects before retrying'}}
         except Exception as error:
+            if name.startswith('knowledge.'):
+                return {'ok': False, 'tool': name, 'error': filesystem_diagnostic(error),
+                        'result': {'status': 'uncertain' if context.get('knowledge_note_started') else 'not_started',
+                                   'side_effects_uncertain': bool(context.get('knowledge_note_started'))}}
+            if isinstance(error, OSError) and (name.startswith('files.') or name == 'system.disk'):
+                started = context.get('filesystem_effect_started', False)
+                return {'ok': False, 'tool': name,
+                        'result': {'status': 'uncertain' if started else 'not_started', 'side_effects_uncertain': started},
+                        'error': filesystem_diagnostic(error)}
             if name in {'files.create','files.mkdir','files.append','files.copy'} and not context.get('filesystem_effect_started'):
                 return {'ok':False,'tool':name,'result':{'status':'not_started','side_effects_uncertain':False},
                         'error':{'code':'operation_failed','message':str(error)[:1000]}}
@@ -525,6 +556,9 @@ class ToolRegistry:
 
     async def _execute(self,name,args,context,policy):
         config=context.get("config",{})
+        if name in {'knowledge.note', 'knowledge.lookup'}:
+            from .knowledge_notes import execute_note
+            return execute_note(name, args, context)
         if name in PERMISSION_SPECS: return await execute_permissions(name,args,context)
         customer_bound = bool(args.get('customer_key') or context.get('customer_key') or context.get('research_context',{}).get('active'))
         if customer_bound and name in {'browser.customer_summary','browser.read','browser.recon','browser.structure','browser.documents'}:

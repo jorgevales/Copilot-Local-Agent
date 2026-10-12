@@ -51,6 +51,16 @@ class Findings:
             self.save()
         return result
 
+    def set_storage_capability(self, statement: str):
+        """Pin locally measured capability ahead of model-proposed findings."""
+        key = 'Local knowledge storage capability'
+        self.data['findings'] = [f for f in self.data['findings'] if f['key'] != key]
+        self.data['findings'].insert(0, {
+            'key': key, 'content': statement, 'provenance': 'Local startup write/readback health check',
+            'signature': hashlib.sha256(statement.encode()).hexdigest(),
+            'timestamp': now(), 'request_id': 'local-startup', 'priority': 0})
+        self.save()
+
     @staticmethod
     def attachment_due(next_ordinal: int) -> bool:
         return next_ordinal > 0 and next_ordinal % 10 == 0

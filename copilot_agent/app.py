@@ -11,6 +11,7 @@ from pathlib import Path
 import uuid
 from .browser import BrowserAdapter, CaptureTimeoutError, model_rank
 from .config import Config
+from .knowledge_health import check_knowledge_health
 from .orchestrator import Orchestrator
 from .state import SessionState
 from .tools import ToolRegistry
@@ -186,12 +187,17 @@ async def start_new_session(config, previous, model_label, registry=None):
     owned_process = getattr(previous.browser, '_launched_process', None)
     await previous.close(preserve_browser_process=True)
     fresh_config = replace(config, attach_existing=True, model=model_label)
+    fresh_config._local_navigation_confirmed = bool(getattr(config, '_local_navigation_confirmed', False))
     directory = config.runtime_dir / 'sessions' / uuid.uuid4().hex
     state = SessionState(directory)
     browser = BrowserAdapter(fresh_config)
     browser._launched_process = owned_process
     engine = None
     try:
+        fresh_config._knowledge_capability = await asyncio.to_thread(check_knowledge_health, {'config': fresh_config})
+        state.data['knowledge_capability'] = fresh_config._knowledge_capability
+        state.data['visible'] = True
+        state.save()
         await browser.start()
         engine = Orchestrator(fresh_config, browser, registry or ToolRegistry(), state,
                               approval_decider=_UI_APPROVAL_DECIDER, display=_TERMINAL.sink,
@@ -308,9 +314,18 @@ async def run(args):
     system('No files will be deleted. Generated-code execution always requires approval.')
     system('Useful Findings are saved on any valid turn; their file is attached every ten messages.')
     system('File delivery: actual Copilot UI downloads and verified ZIP extraction; no Created-folder monitoring.')
-    if not args.yes_setup:
-        if (await ask('Start this visible run [Y/n]? ')).strip().lower() == 'n':
-            return
+    confirmed = bool(args.yes_setup) or (await ask('Allow local navigation and verified knowledge saving for this run [Y/n]? ')).strip().lower() in {'', 'y', 'yes'}
+    config._local_navigation_confirmed = confirmed
+    state.data['visible'] = True
+    if not confirmed:
+        state.data['status'] = 'cancelled'
+        state.save()
+        return
+    config._knowledge_capability = await asyncio.to_thread(check_knowledge_health, {'config': config})
+    state.data['knowledge_capability'] = config._knowledge_capability
+    state.event('knowledge_startup_capability', **config._knowledge_capability)
+    state.save()
+    system(config._knowledge_capability['statement'])
     try:
         if state.data['pending_submission']:
             system('Previous delivery is uncertain. Inspect the previous chat before reconciling.')

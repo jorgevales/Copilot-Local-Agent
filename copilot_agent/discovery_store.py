@@ -36,14 +36,6 @@ def alias(value):
 def directory(context):
     selected = knowledge_directory(context) / 'discovery-v1'
     reject_path_redirection(selected)
-    for key in ('storage_dir', 'root'):
-        config = context.get('config', {})
-        value = config.get(key) if type(config) is dict else getattr(config, key, None)
-        if value and selected.is_relative_to(Path(value).expanduser().absolute()):
-            raise DiscoveryError('synced_store_unavailable', '$', 'Discovery transactional storage must remain outside project and selected OneDrive storage')
-    for key in ('OneDrive', 'OneDriveCommercial', 'OneDriveConsumer'):
-        if os.environ.get(key) and selected.is_relative_to(Path(os.environ[key]).expanduser().absolute()):
-            raise DiscoveryError('synced_store_unavailable')
     return selected
 
 
@@ -92,9 +84,23 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.missing = False
         if readonly:
-            if self.db.execute('PRAGMA user_version').fetchone()[0] != 1:
+            version = self.db.execute('PRAGMA user_version').fetchone()[0]
+            # A version number alone does not make known columns unreadable.
+            # Inspect the exact tables consumed by read-only knowledge paths.
+            required = {'site_knowledge': {'namespace', 'revision', 'payload', 'hash', 'updated'},
+                        'knowledge': {'partition', 'revision', 'payload', 'hash', 'consent', 'created', 'invalidated'},
+                        'knowledge_heads': {'partition', 'revision'}}
+            found = False
+            for table, columns in required.items():
+                actual = {row[1] for row in self.db.execute('PRAGMA table_info(' + table + ')')}
+                if actual:
+                    found = True
+                    if not columns.issubset(actual):
+                        self.db.close()
+                        raise DiscoveryError('store_version', '$', 'Knowledge table has incompatible columns')
+            if version not in (0, 1) and not found:
                 self.db.close()
-                raise DiscoveryError('store_version')
+                raise DiscoveryError('store_version', '$', 'Store version has no readable knowledge adapter')
             return
         self.db.execute('PRAGMA foreign_keys=ON')
         self.db.execute('PRAGMA trusted_schema=OFF')
@@ -105,7 +111,7 @@ class Store:
         version = self.db.execute('PRAGMA user_version').fetchone()[0]
         if version not in (0, 1):
             self.db.close()
-            raise DiscoveryError('store_version')
+            raise DiscoveryError('store_version', '$', 'Unsupported writable store version; read-only inspection remains available')
         self.db.executescript('''
         CREATE TABLE IF NOT EXISTS runs(
           id TEXT PRIMARY KEY, partition TEXT NOT NULL, digest TEXT NOT NULL,
@@ -481,7 +487,7 @@ class Store:
 
     def save_site_knowledge(self, namespace, expected, payload, *, allow_invalidate=False):
         """CAS-save a fully reviewed site-memory payload in one SQLite transaction."""
-        encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
+        encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=True, allow_nan=False)
         if len(encoded.encode('utf-8')) > 131072:
             raise DiscoveryError('resource_limit')
         payload_hash = hashlib.sha256(encoded.encode('utf-8')).hexdigest()
@@ -516,6 +522,27 @@ class Store:
                        'VALUES(?,?,?,?,?) ON CONFLICT(namespace) DO UPDATE SET '
                        'revision=excluded.revision,payload=excluded.payload,hash=excluded.hash,updated=excluded.updated',
                        (namespace, new_revision, encoded, payload_hash, time.time()))
+
+    def quarantine_site_knowledge(self, namespace):
+        """Atomically preserve exact stored bytes before releasing a damaged namespace."""
+        with self.transaction() as db:
+            row = db.execute('SELECT revision,payload,hash,updated FROM site_knowledge WHERE namespace=?',
+                             (namespace,)).fetchone()
+            if row is None:
+                return {'status': 'missing', 'completion_credited': False}
+            db.execute('CREATE TABLE IF NOT EXISTS site_knowledge_quarantine('
+                       'id INTEGER PRIMARY KEY AUTOINCREMENT, namespace TEXT NOT NULL, revision INTEGER NOT NULL,'
+                       'payload TEXT NOT NULL, hash TEXT NOT NULL, updated REAL NOT NULL, quarantined REAL NOT NULL)')
+            cursor = db.execute('INSERT INTO site_knowledge_quarantine(namespace,revision,payload,hash,updated,quarantined) '
+                                'VALUES(?,?,?,?,?,?)', (namespace, *tuple(row), time.time()))
+            retained = db.execute('SELECT payload,hash FROM site_knowledge_quarantine WHERE id=?',
+                                  (cursor.lastrowid,)).fetchone()
+            if retained['payload'] != row['payload'] or retained['hash'] != row['hash']:
+                raise DiscoveryError('knowledge_integrity')
+            db.execute('DELETE FROM site_knowledge WHERE namespace=?', (namespace,))
+        return {'status': 'quarantined', 'namespace_id': namespace,
+                'evidence_sha256': hashlib.sha256(row['payload'].encode('utf-8')).hexdigest(),
+                'completion_credited': False}
 
     def save_knowledge(self, partition, expected, payload, consent):
         with self.transaction() as db:

@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
+import uuid
 import secrets
 import threading
 import time
@@ -15,7 +17,7 @@ ROOT = Path(__file__).resolve().parent
 MAX_BODY = 1024 * 1024
 
 class Workspace:
-    def __init__(self):
+    def __init__(self, history_directory=None):
         self.lock = threading.RLock()
         self.events = []
         self.sequence = 0
@@ -23,6 +25,24 @@ class Workspace:
         self.runtime = None
         self.busy = False
         self.capabilities = {}
+        self.journal = None
+        if history_directory is not None:
+            folder = Path(history_directory)
+            folder.mkdir(parents=True, exist_ok=True)
+            for journal in sorted(folder.glob('run-*.jsonl')):
+                with journal.open(encoding='utf-8') as stream:
+                    for line in stream:
+                        try:
+                            item = json.loads(line)
+                            if not isinstance(item, dict) or not isinstance(item.get('payload'), dict):
+                                continue
+                            self.sequence += 1
+                            item['id'] = self.sequence
+                            self.events.append(item)
+                        except (ValueError, TypeError):
+                            # An interrupted final append must not hide earlier history.
+                            continue
+            self.journal = folder / ('run-' + str(time.time_ns()) + '-' + uuid.uuid4().hex + '.jsonl')
 
     def emit(self, kind, payload):
         # Runtime supplies safe, redacted UI content. Raw private reasoning is not accepted.
@@ -35,8 +55,13 @@ class Workspace:
             raise ValueError('UI event exceeds size limit')
         with self.lock:
             self.sequence += 1
-            self.events.append({'id': self.sequence, 'time': time.time(), 'kind': kind, 'payload': value})
-            self.events = self.events[-5000:]
+            event = {'id': self.sequence, 'time': time.time(), 'kind': kind, 'payload': value}
+            if self.journal is not None:
+                with self.journal.open('a', encoding='utf-8') as stream:
+                    stream.write(json.dumps(event, ensure_ascii=False, allow_nan=False) + '\n')
+                    stream.flush()
+                    os.fsync(stream.fileno())
+            self.events.append(event)
             if kind == 'status':
                 if value.get('state') == 'action_active': self.busy = True
                 elif value.get('state') == 'awaiting_input': self.busy = False
@@ -151,6 +176,18 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         origin=f'http://127.0.0.1:{self.server.server_port}'
         if not self.authorized() or self.headers.get('Origin') != origin:
+            # Drain only a bounded body before closing. On Windows an unread
+            # POST body can reset the socket and hide the actual 403 response.
+            previous_timeout = self.connection.gettimeout()
+            try:
+                size = int(self.headers.get('Content-Length', '0'))
+                if 0 < size <= MAX_BODY:
+                    self.connection.settimeout(.25)
+                    self.rfile.read(size)
+            except (ValueError, OSError):
+                pass
+            finally:
+                self.connection.settimeout(previous_timeout)
             return self.reply(403,{'error':'Unauthorized request'})
         try:
             size=int(self.headers.get('Content-Length','0'))
@@ -191,7 +228,10 @@ def main():
     parser.add_argument('--runtime',help='Reviewed project module exporting create_runtime(emit, request_approval)')
     parser.add_argument('--no-browser',action='store_true')
     args=parser.parse_args()
-    ws=Workspace()
+    local = os.environ.get('LOCALAPPDATA')
+    if not local:
+        raise RuntimeError('Local user storage is unavailable; persistent run history is required.')
+    ws=Workspace(Path(local) / 'CopilotLocalAgent' / 'run-history')
     if args.runtime:
         module=importlib.import_module(args.runtime)
         runtime=module.create_runtime(ws.emit,ws.request_approval)

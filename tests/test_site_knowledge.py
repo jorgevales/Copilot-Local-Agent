@@ -455,7 +455,7 @@ class SiteKnowledgeTests(unittest.TestCase):
             directory = knowledge_directory(context)
             self.assertEqual(directory, self.root / "local" / "CopilotLocalAgent" / "site-knowledge")
             prepared = prepare_knowledge(self.bind_args, context, name="site_knowledge.bind")
-            self.assertIn("outside OneDrive", prepared["storage_scope"])
+            self.assertIn("Discoveries", prepared["storage_scope"])
             self.assertFalse(directory.exists())
         with patch.dict("os.environ", {}, clear=True):
             with self.assertRaises(PolicyError):

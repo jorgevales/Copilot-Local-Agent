@@ -31,6 +31,10 @@ class Orchestrator:
         state.data['website_private'] = True
         browser.website_private = True
         self.findings = Findings(state.directory)
+        capability = getattr(config, '_knowledge_capability', None)
+        if capability:
+            state.data['knowledge_capability'] = capability
+            self.findings.set_storage_capability(capability['statement'])
         self.prompts = PromptBuilder(config, registry, state, self.findings)
         self.policy = PathPolicy(config.allowed_roots, excluded_roots=[config.profile_dir],
                                  mapped_s_root=getattr(config, '_auto_s_drive_root', None))
@@ -68,6 +72,9 @@ class Orchestrator:
                              'cancel_event': self.cancel_event, 'cancelled': self.cancel_event.is_set,
                              'process_registry': self.process_registry,
                              'approved_domains': self.state.data.setdefault('approved_domains', [])}
+        from .local_navigation import SessionNavigationGrant
+        self.base_context['local_navigation_grant'] = SessionNavigationGrant(
+            bool(getattr(config, '_local_navigation_confirmed', False)))
         authorize = getattr(browser, 'authorize_tool_domain', None)
         if callable(authorize):
             for domain in self.state.data['approved_domains']:
@@ -542,6 +549,7 @@ class Orchestrator:
         raise RuntimeError('Unreachable retry state')
 
     def _preflight(self, response):
+        self._recover_uncertain_knowledge()
         recovered = recover_missing_navigation(self.state, self.browser)
         if recovered:
             self.feedback.emit('Orchestrator', 'Lost navigation tab: prior outcome retained as unverified. Fresh approved navigation may proceed; re-observe the page before using its facts.')
@@ -587,6 +595,7 @@ class Orchestrator:
                     raise PolicyError('Code proposal and execution arguments conflict')
 
     async def initialize(self):
+        self._recover_uncertain_knowledge()
         response = await self._validated_exchange('initialize', 'Initialize the continuous conversation under the attached contract.')
         if response['response_type'] != 'final' or response['tool_requests']:
             raise ProtocolError('contradictory_execution_state', ['Initialization must acknowledge readiness without tools'])
@@ -594,6 +603,31 @@ class Orchestrator:
         self.state.data['status'] = 'ready_with_uncertain_operations' if any(c['status'] == 'uncertain' for c in self.state.data['calls'].values()) else 'ready'
         self.state.save()
         return response
+
+    def _recover_uncertain_knowledge(self):
+        """Resolve optional persistence effects once; never replay a write."""
+        from .site_knowledge import reconcile_knowledge_call, quarantine_knowledge_record
+        recovered = {}
+        for call_id, call in list(self.state.data['calls'].items()):
+            if call.get('status') != 'uncertain' or operation_domains(call['request']['name']) != {'knowledge'}:
+                continue
+            try:
+                outcome = reconcile_knowledge_call(self.state, self.base_context, call_id)
+            except Exception as error:
+                namespace = (call.get('reconciliation_baseline') or {}).get('namespace_id')
+                archive_status = 'not_applicable'
+                if namespace and getattr(error, 'code', '') in {'integrity_failure', 'knowledge_integrity'}:
+                    try:
+                        quarantine_knowledge_record(self.base_context, namespace)
+                        archive_status = 'retained'
+                    except Exception:
+                        archive_status = 'storage_unavailable'
+                self.state.quarantine_call(call_id)
+                outcome = {'status': 'abandoned_unverifiable', 'completion_credited': False,
+                           'diagnostic': type(error).__name__, 'evidence_archive': archive_status}
+            recovered[call_id] = outcome
+            self.state.event('knowledge_recovery', operation_id=call_id, **outcome)
+        return recovered
 
     async def turn(self, user_input: str, attachments=()):
         self.cancel_event.clear()
@@ -790,6 +824,19 @@ class Orchestrator:
                 if call['name'] in {'discovery.knowledge_save', 'discovery.knowledge_invalidate', 'navigation.intent'}:
                     from .discovery_knowledge import prepare_knowledge_tool
                     prepared = prepare_knowledge_tool(call['name'], call['arguments'], context)
+                if (self.base_context['local_navigation_grant'].approved and
+                        call['name'] in {'site_knowledge.bind', 'site_knowledge.save', 'site_knowledge.invalidate',
+                                         'discovery.knowledge_save', 'discovery.knowledge_invalidate', 'knowledge.note'}):
+                    needs_approval = False
+                    context['approved'] = True
+                    context['approval_hash'] = canonical_hash({'session': self.state.session_id,
+                        'authority': 'confirmed_local_navigation_and_knowledge', 'call': call})
+                    if call['name'].startswith('site_knowledge.'):
+                        context['site_knowledge_reviewed'] = prepared
+                        context['site_knowledge_consent'] = prepared
+                    else:
+                        context['discovery_reviewed'] = prepared
+                        context['discovery_save_consent'] = prepared
                 if call['name'] == 'ocr.image':
                     artifact = self._attachment_record(self.policy.resolve(call['arguments']['path'], True))
                     prepared = {'approved_image_attachment': artifact, 'destination': self.config.copilot_url}
@@ -920,6 +967,9 @@ class Orchestrator:
                             except Exception:
                                 pass  # The tool outcome remains authoritative.
                 self.state.finish_call(call['call_id'], result)
+                recovery = self._recover_uncertain_knowledge().get(call['call_id'])
+                if recovery:
+                    result.setdefault('result', {})['recovery'] = recovery
                 if call['name'] in {'discovery.manifest', 'navigation.intent'}:
                     self.base_context['discovery_synthesis_pending'] = True
                 if result.get('ok') and call['name'] == 'browser.open':

@@ -15,7 +15,7 @@ def canonical_hash(value) -> str:
 
 def operation_domains(name: str) -> frozenset[str]:
     """Conservative effect domains; unknown tools retain the global gate."""
-    if name.startswith('site_knowledge.') or name.startswith('discovery.knowledge_'):
+    if name.startswith(('site_knowledge.', 'discovery.knowledge_', 'knowledge.')):
         return frozenset({'knowledge'})
     if name in {'files.transfer_to_copilot', 'copilot.download'}:
         return frozenset({'browser', 'filesystem'})

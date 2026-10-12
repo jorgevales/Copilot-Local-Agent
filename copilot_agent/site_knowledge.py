@@ -23,7 +23,7 @@ from .protocol import validate_schema
 
 SCHEMA_VERSION = 1
 MAX_BYTES = 131072
-MAX_ITEMS = 120
+MAX_ITEMS = 40
 CATEGORIES = ("routes", "locators", "forms", "document_areas", "recovery")
 EXCLUDED_DATA = [
     "Customer identities, names, identifiers, contact details and document content",
@@ -75,8 +75,7 @@ RECOVERY = _object({"path": PATH,
                               "items": _enum(("reinspect_page", "wait_ready", "use_locator_fallback",
                                               "return_to_safe_route", "ask_user", "stop"))}})
 CATEGORY_SCHEMAS = dict(zip(CATEGORIES, (ROUTE, LOCATOR, FORM, DOCUMENT_AREA, RECOVERY)))
-KNOWLEDGE = _object({key: {"type": "array", "items": schema, "minItems": 1, "maxItems": 40}
-                     for key, schema in CATEGORY_SCHEMAS.items()}, [])
+KNOWLEDGE = {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "object"}, "minItems": 1, "maxItems": MAX_ITEMS}}
 ORIGIN = _string(280)
 SCOPE_LABEL = {"type": "string", "minLength": 1, "maxLength": 64,
                "pattern": r"^[a-z][a-z0-9-]{0,63}$"}
@@ -84,12 +83,12 @@ BIND = _object({"origin": ORIGIN, "tenant": SCOPE_LABEL, "user_scope": SCOPE_LAB
                 "environment": _enum(("production", "test", "staging", "development"))})
 SAVE = _object({"origin": ORIGIN,
                 "allow_partial": {"type": "boolean"},
-                "categories": {"type": "array", "items": _enum(CATEGORIES), "minItems": 1,
-                               "maxItems": len(CATEGORIES), "uniqueItems": True},
+                "categories": {"type": "array", "items": _string(100), "minItems": 1,
+                               "maxItems": MAX_ITEMS, "uniqueItems": True},
                 "knowledge": KNOWLEDGE,
                 "ttl_days": {"type": "integer", "minimum": 1, "maximum": 90}},
                ["origin", "categories", "knowledge"])
-QUERY = _object({"origin": ORIGIN, "category": _enum(CATEGORIES), "route": PATH}, ["origin"])
+QUERY = _object({"origin": ORIGIN, "category": _string(100), "route": PATH}, ["origin"])
 
 KNOWLEDGE_SPECS = {
     "site_knowledge.bind": (BIND, "user_approval", "Select the current HTTPS site's exact tenant, user/sharing scope and environment through local approval. Scope labels are user-declared; never infer an authenticated identity. No website knowledge is saved."),
@@ -151,7 +150,7 @@ STATIC_CHILDREN = frozenset("search lookup find list overview details summary st
 
 
 def _canonical(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
 
 
 def _hash(value):
@@ -204,6 +203,14 @@ def _session(context):
 def knowledge_directory(context):
     """Context-only test override; never an LLM tool argument or shared runtime."""
     selected = context.get("knowledge_directory")
+    if selected is None:
+        config = context.get("config")
+        if config is not None:
+            get = config.get if isinstance(config, dict) else lambda key: getattr(config, key, None)
+            selected = get("knowledge_directory")
+            base = get("storage_dir") or get("root")
+            if selected is None and base:
+                selected = Path(base) / "Discoveries"
     if selected is None:
         local = os.environ.get("LOCALAPPDATA")
         if not local:
@@ -332,70 +339,77 @@ class KnowledgeWriteError(RuntimeError):
 
 
 def _sanitize_knowledge(args):
-    categories = args["categories"]
+    """Validate bounded JSON structure; content approval belongs to the safety layer."""
     knowledge = args["knowledge"]
-    if set(categories) != set(knowledge):
-        raise ValueError("Saved knowledge must contain exactly the categories requested for local consent")
-    if sum(len(items) for items in knowledge.values()) > MAX_ITEMS:
-        raise ValueError("Website memory exceeds the bounded record limit")
+    categories = args["categories"]
+    if type(knowledge) is not dict or set(categories) != set(knowledge):
+        raise ValueError("Knowledge categories must match the approved payload")
+    count = 0
     for category, items in knowledge.items():
-        for index,item in enumerate(items):
-            errors=validate_schema(item,CATEGORY_SCHEMAS[category])
-            if errors:
-                field=errors[0].split(':',1)[0].removeprefix('$.')
-                raise KnowledgeValidationError('knowledge.'+category+'['+str(index)+'].'+field,item.get(field),errors[0])
-            try:
+        if type(category) is not str or not category.strip() or len(category) > 100:
+            raise ValueError("Knowledge category must be a bounded nonempty string")
+        if type(items) is not list or not items or any(type(item) is not dict for item in items):
+            raise ValueError("Knowledge categories must contain nonempty arrays of objects")
+        count += len(items)
+        # Executable website hints retain their established privacy and
+        # authentication boundaries. Ordinary custom categories and standalone
+        # Discoveries notes do not depend on this navigation vocabulary.
+        if category in CATEGORY_SCHEMAS:
+            for item in items:
+                errors = validate_schema(item, CATEGORY_SCHEMAS[category])
+                if errors:
+                    raise ValueError('Invalid bounded website hint structure')
                 _safe_route(item['path'])
-            except ValueError as exc:
-                raise KnowledgeValidationError('knowledge.'+category+'['+str(index)+'].path',item['path'],str(exc)) from exc
-            if "parent_path" in item:
-                _safe_route(item["parent_path"])
-            if "label" in item:
-                try: _safe_label(item['label'])
-                except ValueError as exc: raise KnowledgeValidationError('knowledge.'+category+'['+str(index)+'].label',item['label'],str(exc)) from exc
-            if category == "locators":
-                _safe_locator(item)
-            if category == "forms":
-                for field in item["fields"]:
-                    _safe_label(field["label"])
-            if category == "recovery" and item["failure"] in {"auth_expired", "access_denied", "captcha"}:
-                if any(step not in {"ask_user", "stop"} for step in item["steps"]):
-                    raise ValueError("Authentication, access-denied and CAPTCHA recovery must stop for the user")
-    if len(_canonical(knowledge).encode("utf-8")) > MAX_BYTES // 2:
-        raise ValueError("Website memory exceeds its bounded payload size")
+                if 'parent_path' in item:
+                    _safe_route(item['parent_path'])
+                if 'label' in item:
+                    _safe_label(item['label'])
+                if category == 'locators':
+                    _safe_locator(item)
+                if category == 'forms':
+                    for field in item['fields']:
+                        _safe_label(field['label'])
+                if category == 'recovery' and item['failure'] in {'auth_expired', 'access_denied', 'captcha'}:
+                    if any(step not in {'ask_user', 'stop'} for step in item['steps']):
+                        raise ValueError('Authentication and access recovery require user intervention')
+    try:
+        encoded = _canonical(knowledge).encode("utf-8")
+    except (ValueError, TypeError, RecursionError) as error:
+        raise ValueError("Knowledge serialization failed: finite JSON is required") from error
+    if count > MAX_ITEMS or len(encoded) > MAX_BYTES // 2:
+        raise ValueError("Knowledge exceeds the bounded payload limit")
     return deepcopy(knowledge)
 
 
 def safe_proposal(args):
-    errors=validate_schema(args,{**SAVE,'properties':{**SAVE['properties'],'knowledge':{'type':'object'}}})
-    if errors: raise KnowledgeValidationError(errors[0].split(':',1)[0],None,errors[0])
-    cleaned=deepcopy(args); rejected=[]; safe={}
-    for category,items in args['knowledge'].items():
-        if category not in CATEGORY_SCHEMAS or not isinstance(items,list):
-            raise KnowledgeValidationError('knowledge.[unsupported-category]',category,'Unsupported category or array')
-        for index,item in enumerate(items):
+    errors = validate_schema(args, SAVE)
+    if errors:
+        raise KnowledgeValidationError("knowledge", None, "Invalid bounded knowledge structure")
+    if set(args['categories']) != set(args['knowledge']):
+        raise ValueError('Consent categories must match submitted knowledge categories')
+    cleaned, safe, rejected = deepcopy(args), {}, []
+    for category, items in args['knowledge'].items():
+        for index, item in enumerate(items):
             try:
-                if not isinstance(item,dict): raise ValueError('Knowledge item must be an object')
                 candidate = deepcopy(item)
-                for key in ('path', 'parent_path'):
-                    if isinstance(candidate.get(key), str):
-                        candidate[key] = _template_route(candidate[key], args['origin'])
-                _sanitize_knowledge({'categories':[category],'knowledge':{category:[candidate]}})
-                safe.setdefault(category,[]).append(candidate)
-            except ValueError as exc:
-                detail=deepcopy(getattr(exc,'detail',{
-                    'path':'knowledge.'+category+'[0]',
-                    'value':'[excluded sha256='+_hash(item)+']',
-                    'reason':str(exc)}))
-                detail['path']=detail['path'].replace('[0]','['+str(index)+']',1)
+                if category in CATEGORY_SCHEMAS:
+                    for key in ('path', 'parent_path'):
+                        if isinstance(candidate.get(key), str):
+                            candidate[key] = _template_route(candidate[key], args['origin'])
+                _sanitize_knowledge({'categories': [category], 'knowledge': {category: [candidate]}})
+                safe.setdefault(category, []).append(candidate)
+            except ValueError as error:
+                detail = {'path': 'knowledge.item[' + str(index) + ']',
+                          'value': '[excluded sha256=' + _hash(item) + ']',
+                          'reason': 'Website hint failed structural or privacy validation; use an ordinary sanitized discovery note.'}
                 if args.get('allow_partial', True) is False:
-                    raise KnowledgeValidationError(detail['path'],detail['value'],detail['reason']) from exc
+                    raise ValueError(detail['reason']) from error
                 rejected.append(detail)
-    if set(args['categories'])!=set(args['knowledge']): raise ValueError('Consent categories must match submitted knowledge categories')
-    if not safe: raise ValueError('No safe items remain; nothing was saved. '+str(rejected))
-    cleaned['knowledge']=safe; cleaned['categories']=list(safe)
+    if not safe:
+        raise ValueError('No valid items remain; save ordinary sanitized discoveries with knowledge.note')
+    cleaned['knowledge'], cleaned['categories'] = safe, list(safe)
     _sanitize_knowledge(cleaned)
-    return cleaned,rejected
+    return cleaned, rejected
 
 
 def validate_knowledge(name, args, context, policy=None):
@@ -411,8 +425,7 @@ def validate_knowledge(name, args, context, policy=None):
     knowledge_directory(context)
     if name == "site_knowledge.save":
         _sanitize_knowledge(args)
-    if name == "site_knowledge.query" and "route" in args:
-        _safe_route(args["route"])
+
 
 
 def prepare_knowledge(args, context, name=None):
@@ -428,7 +441,7 @@ def prepare_knowledge(args, context, name=None):
     validate_knowledge(name, args, context)
     scope = _scope(name, args, context)
     prepared = {"kind": name, "scope": scope, "namespace_id": _hash(scope),
-                "storage_scope": "This Windows user on this device only; outside OneDrive and developer memory",
+                "storage_scope": "Configured shared Discoveries knowledge store",
                 "directory": str(knowledge_directory(context)), "excluded_data": list(EXCLUDED_DATA),
                 "decline": "Decline this grant; the current task and ephemeral website map can continue."}
     if name == "site_knowledge.save":
@@ -439,15 +452,15 @@ def prepare_knowledge(args, context, name=None):
         for category, items in incoming.items():
             current = knowledge.setdefault(category, [])
             for item in items:
-                identity = ((item['path'], item.get('failure')) if category == 'recovery'
-                            else (item['path'], item.get('strategy'), item.get('role'), item.get('value')) if category == 'locators'
-                            else (item['path'], item.get('purpose')) if category == 'forms'
-                            else (item['path'],))
+                identity = ((item.get('path'), item.get('failure')) if category == 'recovery'
+                            else (item.get('path'), item.get('strategy'), item.get('role'), item.get('value')) if category == 'locators'
+                            else (item.get('path'), item.get('purpose')) if category == 'forms'
+                            else (item.get('path'),) if item.get('path') is not None else (_hash(item),))
                 current[:] = [old for old in current if
-                              (((old['path'], old.get('failure')) if category == 'recovery'
-                                else (old['path'], old.get('strategy'), old.get('role'), old.get('value')) if category == 'locators'
-                                else (old['path'], old.get('purpose')) if category == 'forms'
-                                else (old['path'],)) != identity)]
+                              (((old.get('path'), old.get('failure')) if category == 'recovery'
+                                else (old.get('path'), old.get('strategy'), old.get('role'), old.get('value')) if category == 'locators'
+                                else (old.get('path'), old.get('purpose')) if category == 'forms'
+                                else (old.get('path'),) if old.get('path') is not None else (_hash(old),)) != identity)]
                 current.append(deepcopy(item))
         _sanitize_knowledge({'categories': list(knowledge), 'knowledge': knowledge})
         prepared.update(categories=sorted(knowledge), knowledge=knowledge, rejected_items=rejected,
@@ -510,6 +523,36 @@ def _digest(value):
     return type(value) is str and re.fullmatch(r"[a-f0-9]{64}", value) is not None
 
 
+class KnowledgeStorageError(PolicyError):
+    """Sanitized technical storage failure; never include paths or payloads."""
+    def __init__(self, code):
+        self.code = code
+        super().__init__("Knowledge storage: " + code)
+
+
+def storage_error_code(error):
+    import sqlite3
+    code = getattr(error, "code", None)
+    if code in {"knowledge_integrity", "evidence_integrity"}:
+        return "integrity_failure"
+    if code == "store_version":
+        return "incompatible_store_version"
+    if code:
+        return code
+    if isinstance(error, PermissionError):
+        return "permission_denied"
+    if isinstance(error, FileNotFoundError):
+        return "missing_root"
+    if isinstance(error, sqlite3.OperationalError):
+        text = str(error).lower()
+        return "storage_locked" if "locked" in text else "read_only" if "readonly" in text else "storage_unavailable"
+    if isinstance(error, sqlite3.DatabaseError):
+        return "integrity_failure"
+    if isinstance(error, (ValueError, TypeError, UnicodeError)):
+        return "serialization_error"
+    return "filesystem_unavailable"
+
+
 def _read(context, scope):
     # Both discovery knowledge generations now share the same per-user SQLite
     # ledger. Read old JSON records only as a migration fallback; a successful
@@ -519,8 +562,26 @@ def _read(context, scope):
     try:
         store = Store(context, persistent=True, readonly=True, allow_missing=True)
         value = store.site_knowledge(_hash(scope))
+        if value is None and not context.get('knowledge_directory'):
+            local = os.environ.get('LOCALAPPDATA')
+            legacy = Path(local) / 'CopilotLocalAgent' / 'site-knowledge' if local else None
+            if legacy is not None and legacy.absolute() != knowledge_directory(context):
+                old_context = dict(context, knowledge_directory=legacy)
+                old_store = Store(old_context, persistent=True, readonly=True, allow_missing=True)
+                try:
+                    value = old_store.site_knowledge(_hash(scope))
+                finally:
+                    old_store.close()
+                if value is None:
+                    old_path = _record_path(old_context, scope)
+                    if old_path.is_file():
+                        checked = PathPolicy([legacy]).resolve(old_path, True)
+                        if checked.stat().st_size > MAX_BYTES:
+                            raise ValueError('Bounded legacy knowledge limit exceeded')
+                        value = json.loads(checked.read_text(encoding='utf-8'), object_pairs_hook=_json_pairs,
+                                           parse_constant=_reject_json_constant)
     except Exception as error:
-        raise PolicyError("The shared website knowledge ledger failed storage or integrity validation") from error
+        raise KnowledgeStorageError(storage_error_code(error)) from error
     finally:
         if store is not None:
             store.close()
@@ -538,7 +599,7 @@ def _read(context, scope):
             raise PolicyError("Stored website knowledge is damaged; replace it after local review") from error
     expected = {"schema_version", "namespace_id", "scope_fingerprint", "knowledge", "consent",
                 "provenance", "observed_at", "expires_at", "invalidated_at", "payload_sha256"}
-    if (type(value) is not dict or set(value) not in (expected,expected|{'revision'}) or value.get("schema_version") != SCHEMA_VERSION
+    if (type(value) is not dict or not expected.issubset(value) or type(value.get("schema_version")) is not int or value.get("schema_version") < 1
             or value.get("namespace_id") != _hash(scope) or value.get("scope_fingerprint") != _fingerprint(scope)
             or type(value.get("consent")) is not dict or type(value.get("provenance")) is not dict):
         raise PolicyError("Stored website knowledge does not match the selected namespace and schema")
@@ -567,7 +628,7 @@ def _read(context, scope):
     except (ValueError, TypeError, KeyError) as error:
         raise PolicyError("Stored website knowledge failed privacy or freshness validation") from error
     if value["payload_sha256"] != _hash(value["knowledge"]):
-        raise PolicyError("Stored website knowledge payload integrity failed")
+        raise KnowledgeStorageError("integrity_failure")
     provenance = value["provenance"]
     if (set(provenance) != {"source_urls", "session", "request", "source"}
             or provenance["source"] != "local_user_approved_navigation_templates"
@@ -585,7 +646,7 @@ def _fingerprint(scope):
 
 
 def _sources(scope, knowledge):
-    return sorted({scope["origin"] + item["path"] for items in knowledge.values() for item in items})
+    return sorted({scope["origin"] + item["path"] for items in knowledge.values() for item in items if isinstance(item.get("path"), str) and item["path"].startswith("/")})
 
 
 def _write(context, scope, value):
@@ -665,11 +726,15 @@ def reconcile_knowledge_call(state, context, call_id):
     baseline = call.get('reconciliation_baseline') or {}
     if baseline.get('kind') != 'knowledge_save':
         raise ValueError('This operation has no recorded knowledge readback baseline')
-    origin = _current_origin(context)
-    scope = _scope('site_knowledge.retrieve', {'origin': origin}, context)
-    if _hash(scope) != baseline['namespace_id']:
-        raise PolicyError('Current site namespace differs from the original save')
-    current = _read(context, scope)
+    from .discovery_store import Store
+    store = Store(context, persistent=True, readonly=True, allow_missing=True)
+    try:
+        current = store.site_knowledge(baseline['namespace_id'])
+    finally:
+        store.close()
+    if current is not None and (current.get('namespace_id') != baseline['namespace_id']
+            or current.get('payload_sha256') != _hash(current.get('knowledge'))):
+        raise KnowledgeStorageError('integrity_failure')
     current_hash = _hash(current) if current is not None else None
     if current_hash == baseline['before_sha256']:
         outcome = 'not_executed'
@@ -765,11 +830,27 @@ def execute_knowledge(name, args, context, policy=None):
     if name == "site_knowledge.query":
         category = args.get("category")
         route = args.get("route")
-        result["knowledge"] = {key: [item for item in items if route is None or item["path"] == route]
+        result["knowledge"] = {key: [item for item in items if route is None or item.get("path") == route]
                                for key, items in result["knowledge"].items() if category is None or key == category}
     elif name == "site_knowledge.export":
         knowledge = result.pop("knowledge")
         result["summary"] = {"item_counts": {key: len(items) for key, items in knowledge.items()},
-                             "route_templates": sorted({item["path"] for items in knowledge.values() for item in items}),
+                             "route_templates": sorted({item["path"] for items in knowledge.values() for item in items if isinstance(item.get("path"), str)}),
                              "categories": sorted(knowledge)}
     return result
+
+
+def quarantine_knowledge_record(context, namespace_id):
+    """Preserve an unreadable active record as evidence, then release its namespace.
+
+    Called only by local operation-ledger recovery, never a model tool argument.
+    A subsequent approved save starts a new record; this does not credit the old write.
+    """
+    if not _digest(namespace_id):
+        raise ValueError('A retained namespace identifier is required')
+    from .discovery_store import Store
+    store = Store(context, persistent=True)
+    try:
+        return store.quarantine_site_knowledge(namespace_id)
+    finally:
+        store.close()

@@ -5,7 +5,7 @@ history.replaceState(null,'',location.pathname);
 let cursor=0,events=[],snapshot=null,selected=null,activeTab='activity',hiddenBefore=0,approvalSignature='',polling=false,bookmarkIds=new Set(),lastFocus=null;
 let submitting=false,launchPending=false,launchReply='y',launchCursor=0,launchError='',connectionLost=false;
 function backendPrompt(){return events.filter(e=>e.kind==='status').at(-1);}
-function launchRequested(){const p=backendPrompt();return p?.payload.state==='awaiting_input'&&String(p.payload.summary||'').trim().endsWith('Start this visible run [Y/n]?');}
+function launchRequested(){const p=backendPrompt();return p?.payload.state==='awaiting_input'&&String(p.payload.summary||'').trim().endsWith('Allow local navigation and verified knowledge saving for this run [Y/n]?');}
 function runtimeAvailable(){return Boolean(snapshot?.runtime_connected)&&!connectionLost&&events.filter(e=>e.kind==='connection').at(-1)?.payload.state!=='disconnected';}
 function runtimeStateLabel(){
  if(!runtimeAvailable())return 'Runtime unavailable';
@@ -19,7 +19,7 @@ function runtimeStateLabel(){
 }
 function renderLaunch(){
  const requested=launchRequested(),available=runtimeAvailable();
- const subsequent=events.find(e=>e.id>launchCursor&&(e.kind==='error'||e.kind==='connection'&&e.payload.state==='disconnected'||e.kind==='status'&&e.payload.state==='awaiting_input'&&!String(e.payload.summary||'').trim().endsWith('Start this visible run [Y/n]?')));
+ const subsequent=events.find(e=>e.id>launchCursor&&(e.kind==='error'||e.kind==='connection'&&e.payload.state==='disconnected'||e.kind==='status'&&e.payload.state==='awaiting_input'&&!String(e.payload.summary||'').trim().endsWith('Allow local navigation and verified knowledge saving for this run [Y/n]?')));
  if(launchPending&&subsequent){launchPending=false;if(subsequent.kind==='error')launchError=subsequent.payload.summary||'Startup reported an error. Review the conversation for details.';}
  $('launch-card').hidden=!requested&&!launchPending&&!launchError;
  $('launch-card').setAttribute('aria-busy',String(submitting||launchPending));
