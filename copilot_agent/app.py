@@ -132,8 +132,13 @@ async def choose_browser_endpoint(config, args, settings):
     key = machine_key()
     remembered = debug_ports.get(key)
     candidates = []
-    if not getattr(args, 'port', None) and type(remembered) is int and 1024 <= remembered <= 65535:
-        candidates.append(remembered)
+    explicit_port = getattr(args, 'port', None)
+    if not explicit_port:
+        # Prefer the conventional local agent endpoint when available, while
+        # still attaching only after exact Edge/profile ownership validation.
+        candidates.append(9222)
+        if type(remembered) is int and 1024 <= remembered <= 65535 and remembered not in candidates:
+            candidates.append(remembered)
     if config.debug_port not in candidates:
         candidates.append(config.debug_port)
     selected = None
