@@ -221,10 +221,10 @@ async def start_new_session(config, previous, model_label, registry=None):
                               event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT)
         engine.feedback.color=_TERMINAL.color
         globals()['_UI_PERMISSION_CONTEXT']=engine.base_context
-        await engine.prepare_initialization()
-        # Recheck current account availability and the actual checked option.
+        # Keep model discovery and initialization on the one owned Copilot tab.
         await browser.discover_models()
         await browser.select_model(model_label)
+        await engine.prepare_initialization()
         state.event('model_selected', label=model_label, visible=True)
         await engine.initialize()
         if hasattr(browser, 'verify_interaction_ready'):
@@ -356,19 +356,9 @@ async def run(args):
                                     event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT)
         orchestrator.feedback.color=_TERMINAL.color
         globals()['_UI_PERMISSION_CONTEXT']=orchestrator.base_context
-        # Startup attachment transfer and model discovery use separate visible
-        # tabs so neither UI flow can disturb the other's composer/picker state.
-        discover = getattr(browser, 'discover_models_on_auxiliary_page', browser.discover_models)
-        startup_tasks = [asyncio.create_task(orchestrator.prepare_initialization()),
-                         asyncio.create_task(discover())]
-        try:
-            _, models = await asyncio.gather(*startup_tasks)
-        except BaseException:
-            for task in startup_tasks:
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(*startup_tasks, return_exceptions=True)
-            raise
+        # Use the single owned Copilot tab throughout startup. Opening and then
+        # closing an auxiliary Copilot tab can terminate an attached Edge route.
+        models = await browser.discover_models()
         browser.models = models
         ranked = model_rank(models)
         enabled = [m for m in ranked if m.get('enabled', True)]
@@ -405,6 +395,7 @@ async def run(args):
                 raise ValueError('Model selection exhausted five attempts')
         if chosen['label'] != preferred['label']:
             await browser.select_model(chosen['label'])
+        await orchestrator.prepare_initialization()
         settings['config']['model'] = chosen['label']
         persist_runtime_settings(config, settings)
         state.event('model_selected', label=chosen['label'], visible=True)

@@ -24,10 +24,6 @@ class StartupBrowser:
             {'label': 'Alternate model', 'enabled': True, 'provider': 'OpenAI'},
         ]
 
-    async def discover_models_on_auxiliary_page(self):
-        self.events.append('browser:discover-aux')
-        return await self.discover_models()
-
     async def select_model(self, label):
         self.events.append('browser:select:' + label)
         self.model_label = label
@@ -103,15 +99,16 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
             await run(args)
         return events
 
-    async def test_default_is_preselected_while_user_decides_and_readiness_precedes_prompt(self):
+    async def test_single_tab_discovery_precedes_preload_and_readiness_precedes_prompt(self):
         events = await self.run_flow(['', ':exit'])
         model_prompt = next(item for item in events if item.startswith('ask:Choose'))
         user_prompt = next(item for item in events if item == 'ask:You: ')
 
-        self.assertLess(events.index('orchestrator:preload'), events.index('browser:discover'))
-        self.assertIn('browser:discover-aux', events)
+        self.assertLess(events.index('browser:discover'), events.index('orchestrator:preload'))
+        self.assertFalse(any(item == 'browser:discover-aux' for item in events))
         self.assertLess(events.index('browser:select:GPT-6 Sol'), events.index(model_prompt))
         self.assertEqual(1, events.count('browser:select:GPT-6 Sol'))
+        self.assertLess(events.index(model_prompt), events.index('orchestrator:preload'))
         self.assertLess(events.index('orchestrator:initialize'),
                         events.index('browser:ready:GPT-6 Sol'))
         self.assertLess(events.index('browser:ready:GPT-6 Sol'), events.index(user_prompt))

@@ -37,6 +37,45 @@ class CorrelationTests(unittest.TestCase):
 
 
 class StartupRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_startup_reuses_initial_blank_page_without_opening_another(self):
+        class Page:
+            url = 'about:blank'
+            def is_closed(self): return False
+        class Context:
+            def __init__(self):
+                self.pages = [Page()]
+                self.new_pages = 0
+            async def new_page(self):
+                self.new_pages += 1
+                return Page()
+        adapter = BrowserAdapter.__new__(BrowserAdapter)
+        adapter.context = Context()
+
+        claimed = await adapter._claim_chat_page()
+
+        self.assertIs(claimed, adapter.context.pages[0])
+        self.assertEqual(0, adapter.context.new_pages)
+
+    async def test_startup_opens_one_page_when_edge_has_no_blank_page(self):
+        class Page:
+            url = 'https://example.com/'
+            def is_closed(self): return False
+        class Context:
+            def __init__(self):
+                self.pages = [Page()]
+                self.new_pages = 0
+            async def new_page(self):
+                self.new_pages += 1
+                page = Page()
+                page.url = 'about:blank'
+                return page
+        adapter = BrowserAdapter.__new__(BrowserAdapter)
+        adapter.context = Context()
+
+        await adapter._claim_chat_page()
+
+        self.assertEqual(1, adapter.context.new_pages)
+
     async def test_first_navigation_timeout_still_checks_visible_page_readiness(self):
         from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 

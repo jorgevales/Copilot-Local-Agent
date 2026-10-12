@@ -355,6 +355,17 @@ class BrowserAdapter:
             # Continue the separate bounded UI readiness check on this same page.
             print('[System] Copilot navigation is still loading; checking the visible UI before stopping startup.')
 
+    async def _claim_chat_page(self):
+        """Reuse Edge's initial blank tab so startup creates one Copilot tab only."""
+        pages = list(getattr(self.context, 'pages', ()))
+        for page in reversed(pages):
+            closed = getattr(page, 'is_closed', None)
+            if getattr(page, 'url', None) == 'about:blank' and not (callable(closed) and closed()):
+                self.page = page
+                return page
+        self.page = await asyncio.wait_for(self.context.new_page(), 10)
+        return self.page
+
     async def _connect_running_edge_fallback(self):
         """Retry verified running Edge endpoints after a failed selected route."""
         attempts = set()
@@ -454,14 +465,12 @@ class BrowserAdapter:
                     ['clipboard-read', 'clipboard-write'],
                     origin='https://m365.cloud.microsoft'),
                 10)
-            self.page = await asyncio.wait_for(self.context.new_page(), 10)
-            # Tool tabs share this verified profile's cookies and CDP port. Guard
-            # only owned tool pages; never intercept the Copilot or user tabs.
+            await self._claim_chat_page()
+            # Website tool tabs are created lazily by browser.open. Starting one
+            # here leaves an unexplained blank tab beside every Copilot chat.
             self.tool_context = self.context
-            self.tool_page = await asyncio.wait_for(self.context.new_page(), 10)
-            await self._configure_tool_context(self.tool_page)
+            self.tool_page = None
             self.page.set_default_timeout(5000)
-            self.tool_page.set_default_timeout(5000)
             self.startup_stage = 'copilot_navigation'
             await self._navigate_copilot()
             await self.page.bring_to_front()
@@ -680,29 +689,8 @@ class BrowserAdapter:
                 await self.page.keyboard.press('Escape')
 
     async def discover_models_on_auxiliary_page(self) -> list[dict]:
-        """Discover the account's model options on a separate owned tab.
-
-        Startup can then upload the initialization attachments in the primary
-        composer at the same time without racing the model picker against the
-        attachment menu or composer contents.
-        """
-        page = await asyncio.wait_for(self.context.new_page(), 10)
-        probe = BrowserAdapter(self.config)
-        probe.page = page
-        try:
-            await page.goto(self.config.copilot_url, wait_until='domcontentloaded',
-                            timeout=int(self.config.startup_timeout * 1000))
-            deadline = time.monotonic() + self.config.startup_timeout
-            while time.monotonic() < deadline:
-                if (urlparse(page.url).hostname == 'm365.cloud.microsoft'
-                        and await probe._editor(required=False) is not None
-                        and await probe._visible(edge.PICKER_SELECTOR) is not None):
-                    return await probe.discover_models()
-                await asyncio.sleep(self.config.poll_interval)
-            raise BrowserUIError('The auxiliary model-discovery tab did not reach the signed-in Copilot model picker.')
-        finally:
-            if not page.is_closed():
-                await page.close()
+        """Compatibility entry point; discovery stays on the single chat tab."""
+        return await self.discover_models()
 
     async def select_model(self, label: str):
         matches = [item for item in self.models if item['label'] == label and item['enabled']]

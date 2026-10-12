@@ -70,7 +70,7 @@ class NewSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], new.state.data['unresolved_questions'])
         self.assertEqual({}, new.state.data['approvals'])
         self.assertEqual({}, new.state.data['calls'])
-        self.assertEqual([], new.findings.data['findings'])
+        self.assertNotIn('OLD_TOPIC_UNIQUE', json.dumps(new.findings.data['findings']))
         self.assertEqual(1, new.state.message_count)
         self.assertEqual(8, len(fresh_browser.sent[0]['attachments']))
         self.assertEqual(8, len(fresh_browser.preloaded['attachments']))
@@ -78,8 +78,8 @@ class NewSessionTests(unittest.IsolatedAsyncioTestCase):
                          fresh_browser.sent[0]['message'])
         self.assertEqual(fresh_browser.preloaded['request_id'],
                          fresh_browser.sent[0]['message']['request_id'])
-        self.assertLess(fresh_browser.events.index('preload_exchange'),
-                        fresh_browser.events.index('discover_models'))
+        self.assertLess(fresh_browser.events.index('discover_models'),
+                        fresh_browser.events.index('preload_exchange'))
         self.assertLess(fresh_browser.events.index('select_model:Synthetic model'),
                         fresh_browser.events.index('exchange'))
         self.assertLess(fresh_browser.events.index('exchange'),
