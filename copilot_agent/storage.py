@@ -1,4 +1,4 @@
-"""Per-user local app-data storage and operator-selected storage paths."""
+"""S: project-sibling persistence and operator-selected storage helpers."""
 from __future__ import annotations
 
 import hashlib
@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path, PureWindowsPath
 import socket
+import ntpath
 
 from .persistence import write_json
 
@@ -18,17 +19,37 @@ def machine_key(hostname=None) -> str:
     return 'vdi-' + hashlib.sha256(name.casefold().encode('utf-8')).hexdigest()[:16]
 
 
+def discoveries_storage(project_root: Path) -> Path:
+    """Return the verified S: project sibling used for all durable agent data."""
+    from .policy import PolicyError, mapped_s_drive_root
+    root = Path(project_root).expanduser().resolve()
+    try:
+        share = mapped_s_drive_root().resolve()
+    except (PolicyError, OSError) as error:
+        raise ValueError('S: must be mapped to its UNC share before the agent can start; no local C: storage fallback is permitted') from error
+    if root != share and share not in root.parents:
+        raise ValueError('The project is not under the live S: UNC mapping; place/run the project from S: to enable persistent storage')
+    target = root.parent / 'Discoveries knowledge'
+    if target == share or share not in target.parents:
+        raise ValueError('The Discoveries knowledge folder must be a sibling of the project root inside the mapped S: share')
+    return target
+
+
+def discoveries_storage_paths(project_root: Path) -> dict[str, str]:
+    """Describe the same folder as an S: path and its live UNC filesystem path."""
+    from .policy import mapped_s_drive_root
+    target = discoveries_storage(project_root).resolve()
+    share = mapped_s_drive_root().resolve()
+    relative = ntpath.relpath(str(target), str(share))
+    if relative == '..' or relative.startswith('..\\'):
+        raise ValueError('The Discoveries knowledge folder resolved outside the live S: share')
+    return {'s_path': str(Path('S:/') / Path(relative)), 'unc_path': str(target)}
+
+
 def default_local_storage(environ=None) -> Path:
-    """Return the ordinary per-user app-data root without probing OneDrive."""
-    environment = os.environ if environ is None else environ
-    base = environment.get('LOCALAPPDATA')
-    if isinstance(base, str) and base.strip():
-        return Path(base).expanduser().resolve() / 'CopilotLocalAgent'
-    if os.name == 'nt':
-        return Path.home() / 'AppData' / 'Local' / 'CopilotLocalAgent'
-    base = environment.get('XDG_DATA_HOME')
-    return (Path(base).expanduser() if isinstance(base, str) and base.strip()
-            else Path.home() / '.local' / 'share') / 'copilot-local-agent'
+    """Compatibility name: agent storage is the S: Discoveries project sibling."""
+    from .config import PROJECT_ROOT
+    return discoveries_storage(PROJECT_ROOT)
 
 
 def validate_user_storage_directory(path: Path) -> Path:

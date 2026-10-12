@@ -30,7 +30,8 @@ All paths below are relative to `Scripts and projects/Copilot Local Agent`.
 | `copilot_agent/feedback.py` | `Feedback`, `public_preview`; attributed terminal output and safe previews. |
 | `copilot_agent/logging_utils.py` | `redact`, `EventLog`; redacted event retention. |
 | `copilot_agent/diagnostics.py` | `DiagnosticReports`; separate internal/sanitized bug reports and source-origin recommendations. |
-| `copilot_agent/storage.py` | OneDrive discovery, machine keys, selected settings and shared Python candidates. |
+| `copilot_agent/storage.py` | Project-relative S: `Discoveries knowledge` root discovery; mapped S: and UNC path resolution; machine keys and shared Python candidates. |
+| `copilot_agent/terminal_input.py` | Single-reader terminal broker that separates pending approval answers from steering input. |
 | `copilot_agent/sync.py` | `CreatedSync`, `snapshot`; bounded stable-file polling. |
 | `copilot_agent/file_picker.py` | `select_files`; native picker and supported file filters. |
 

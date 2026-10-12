@@ -7,7 +7,8 @@
 - Model availability, labels, quotas, tenant behavior, and UI selectors can change.
 - `local_python` is not Windows Sandbox or a full OS security boundary; native extensions and a trusted local machine remain residual risks.
 - Physical display capture/viewer placement requires an unlocked Windows desktop, available displays, GDI/Tk access, and organizational permission.
-- Created-folder monitoring is disabled until the user explicitly configures an approved OneDrive directory; local paths do not prove cloud synchronization.
+- S: must be mounted and resolve to a UNC share before startup can identify the canonical Discoveries knowledge sibling. No C: or automatic OneDrive storage fallback is allowed. The UNC and mapped path are both provided to the agent.
+- The one-run local navigation grant permits direct reads and creation under the exact canonical Discoveries folder; deletion and overwrite remain explicit approval actions. Approval input is isolated from queued steering input.
 - Browser and download behavior is environment-specific. Offline mocks do not prove production UI, VDI, or delivery behavior.
 - Internal bug reports include filtered error context and source-relative frames; send them only to authorized Copilot. Sanitized reports use an allowlist and require manual review before external sharing.
 

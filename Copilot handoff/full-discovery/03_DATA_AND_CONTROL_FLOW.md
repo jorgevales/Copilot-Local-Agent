@@ -2,8 +2,8 @@
 
 ## Startup and initialization
 
-1. The launcher validates the selected shared Python, project environment, lock file, PowerShell bootstrap, OneDrive account, and Edge path.
-2. `copilot_agent.app.run()` loads `Config`, discovers or validates the selected storage, and chooses a free/remembered loopback port or an explicitly owned existing endpoint.
+1. The launcher validates the selected shared Python, project environment, lock file, PowerShell bootstrap, and Edge path.
+2. `copilot_agent.app.run()` loads `Config`, resolves the project checkout through the live S: mapping to its UNC share, and selects the sibling `Discoveries knowledge` directory. It reports both paths and fails closed if the checkout is not on S:.
 3. `start_new_session()` creates a fresh local session and owned chat/tool pages; resume restores state but preserves uncertainty and clears inherited approvals where required.
 4. `PromptBuilder` verifies the ten complete guidance/schema/catalogue components and builds eight physical startup attachments: guidance 01-06 separately, then two lossless groups for 07-08 and schema/catalogue.
 5. `BrowserAdapter.exchange()` sends the compact initialization/request and captures only a newly correlated assistant response.
@@ -33,5 +33,5 @@ Actionable exceptions set a `bug_fix` session flag and are recorded to separate 
 
 ## External interfaces
 
-The project interfaces with Microsoft Copilot through visible Edge UI/CDP, Edge download events/settings, local OneDrive paths, Windows registry/process/network/display APIs, Playwright, and the configured package index during setup. It does not call a reasoning-model API.
+The project interfaces with Microsoft Copilot through visible Edge UI/CDP, Edge download events/settings, the S: mapped drive and its UNC target, Windows registry/process/network/display APIs, Playwright, and the configured package index during setup. OneDrive is not selected automatically for agent storage and is used only after an explicit request. It does not call a reasoning-model API.
 

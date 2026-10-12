@@ -21,7 +21,7 @@ from .attachments import MAX_USER_FILES
 from .diagnostics import DiagnosticReports
 from .browser import BrowserUIError
 from .protocol import ProtocolError
-from .policy import PolicyError
+from .policy import PolicyError, mapped_s_drive_root
 from .storage import default_local_storage, machine_key, read_user_settings, save_user_settings, validate_user_storage_directory
 from . import reused_browser as edge
 from .setup_resources import choose_edge
@@ -54,6 +54,11 @@ async def ask(prompt: str) -> str:
     if _TERMINAL_INPUT is not None:
         return await _TERMINAL_INPUT.ask(_TERMINAL.prompt('User', prompt))
     return await asyncio.to_thread(input, _TERMINAL.prompt('User', prompt))
+
+
+async def _terminal_approval_decider(_preview):
+    prompt = _TERMINAL.prompt('User', 'Choose 1 = Deny, 2 = Allow this exact execution once, 3 = Allow this exact displayed plan [1/2/3]: ')
+    return await _TERMINAL_INPUT.ask_approval(prompt)
 
 
 def _record_bug_fix(state, config, exc, operation, stage, report_index=None):
@@ -228,7 +233,7 @@ async def start_new_session(config, previous, model_label, registry=None):
         state.save()
         await browser.start()
         engine = Orchestrator(fresh_config, browser, registry or ToolRegistry(), state,
-                              approval_decider=_UI_APPROVAL_DECIDER, display=_TERMINAL.sink,
+                              approval_decider=_UI_APPROVAL_DECIDER or (_terminal_approval_decider if _UI_ASK is None else None), display=_TERMINAL.sink,
                               event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT,
                               steering_poll=_UI_STEERING_POLL,
                               steering_complete=_UI_STEERING_COMPLETE)
@@ -270,16 +275,30 @@ async def run(args):
     global _TERMINAL_INPUT, _UI_STEERING_POLL, _UI_TAKE_ATTACHMENTS
     terminal_input = None
     config = Config.load(args.config)
+    from .storage import discoveries_storage
+    canonical_storage = discoveries_storage(config.root)
+    if config.storage_dir.resolve() != canonical_storage.resolve():
+        system('Configured storage is not the canonical S: project sibling; redirecting agent-owned storage to ' + str(canonical_storage))
+        config.select_storage(canonical_storage)
+    config.knowledge_directory = canonical_storage
+    s_root = mapped_s_drive_root().resolve()
+    config._s_storage_verified = True
+    kept_roots = [root for root in config.allowed_roots
+                  if Path(root).resolve() == s_root or s_root in Path(root).resolve().parents]
+    if len(kept_roots) != len(config.allowed_roots):
+        system('Removed configured file roots outside the live S: share; C: and unrelated locations are not agent write targets.')
+    if str(s_root) not in kept_roots:
+        kept_roots.append(str(s_root))
+    config.allowed_roots = kept_roots
     if _UI_UPLOAD_ROOT is not None:
         config._ui_upload_root = Path(_UI_UPLOAD_ROOT).resolve()
     if config.visible is not True:
         raise ValueError('Copilot runs require a visible Microsoft Edge window; invisible operation is disabled.')
     if config.storage_dir is None:
         config.select_storage(default_local_storage())
-    # Select a separately writable temp volume before settings, Edge, Playwright,
-    # or uploads initialize. Persistent runtime storage can be synced or quota
-    # limited, so it is never used as the temporary directory.
-    temp_directory = configure_temp_directory()
+    # Probe separate directories under the verified S: storage before settings,
+    # Edge, Playwright, or uploads initialize; retry paths stay on that share.
+    temp_directory = configure_temp_directory(config.storage_dir)
     settings = read_runtime_settings(config)
     if args.config is None and isinstance(settings.get('config'), dict):
         personal = settings['config']
@@ -290,6 +309,13 @@ async def run(args):
         # response-recovery contract. Explicit operator config files may still
         # choose a lower value when deliberately required.
         config.max_corrections = 12
+    # Remembered settings may predate the S:-only policy. Reapply it after
+    # loading them so persisted C:/OneDrive roots cannot silently return.
+    s_root = mapped_s_drive_root().resolve()
+    config.allowed_roots = [str(Path(root).resolve()) for root in config.allowed_roots
+                            if Path(root).resolve() == s_root or s_root in Path(root).resolve().parents]
+    if str(s_root) not in config.allowed_roots:
+        config.allowed_roots.append(str(s_root))
     if args.attach_existing:
         config.attach_existing = True
     if args.port:
@@ -321,7 +347,7 @@ async def run(args):
                                                           getattr(config, '_auto_local_drive_root', None)}]
     persist_runtime_settings(config, settings)
     if getattr(args, 'setup_only', False):
-        system('Setup verified. Personal storage: ' + str(config.storage_dir))
+        system('Setup verified. S: Discoveries storage: ' + str(config.storage_dir))
         system('Python resource setup verified. Setup.cmd creates the project virtual environment and installs pinned dependencies before this storage step.')
         return
     await choose_browser_endpoint(config, args, settings)
@@ -338,10 +364,13 @@ async def run(args):
     orchestrator = None
     bug_reports = []
     system('Copilot Local Agent — reasoning through Microsoft 365 Copilot web UI')
-    system('Session records are kept in the configured per-user storage.')
+    from .storage import discoveries_storage_paths
+    storage_paths = discoveries_storage_paths(config.root)
+    system('Agent storage target for every save: ' + storage_paths['s_path'] + ' (resolved UNC filesystem path: ' + storage_paths['unc_path'] + ').')
+    system('Direct reads and new-file/folder creation in Discoveries knowledge are granted for this run; deletion or overwrite requires separate confirmation.')
     system('Browser: Visible. Non-visible Copilot operation has not passed acceptance and is unavailable.')
     system('Permitted file roots: ' + ', '.join(Path(root).name for root in config.allowed_roots))
-    system('C: and the currently mapped S: share are permitted file roots when available; writes require approval.')
+    system('Agent-owned writes are restricted to the S: share; no C: or OneDrive storage fallback is permitted.')
     system('Third-party browser domains: ' + ', '.join(config.allowed_domains))
     system('No files will be deleted. Generated-code execution always requires approval.')
     system('Useful Findings are saved on any valid turn; their file is attached every ten messages.')
@@ -373,7 +402,7 @@ async def run(args):
             _UI_STEERING_POLL = terminal_input.poll_steering
             _UI_TAKE_ATTACHMENTS = terminal_input.take_attachments
         orchestrator = Orchestrator(config, browser, ToolRegistry(), state,
-                                    approval_decider=_UI_APPROVAL_DECIDER, display=_TERMINAL.sink,
+                                    approval_decider=_UI_APPROVAL_DECIDER or (_terminal_approval_decider if _UI_ASK is None else None), display=_TERMINAL.sink,
                                     event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT,
                                     steering_poll=_UI_STEERING_POLL,
                                     steering_complete=_UI_STEERING_COMPLETE)

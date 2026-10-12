@@ -54,4 +54,4 @@ If several UI artifacts, downloads or archive members could match, request disam
 
 ## Evidence and retention
 
-Return concise artifact paths, metadata, hashes and verification results. Distinguish generated, link observed, download completed, archive inspected, extraction approved and outputs verified. Preserve the ZIP, extracted artifacts and existing files; avoid duplicate uploads/writes. Runtime records and diagnostic snapshots stay in the user's selected OneDrive storage unless explicitly selected for attachment. Complete coding packages are delivered as artifacts and never executed automatically.
+Return concise artifact paths, metadata, hashes and verification results. Distinguish generated, link observed, download completed, archive inspected, extraction approved and outputs verified. Preserve the ZIP, extracted artifacts and existing files; avoid duplicate uploads/writes. Runtime records and diagnostic snapshots stay in the S: project-sibling `Discoveries knowledge` folder; never use C: or OneDrive as an automatic fallback. Complete coding packages are delivered as artifacts and never executed automatically.

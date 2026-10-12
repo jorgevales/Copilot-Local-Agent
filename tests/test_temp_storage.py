@@ -23,7 +23,8 @@ class TempStorageTests(unittest.TestCase):
                 'TMP': str(root / 'temp-two'),
                 'SystemRoot': str(root / 'windows'),
             }
-            candidates = _candidate_directories(environment, home=root / 'home', platform='nt')
+            storage = root / 'S' / 'Discoveries knowledge'
+            candidates = _candidate_directories(environment, storage_root=storage, home=root / 'home', platform='nt')
             attempted = []
 
             def probe(path):
@@ -34,20 +35,23 @@ class TempStorageTests(unittest.TestCase):
                     path.mkdir(parents=True, exist_ok=True)
 
             selected = select_temp_directory(
-                environment, home=root / 'home', platform='nt', probe=probe)
+                environment, storage_root=storage, home=root / 'home', platform='nt', probe=probe)
 
             self.assertEqual(candidates[1], selected)
             self.assertEqual(candidates[:2], attempted)
 
-    def test_persistent_runtime_temp_is_not_a_candidate(self):
+    def test_temp_candidates_remain_under_s_discoveries_storage(self):
         with tempfile.TemporaryDirectory() as root:
             root = Path(root)
+            storage = root / 'Discoveries knowledge'
             candidates = _candidate_directories(
                 {'LOCALAPPDATA': str(root / 'local'),
                  'TEMP': str(root / 'temp'),
                  'TMP': str(root / 'temp')},
+                storage_root=storage,
                 home=root / 'home', platform='nt')
-            self.assertNotIn(root / 'runtime' / 'temp', candidates)
+            self.assertEqual(storage.resolve() / 'runtime' / 'temp', candidates[0])
+            self.assertFalse(any(str(path).startswith(str(root / 'local')) for path in candidates))
             self.assertGreaterEqual(len(candidates), 3)
 
     def test_all_candidate_failures_report_retries_and_chain_last_error(self):
@@ -56,7 +60,7 @@ class TempStorageTests(unittest.TestCase):
                            'TEMP': str(Path(root) / 'temp')}
             failure = OSError(errno.ENOSPC, 'No space left on device')
             with self.assertRaisesRegex(OSError, r'location\(s\) tested') as caught:
-                select_temp_directory(environment, home=root, platform='nt',
+                select_temp_directory(environment, storage_root=Path(root) / 'S' / 'Discoveries knowledge', home=root, platform='nt',
                                       probe=lambda path: (_ for _ in ()).throw(failure))
             self.assertIs(failure, caught.exception.__cause__)
             self.assertIn('No space left on device', str(caught.exception.__cause__))
@@ -71,7 +75,7 @@ class TempStorageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             environment = {'LOCALAPPDATA': root}
             with patch.object(tempfile, 'tempdir', None):
-                selected = configure_temp_directory(environment, home=root, platform='nt')
+                selected = configure_temp_directory(Path(root) / 'S' / 'Discoveries knowledge', environment, home=root, platform='nt')
                 self.assertEqual(str(selected), environment['TEMP'])
                 self.assertEqual(str(selected), environment['TMP'])
                 self.assertEqual(str(selected), environment['TMPDIR'])

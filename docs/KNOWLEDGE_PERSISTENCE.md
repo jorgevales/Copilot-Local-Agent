@@ -6,16 +6,14 @@ execution, authentication bypass, website transactions or arbitrary file changes
 File navigation probes the current local/mapped/network volume and reports sanitized
 OS errors. Browser-profile access remains protected.
 
-Knowledge defaults to the shared `Discoveries knowledge` folder beside the
-project's parent on the currently mapped S: share. It does not follow runtime,
-workspace, profile or OneDrive storage. On a machine where the project is not on
-the mapped S: share, durable knowledge is unavailable and the agent reports that
-instead of silently writing elsewhere. `knowledge_directory` is an explicit
-operator path override. Startup creates a unique probe, flushes it, checks its
-hash, removes it, and checks the SQLite schema and integrity. `knowledge_directory`
-may be set only to that exact S: project-sibling location; it cannot redirect
-persistent knowledge to OneDrive. The result is pinned as the first operational
-Useful Finding and included in every agent message.
+Knowledge uses `Discoveries knowledge` beside the project's parent on the live
+S: share. It does not follow runtime, workspace, profile or OneDrive storage. On
+a machine where the project is not on the mapped S: share, the agent stops before
+writing rather than silently falling back. A configured `knowledge_directory`
+must match this canonical folder. Startup creates a unique probe, flushes it,
+checks its hash, removes it, and checks SQLite schema and integrity. The verified
+S: path and resolved UNC filesystem path are included in the startup contract and
+each agent save response.
 
 Website knowledge and discovery records share the SQLite ledger. Compatible JSON
 records already under the selected S: Discoveries root are read through a

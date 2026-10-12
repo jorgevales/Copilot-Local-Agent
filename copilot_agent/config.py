@@ -176,11 +176,6 @@ class Config:
         configured_roots = [p for p in self.allowed_roots if p not in {previous_s_root, previous_c_root}]
         self.allowed_roots = [str((base / p).resolve()) if not Path(p).is_absolute() else str(Path(p).resolve()) for p in configured_roots]
         self._auto_local_drive_root = None
-        if os.name == 'nt':
-            local_drive = Path('C:/')
-            if local_drive.is_dir() and str(local_drive) not in self.allowed_roots:
-                self.allowed_roots.append(str(local_drive))
-                self._auto_local_drive_root = str(local_drive)
         self._auto_s_drive_root = None
         try:
             s_root = str(mapped_s_drive_root())

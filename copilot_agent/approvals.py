@@ -31,6 +31,8 @@ class ApprovalManager:
             ('Source path', arguments.get('source')),
             ('Destination path', arguments.get('destination')),
             ('Resolved S: destination', (preview.get('prepared_code') or {}).get('mapped_s_drive_destination')),
+            ('Discoveries S: folder', (preview.get('prepared_code') or {}).get('storage_path_s') or (preview.get('prepared_code') or {}).get('storage_folder_s_path')),
+            ('Discoveries UNC filesystem path', (preview.get('prepared_code') or {}).get('storage_path_unc') or (preview.get('prepared_code') or {}).get('storage_folder')),
             ('Recovery call ID', arguments.get('call_id')),
             ('Recovery target', (preview.get('prepared_code') or {}).get('uncertain_operation')),
             ('Permissions', arguments.get('permissions')),

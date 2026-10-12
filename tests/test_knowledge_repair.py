@@ -1,4 +1,5 @@
 import json
+import os
 import unittest
 from unittest.mock import patch
 from copilot_agent.discovery_store import Store
@@ -12,6 +13,27 @@ from tests.test_orchestrator import MockBrowser, final_response, tool_response
 
 
 class KnowledgeRepairTests(unittest.IsolatedAsyncioTestCase):
+    async def test_knowledge_note_retries_after_storage_write_failure_and_reports_location(self):
+        _, _, _, app = self.fixture()
+        attempts = []
+        app.base_context['approved'] = True
+        app.base_context['storage_attempt_notice'] = lambda attempt, total, path: attempts.append((attempt, total, path))
+        original_replace = os.replace
+        calls = 0
+
+        def replace_with_one_transient_failure(source, destination):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OSError(28, 'No space left on device')
+            return original_replace(source, destination)
+
+        with patch('copilot_agent.knowledge_notes.os.replace', side_effect=replace_with_one_transient_failure):
+            receipt = execute_note('knowledge.note', {'title': 'Retry check', 'content': 'Verified local path'}, app.base_context)
+        self.assertTrue(receipt['verified'])
+        self.assertEqual([(1, 3), (2, 3)], [(item[0], item[1]) for item in attempts])
+        self.assertEqual(attempts[0][2], attempts[1][2])
+
     async def test_compatible_newer_store_is_readable_and_zero_version_migrates(self):
         _, _, _, app = self.fixture()
         store = Store(app.base_context, persistent=True)

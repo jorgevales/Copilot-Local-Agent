@@ -9,7 +9,8 @@ from unittest.mock import patch
 from copilot_agent.config import Config, PROJECT_ROOT
 from copilot_agent.storage import (machine_key, profile_directory, read_user_settings,
                                   save_user_settings, shared_python_candidates,
-                                  default_local_storage, validate_user_storage_directory)
+                                  default_local_storage, discoveries_storage,
+                                  discoveries_storage_paths, validate_user_storage_directory)
 
 
 class StorageTests(unittest.TestCase):
@@ -20,12 +21,22 @@ class StorageTests(unittest.TestCase):
     def test_config_defaults_to_gpt_6_sol(self):
         self.assertEqual('GPT-6 Sol', Config().model)
 
-    def test_default_storage_uses_local_app_data_without_one_drive(self):
-        onedrive = self.root / 'OneDrive - Example'
-        onedrive.mkdir()
-        self.assertEqual(self.root / 'LocalAppData' / 'CopilotLocalAgent',
-                         default_local_storage({'LOCALAPPDATA': str(self.root / 'LocalAppData'),
-                                                'OneDrive': str(onedrive)}))
+    def test_default_storage_fails_closed_without_s_mapping(self):
+        from copilot_agent.policy import PolicyError
+        with patch('copilot_agent.policy.mapped_s_drive_root', side_effect=PolicyError('unmapped')):
+            with self.assertRaisesRegex(ValueError, 'no local C: storage fallback'):
+                default_local_storage({'LOCALAPPDATA': str(self.root / 'LocalAppData')})
+
+    def test_discoveries_root_is_project_sibling_with_s_and_resolved_unc_paths(self):
+        share = self.root / 'share'
+        project = share / 'Projects' / 'Copilot Chat Local agent'
+        project.mkdir(parents=True)
+        with patch('copilot_agent.policy.mapped_s_drive_root', return_value=share):
+            target = discoveries_storage(project)
+            paths = discoveries_storage_paths(project)
+        self.assertEqual((share / 'Projects' / 'Discoveries knowledge').resolve(), target)
+        self.assertEqual(str(target), paths['unc_path'])
+        self.assertEqual(str(Path('S:/') / 'Projects' / 'Discoveries knowledge'), paths['s_path'])
 
     def test_machine_profiles_are_distinct_safe_and_case_consistent(self):
         self.assertEqual(machine_key('VDI-A'), machine_key('vdi-a'))
@@ -60,8 +71,6 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(selected / 'runtime', config.runtime_dir)
         self.assertEqual(selected / 'workspace', config.workspace_dir)
         expected = [str(selected / 'workspace'), str(selected / 'deliveries')]
-        if os.name == 'nt':
-            expected.append(str(Path('C:/')))
         self.assertEqual(expected, config.allowed_roots)
         self.assertTrue(config.profile_dir.is_relative_to(selected / 'runtime' / 'edge-profiles'))
         self.assertFalse((source / 'runtime').exists())

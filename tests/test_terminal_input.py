@@ -69,6 +69,18 @@ class TerminalInputTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual('Next ordinary request', answer)
         self.assertEqual([], self.broker.poll_steering())
 
+    async def test_approval_token_is_separate_from_steering_during_approval_prompt(self):
+        self.broker.set_active('run-approval', threading.Event())
+        approval = asyncio.create_task(self.broker.ask_approval('Choose 1/2/3'))
+        deadline = time.monotonic() + 1
+        while not self.broker._approval_prompt_active and time.monotonic() < deadline:
+            await asyncio.sleep(.01)
+        self.lines.put('Please preserve the pending action plan')
+        self.lines.put('2')
+        self.assertEqual('2', await asyncio.wait_for(approval, timeout=2))
+        items = await asyncio.to_thread(self._wait_for_items, 1)
+        self.assertEqual('Please preserve the pending action plan', items[0]['text'])
+
     def _wait_for_items(self, count):
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:

@@ -11,6 +11,7 @@ import heapq
 import json
 import math
 import time
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from .discovery_contracts import (DiscoveryError, canonical, schema, validate_budgets,
@@ -393,6 +394,14 @@ def check_plan(plan, knowledge):
 
 def prepare_knowledge_tool(name, args, context):
     validate_knowledge_tool(name, args, context)
+    from .storage import discoveries_storage_paths
+    try:
+        paths = discoveries_storage_paths(getattr(context.get('config'), 'root', None) or Path(__file__).resolve().parents[1])
+    except (OSError, ValueError):
+        if context.get('knowledge_directory') is None:
+            raise
+        fixture_path = str(context['knowledge_directory'])
+        paths = {'s_path': fixture_path, 'unc_path': fixture_path}
     if name == 'navigation.intent':
         accepted = context.setdefault('discovery_accepted_at', time.time())
         context.setdefault('discovery_accepted_monotonic', time.monotonic())
@@ -412,6 +421,7 @@ def prepare_knowledge_tool(name, args, context):
         if name == 'discovery.knowledge_save':
             _, k = candidate(context, args, store)
             return {'kind': name, 'namespace_id': partition, 'expected_revision': args['expected_revision'],
+                    'storage_path_s': paths['s_path'], 'storage_path_unc': paths['unc_path'],
                     'new_revision': k['revision'], 'payload_sha256': digest(k),
                     'categories': ['routes', 'templates', 'actions', 'evidence'],
                     'route_count': len(k['routes']), 'trusted_routes': sum(r['status'] == 'trusted' for r in k['routes']),
@@ -423,6 +433,7 @@ def prepare_knowledge_tool(name, args, context):
         if current != args['expected_revision']:
             raise DiscoveryError('stale_knowledge_revision')
         return {'kind': name, 'namespace_id': partition, 'expected_revision': current,
+                'storage_path_s': paths['s_path'], 'storage_path_unc': paths['unc_path'],
                 'consent_question': 'Invalidate this exact local discovery namespace? Existing legacy website memory is separate.'}
     finally:
         store.close()
@@ -480,8 +491,25 @@ async def execute_knowledge_tool(name, args, context):
                        'source_run': args['run_id'],
                        'scope': deepcopy(context['discovery_runs'][args['run_id']]['graph'].manifest['scope']),
                        'timestamp': datetime.now(timezone.utc).isoformat(timespec='seconds')}
-            store.save_knowledge(partition, args['expected_revision'], k, consent)
-            verified = store.knowledge(partition)
+            verified = None
+            for attempt in range(1, 4):
+                callback = context.get('storage_attempt_notice')
+                if callable(callback):
+                    callback(attempt, 3, store.folder)
+                try:
+                    store.save_knowledge(partition, args['expected_revision'], k, consent)
+                except Exception as error:
+                    # Verify commit state before deciding whether another CAS
+                    # attempt is safe. Never retry a conflicting revision.
+                    current = store.knowledge(partition)
+                    if current is not None and current.get('hash') == digest(k):
+                        verified = current
+                        break
+                    if store.knowledge_revision(partition) != args['expected_revision'] or attempt == 3:
+                        raise
+                    continue
+                verified = store.knowledge(partition)
+                break
             if verified['hash'] != digest(k):
                 raise DiscoveryError('knowledge_integrity')
             return {'status': 'saved', 'knowledge_id': k['knowledge_id'], 'revision': k['revision'],

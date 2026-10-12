@@ -76,6 +76,22 @@ class Orchestrator:
                              'cancel_event': self.cancel_event, 'cancelled': self.cancel_event.is_set,
                              'process_registry': self.process_registry,
                              'approved_domains': self.state.data.setdefault('approved_domains', [])}
+        def display_s_path(directory):
+            import ntpath
+            try:
+                from .policy import mapped_s_drive_root
+                relative = ntpath.relpath(str(Path(directory).resolve()), str(mapped_s_drive_root().resolve()))
+                if relative == '..' or relative.startswith('..\\'):
+                    return self.prompts.storage_paths['s_path']
+                return str(Path('S:/') / Path(relative))
+            except (OSError, ValueError):
+                return self.prompts.storage_paths['s_path']
+
+        def storage_attempt_notice(attempt, total, directory):
+            s_path = display_s_path(directory)
+            self.feedback.emit('System', f'Save attempt {attempt}/{total}; intended S: path {s_path}; '
+                               f'resolved UNC filesystem path {directory}')
+        self.base_context['storage_attempt_notice'] = storage_attempt_notice
         from .local_navigation import SessionNavigationGrant
         self.base_context['local_navigation_grant'] = SessionNavigationGrant(
             bool(getattr(config, '_local_navigation_confirmed', False)))
@@ -838,6 +854,9 @@ class Orchestrator:
                     if isinstance(file_preflight, dict) and file_preflight.get('s_drive_destination'):
                         prepared = {'mapped_s_drive_destination': file_preflight['s_drive_destination'],
                                     'identity_checked': True, 'write_scope': 'one exact approved output'}
+                        if call['name'] in {'files.create', 'files.mkdir'}:
+                            prepared['storage_folder'] = self.prompts.storage_paths['unc_path']
+                            prepared['storage_folder_s_path'] = self.prompts.storage_paths['s_path']
                 if call['name'] == 'code_runner':
                     needs_approval = True
                     prepared = self._code_runner().prepare(call['arguments'])
@@ -879,6 +898,18 @@ class Orchestrator:
                     else:
                         context['discovery_reviewed'] = prepared
                         context['discovery_save_consent'] = prepared
+                if (self.base_context['local_navigation_grant'].approved
+                        and call['name'] in {'files.create', 'files.mkdir'} and prepared
+                        and prepared.get('mapped_s_drive_destination')):
+                    destination = Path(prepared['mapped_s_drive_destination']).resolve()
+                    discoveries = Path(self.prompts.storage_paths['unc_path']).resolve()
+                    if destination != discoveries and discoveries not in destination.parents:
+                        raise PolicyError('The session create grant covers only the canonical S: Discoveries knowledge folder.')
+                    # The user's one run confirmation grants non-destructive
+                    # reads and new-file/folder creation in this exact subtree.
+                    needs_approval = False
+                    context['approved'] = True
+                    context['s_drive_destination'] = prepared['mapped_s_drive_destination']
                 if call['name'] == 'ocr.image':
                     artifact = self._attachment_record(self.policy.resolve(call['arguments']['path'], True))
                     prepared = {'approved_image_attachment': artifact, 'destination': self.config.copilot_url}
@@ -904,6 +935,11 @@ class Orchestrator:
                     if manifest.get('office'):
                         raise PolicyError('A native Office container was delivered as ZIP; request a real outer ZIP containing the Office file.')
                     prepared = {'archive_manifest': manifest, 'destination': str(self.policy.resolve(call['arguments']['destination'])), 'expected_files': call['arguments'].get('expected_files', [])}
+                if call['name'] in {'files.create', 'files.mkdir', 'files.append', 'files.copy',
+                                    'site_knowledge.invalidate', 'discovery.knowledge_invalidate'}:
+                    target = (prepared or {}).get('mapped_s_drive_destination') or (prepared or {}).get('directory') or self.prompts.storage_paths['unc_path']
+                    self.feedback.emit('System', 'Save target: intended S: path ' + display_s_path(target) +
+                                       '; resolved filesystem destination ' + str(target))
                 if needs_approval:
                     self.state.data['status'] = 'awaiting_approval'
                     self.state.save()

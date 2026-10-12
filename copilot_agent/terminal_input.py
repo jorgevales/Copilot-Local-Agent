@@ -23,6 +23,7 @@ class TerminalInputBroker:
         self._steering = deque()
         self._attachments = []
         self._sequence = 0
+        self._approval_prompt_active = False
         self._active_run_id = None
         self._cancel_event = None
         self._closed = threading.Event()
@@ -49,6 +50,12 @@ class TerminalInputBroker:
             with self._lock:
                 active = self._active_run_id is not None
             if active:
+                with self._lock:
+                    approval_prompt = self._approval_prompt_active
+                    if approval_prompt and line.casefold() in {'1', '2', '3', 'deny', 'once', 'plan'}:
+                        self._approval_prompt_active = False
+                        self._answers.put({'text': line, 'attachments': []})
+                        continue
                 self._route_steering(line)
             else:
                 self._answers.put({'text': line, 'attachments': []})
@@ -114,6 +121,18 @@ class TerminalInputBroker:
         with self._lock:
             self._attachments = list(item.get('attachments', []))
         return item['text']
+
+    async def ask_approval(self, prompt):
+        """Read only an explicit approval token; other input remains steering."""
+        self.output(prompt + ' ', end='', flush=True)
+        with self._lock:
+            self._approval_prompt_active = True
+        try:
+            item = await asyncio.to_thread(self._answers.get)
+            return item['text']
+        finally:
+            with self._lock:
+                self._approval_prompt_active = False
 
     def take_attachments(self):
         with self._lock:

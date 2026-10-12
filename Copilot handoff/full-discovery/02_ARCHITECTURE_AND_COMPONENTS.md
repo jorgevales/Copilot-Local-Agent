@@ -21,7 +21,8 @@ The orchestrator also coordinates `SessionState`, `PromptBuilder`, `ToolRegistry
 | Attachments/prompts | Exact source hashing, queue limits, startup guidance bundling, compact context. | `attachments.py:AttachmentQueue`; `bundle.py:build_startup_attachments`; `prompts.py:PromptBuilder` |
 | Delivery | User-intent classification, actual link/download binding, ZIP validation, create-only extraction. | `delivery.py`; `downloads.py:DownloadService`; `archives.py:ArchiveService` |
 | Desktop | GDI PNG capture, viewer launch/tiling, independent title/bounds verification. | `desktop.py:capture_display`, `inspect_windows` |
-| Storage/sync | OneDrive account discovery, per-machine profile/settings paths, deferred Created synchronization. | `storage.py`; `sync.py:CreatedSync` |
+| Storage/sync | S-drive `Discoveries knowledge` sibling resolution from the project root, operator S: plus resolved UNC paths, verified knowledge writes, and optional explicitly requested delivery sync. | `storage.py`; `site_knowledge.py`; `discovery_knowledge.py`; `knowledge_notes.py`; `sync.py:CreatedSync` |
+| Terminal approvals | Single-reader stdin broker keeps steering queued while an approval is pending; a steering message does not satisfy an approval. | `terminal_input.py`; `approvals.py`; `app.py` |
 | Feedback/findings/logging | Attributed terminal output, redaction, immediate finding storage/deduplication, audit events. | `feedback.py:Feedback`; `findings.py:Findings`; `logging_utils.py:EventLog` |
 | Bug reports | Separate restricted and allowlisted sanitized reports, file-origin mapping, retention, and integrity validation. | `copilot_agent/diagnostics.py:DiagnosticReports` |
 

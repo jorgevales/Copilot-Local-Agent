@@ -10,19 +10,19 @@ From `Scripts and projects/Copilot Local Agent`:
 .\Run Tests.cmd
 ```
 
-Setup prompts for shared Python and OneDrive/Edge resources, validates/reuses or safely preserves an incomplete `.venv`, installs the locked packages, and stores mutable settings outside source. Start requires visible Edge/Copilot operation; complete sign-in/MFA manually in the dedicated window.
+Setup prompts for shared Python and Edge resources, validates/reuses or safely preserves an incomplete `.venv`, installs the locked packages, and stores mutable settings outside source. Start requires a project checkout beneath the live S: mapping and verifies its resolved UNC target before use; it reports both `Discoveries knowledge` paths. Start requires visible Edge/Copilot operation; complete sign-in/MFA manually in the dedicated window.
 
 Direct advanced forms use the selected shared interpreter:
 
 ```powershell
 python -B app.py --config <settings-file>
-python -B app.py --resume <OneDrive-runtime-session-path>
+python -B app.py --resume <runtime-session-path>
 python -B app.py --attach-existing --port <port> --profile <dedicated-profile-path>
 ```
 
 ## Verified local validation
 
-Verified locally on 7 October 2026: `349` tests passed, `1` skipped, `0` failed. The skip is the Windows symlink-privilege case. Coverage includes protocol/state, browser correlation, Edge startup, attachments, bundle integrity, tools/policy, approvals, both code-runner modes, delivery/download/archive verification, launcher/setup fixtures, findings, synchronization, feedback, diagnostics, and cleanup.
+Verified on 12 October 2026: focused storage, terminal approval, tool policy, site/discovery knowledge, startup, and orchestrator regression suite: `133` tests passed, `1` skipped, `0` failed. This was not a full-project or live S:/Edge test. Do not infer live S: mapping behavior from synthetic UNC mapping tests.
 
 Live harnesses are explicitly named `tests/live_*.py` and are not equivalent to ordinary offline tests. `docs/VISUAL_ACCEPTANCE.md` is the acceptance checklist; `docs/TEST_REPORT.md` contains retained evidence and environment limits.
 

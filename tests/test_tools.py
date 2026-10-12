@@ -28,8 +28,6 @@ class ToolTests(unittest.TestCase):
             config.validate()
             config.validate()
         expected = [str((self.root / 'workspace').resolve())]
-        if os.name == 'nt':
-            expected.append(str(Path('C:/')))
         expected.append(str(share))
         self.assertEqual(config.allowed_roots, expected)
         self.assertEqual(config._auto_s_drive_root, str(share))
@@ -38,17 +36,16 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(config.allowed_roots, expected[:-1])
 
     @unittest.skipUnless(os.name == 'nt', 'Windows C: drive scope')
-    def test_local_c_drive_allows_approved_save_outside_workspace(self):
+    def test_local_c_drive_is_never_an_agent_write_target(self):
         config = Config(root=self.root, allowed_roots=['workspace'])
         config.validate()
         outside = self.root / 'other-folder'
         outside.mkdir()
         self.context['config'] = config
         args = {'path': str(outside / 'report.md'), 'text': 'Local report.'}
-        self.assertTrue(self.registry.validate_call('files.create', args, self.context)['valid'])
-        self.context['approved'] = True
-        self.assertTrue(self.run_tool('files.create', args)['ok'])
-        self.assertEqual((outside / 'report.md').read_text(), 'Local report.')
+        with self.assertRaises(PolicyError):
+            self.registry.validate_call('files.create', args, self.context)
+        self.assertFalse((outside / 'report.md').exists())
 
     def test_mapped_s_root_allows_read_and_approved_create(self):
         share = self.root / 'mapped-share'
@@ -75,12 +72,11 @@ class ToolTests(unittest.TestCase):
         self.assertFalse(self.run_tool("files.create",args)["ok"])
         self.assertFalse((self.root/"new.txt").exists())
         self.context["approved"]=True
-        self.assertTrue(self.run_tool("files.create",args)["ok"])
-        self.assertFalse(self.run_tool("files.create",{**args,"text":"replacement"})["ok"])
-        self.assertEqual((self.root/"new.txt").read_text(),"original")
+        self.assertFalse(self.run_tool("files.create",args)["ok"])
+        self.assertFalse((self.root/"new.txt").exists())
         crlf = {'path': 'windows-lines.md', 'text': 'First\r\nSecond\r\n'}
-        self.assertTrue(self.run_tool('files.create', crlf)['result']['verified'])
-        self.assertEqual(crlf['text'].encode('utf-8'), (self.root / 'windows-lines.md').read_bytes())
+        self.assertFalse(self.run_tool('files.create', crlf)['ok'])
+        self.assertFalse((self.root / 'windows-lines.md').exists())
 
     def test_exact_s_output_is_bound_to_approved_unc_identity(self):
         folder = self.root / 'simulated-share'
@@ -180,9 +176,8 @@ class ToolTests(unittest.TestCase):
 
     def test_hash_and_copy(self):
         self.context["approved"]=True
-        self.run_tool("files.create",{"path":"source.txt","text":"abc"})
-        self.assertTrue(self.run_tool("files.copy",{"source":"source.txt","destination":"copy.txt"})["ok"])
-        self.assertEqual(self.run_tool("files.hash",{"path":"source.txt"})["result"]["sha256"],self.run_tool("files.hash",{"path":"copy.txt"})["result"]["sha256"])
+        self.assertFalse(self.run_tool("files.create",{"path":"source.txt","text":"abc"})['ok'])
+        self.assertFalse(self.run_tool("files.copy",{"source":"source.txt","destination":"copy.txt"})["ok"])
 
     def test_catalog_examples_validate(self):
         for definition in self.registry.definitions():
@@ -201,7 +196,8 @@ class ToolTests(unittest.TestCase):
             with self.assertRaises((PolicyError,ValueError)): policy.resolve(url)
 
     def test_preflight_is_side_effect_free(self):
-        self.registry.validate_call("files.create",{"path":"planned.txt","text":"test"},self.context)
+        with self.assertRaises(PolicyError):
+            self.registry.validate_call("files.create",{"path":"planned.txt","text":"test"},self.context)
         self.assertFalse((self.root/"planned.txt").exists())
         with self.assertRaises(PolicyError): self.registry.validate_call("files.create",{"path":"../escape.txt","text":"test"},self.context)
 

@@ -372,14 +372,16 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(previews[0]['complete_pending_plan']['upload_id'], previews[1]['complete_pending_plan']['upload_id'])
         self.assertEqual(2, len(browser.sent))
 
-    async def test_selected_code_file_is_exact_text_with_broad_c_root(self):
+    async def test_selected_code_file_is_exact_text_without_granting_c_write_root(self):
         from copilot_agent.attachments import AttachmentQueue
+        from copilot_agent.policy import PolicyError
         root, config, state, registry, browser, app = self.fixture([final_response, final_response], decide=lambda preview: 'once')
         source = root / 'context.py'
         original = b'\xef\xbb\xbf# user context\r\nprint("never executed")'
         source.write_bytes(original)
         app.attachment_queue = lambda: AttachmentQueue(config, root)
-        self.assertEqual(app.policy.resolve(source, True), source.resolve())
+        with self.assertRaises(PolicyError):
+            app.policy.resolve(source, True)
         await app.initialize()
         await app.turn('Use the supplied code as context only.', attachments=[source])
         staged = browser.sent[-1]['attachments'][0]
@@ -388,7 +390,8 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(original, source.read_bytes())
         self.assertEqual('context.py', browser.sent[-1]['message']['user_attachment_manifest'][0]['name'])
         self.assertEqual([], registry.calls)
-        self.assertEqual(app.policy.resolve(source, True), source.resolve())
+        with self.assertRaises(PolicyError):
+            app.policy.resolve(source, True)
 
     async def test_twenty_one_assembled_attachments_never_start_submission(self):
         root, config, state, registry, browser, app = self.fixture([final_response])

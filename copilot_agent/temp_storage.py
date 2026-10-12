@@ -1,8 +1,4 @@
-"""Select a verified temporary directory without trusting free-space metadata.
-
-The agent's persistent runtime may live on a synced, quota-limited, or redirected
-volume. Temporary browser and upload data should use a separately probed location.
-"""
+"""Probe retry locations under S: without trusting free-space metadata."""
 from __future__ import annotations
 
 import hashlib
@@ -15,31 +11,14 @@ import uuid
 _PROBE_BYTES = 64 * 1024
 
 
-def _candidate_directories(environ=None, *, home=None, platform=None) -> list[Path]:
-    environment = os.environ if environ is None else environ
-    system = os.name if platform is None else platform
-    home_path = Path.home() if home is None else Path(home)
-    candidates: list[Path] = []
-    if system == 'nt':
-        local_app_data = environment.get('LOCALAPPDATA')
-        if local_app_data:
-            candidates.append(Path(local_app_data) / 'Temp' / 'CopilotLocalAgent')
-        # Respect operator-provided temporary locations, but verify them with I/O.
-        for key in ('TEMP', 'TMP'):
-            if environment.get(key):
-                candidates.append(Path(environment[key]) / 'CopilotLocalAgent')
-        system_root = environment.get('SystemRoot') or environment.get('WINDIR')
-        if system_root:
-            candidates.append(Path(system_root) / 'Temp' / 'CopilotLocalAgent')
-        candidates.append(home_path / 'AppData' / 'Local' / 'Temp' / 'CopilotLocalAgent')
-    else:
-        for key in ('TMPDIR', 'TEMP', 'TMP'):
-            if environment.get(key):
-                candidates.append(Path(environment[key]) / 'copilot-local-agent')
-        cache = environment.get('XDG_CACHE_HOME')
-        if cache:
-            candidates.append(Path(cache) / 'copilot-local-agent' / 'temp')
-        candidates.append(Path('/tmp') / 'copilot-local-agent')
+def _candidate_directories(environ=None, *, storage_root=None, home=None, platform=None) -> list[Path]:
+    # Temporary upload/browser work is agent-owned data too. Keep retries on S:
+    # and try separate directories so one locked/broken folder does not block startup.
+    if storage_root is None:
+        raise ValueError('An S: Discoveries storage root is required for temporary agent files')
+    base = Path(storage_root)
+    candidates = [base / 'runtime' / 'temp', base / 'runtime' / 'temp-retry-1',
+                  base / 'runtime' / 'temp-retry-2', base / 'runtime' / 'cache' / 'temp']
 
     result: list[Path] = []
     seen: set[str] = set()
@@ -74,14 +53,14 @@ def _probe_directory(directory: Path) -> None:
         path.unlink(missing_ok=True)
 
 
-def select_temp_directory(environ=None, *, home=None, platform=None, probe=_probe_directory) -> Path:
+def select_temp_directory(environ=None, *, storage_root=None, home=None, platform=None, probe=_probe_directory) -> Path:
     """Return the first directory that passes a real write and readback probe.
 
-    It deliberately does not consult disk-usage/free-space estimates and never
-    reuses ``storage_dir/runtime/temp``. Every failed candidate is followed by
-    another independent location; the last exception is chained on total failure.
+    It deliberately avoids disk-usage/free-space estimates. Candidates remain
+    under S: but use separate directories; every failed path is followed by
+    another independent location and the last exception is chained on failure.
     """
-    candidates = _candidate_directories(environ, home=home, platform=platform)
+    candidates = _candidate_directories(environ, storage_root=storage_root, home=home, platform=platform)
     failures: list[tuple[Path, OSError]] = []
     for candidate in candidates:
         try:
@@ -99,9 +78,9 @@ def select_temp_directory(environ=None, *, home=None, platform=None, probe=_prob
     raise OSError(message)
 
 
-def configure_temp_directory(environ=None, *, home=None, platform=None, probe=_probe_directory) -> Path:
+def configure_temp_directory(storage_root, environ=None, *, home=None, platform=None, probe=_probe_directory) -> Path:
     """Select and publish the verified location to Python and child processes."""
-    directory = select_temp_directory(environ, home=home, platform=platform, probe=probe)
+    directory = select_temp_directory(environ, storage_root=storage_root, home=home, platform=platform, probe=probe)
     target = str(directory)
     environment = os.environ if environ is None else environ
     environment['TEMP'] = target

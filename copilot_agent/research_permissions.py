@@ -73,9 +73,12 @@ PERMISSION_SPECS = {
 def directory(context):
     value = context.get('permission_directory')
     if value is None:
-        local = os.environ.get('LOCALAPPDATA')
-        if not local: raise PolicyError('Per-user local permission storage is unavailable')
-        value = Path(local)/'CopilotLocalAgent'/'permission-grants'
+        config = context.get('config')
+        storage = (config.get('storage_dir') if isinstance(config, dict)
+                   else getattr(config, 'storage_dir', None))
+        if storage is None:
+            raise PolicyError('S: Discoveries storage is required for durable permission records')
+        value = Path(storage) / 'runtime' / 'permission-grants'
     path = Path(value).absolute()
     reject_path_redirection(path)
     return path

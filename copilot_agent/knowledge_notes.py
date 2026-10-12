@@ -40,22 +40,41 @@ def execute_note(name, args, context):
     if len(data) > 65536:
         raise ValueError('Knowledge note exceeds the bounded artifact size')
     identifier = hashlib.sha256(data).hexdigest()
-    folder.mkdir(parents=True, exist_ok=True)
     target = folder / (identifier + '.json')
-    temporary = folder / ('.note-' + uuid.uuid4().hex + '.tmp')
     if target.exists():
         if target.read_bytes() != data:
             raise ValueError('Existing knowledge artifact integrity failure; preserve evidence and use a different note')
     else:
-        try:
-            with temporary.open('xb') as stream:
-                stream.write(data)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, target)
-            context['knowledge_note_started'] = True
-        finally:
-            temporary.unlink(missing_ok=True)
+        last_error = None
+        for attempt in range(1, 4):
+            callback = context.get('storage_attempt_notice')
+            if callable(callback):
+                callback(attempt, 3, folder)
+            temporary = folder / ('.note-' + uuid.uuid4().hex + '.tmp')
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+                with temporary.open('xb') as stream:
+                    stream.write(data)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, target)
+                context['knowledge_note_started'] = True
+                break
+            except OSError as error:
+                last_error = error
+                # A share can report a late error after committing the atomic
+                # rename. Read back before retrying to avoid duplicate effects.
+                if target.is_file():
+                    if target.read_bytes() == data:
+                        context['knowledge_note_started'] = True
+                        break
+                    raise ValueError('Knowledge artifact target changed during a failed write; preserve evidence') from error
+                if attempt == 3:
+                    raise
+            finally:
+                temporary.unlink(missing_ok=True)
+        if not target.is_file() and last_error is not None:
+            raise last_error
     if target.read_bytes() != data:
         raise ValueError('Knowledge artifact readback integrity failure')
     # The immutable artifact remains discoverable if an incompatible/locked

@@ -459,6 +459,8 @@ class SiteKnowledgeTests(unittest.TestCase):
             self.assertEqual(directory, (share / 'Scripts and projects' / 'Discoveries knowledge').resolve())
             prepared = prepare_knowledge(self.bind_args, context, name="site_knowledge.bind")
             self.assertIn("Discoveries knowledge", prepared["storage_scope"])
+            self.assertEqual(str(directory), prepared['storage_path_unc'])
+            self.assertIn('S:', prepared['storage_path_s'])
             self.assertFalse(directory.exists())
         with patch('copilot_agent.site_knowledge.mapped_s_drive_root', side_effect=PolicyError('unavailable')):
             with self.assertRaises(PolicyError):

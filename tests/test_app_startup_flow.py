@@ -90,7 +90,10 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
              patch('copilot_agent.app.read_user_settings', return_value={}), \
              patch('copilot_agent.app.save_user_settings'), \
              patch('copilot_agent.app.configure_temp_directory',
-                   side_effect=lambda: events.append('temp:verified') or root / 'verified-temp'), \
+                   side_effect=lambda storage_root: events.append('temp:verified') or root / 'verified-temp'), \
+             patch('copilot_agent.storage.discoveries_storage', return_value=root), \
+             patch('copilot_agent.storage.discoveries_storage_paths', return_value={'s_path': r'S:\Discoveries knowledge', 'unc_path': str(root)}), \
+             patch('copilot_agent.app.mapped_s_drive_root', return_value=root), \
              patch('copilot_agent.app.choose_edge', new=AsyncMock(side_effect=lambda *a, **k: events.append('edge:choose'))), \
              patch('copilot_agent.app.choose_browser_endpoint', new=AsyncMock()), \
              patch('copilot_agent.app.BrowserAdapter', return_value=browser), \

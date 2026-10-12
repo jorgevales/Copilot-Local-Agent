@@ -12,6 +12,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import ntpath
 from pathlib import Path
 import re
 import uuid
@@ -447,6 +448,24 @@ def prepare_knowledge(args, context, name=None):
                 "storage_scope": "Configured shared Discoveries knowledge store",
                 "directory": str(knowledge_directory(context)), "excluded_data": list(EXCLUDED_DATA),
                 "decline": "Decline this grant; the current task and ephemeral website map can continue."}
+    from .storage import discoveries_storage_paths
+    try:
+        paths = discoveries_storage_paths(getattr(context.get('config'), 'root', Path(__file__).resolve().parents[1]))
+    except (OSError, ValueError):
+        # A caller may have supplied a test mapping resolver while storage.py
+        # still has the platform resolver. Reconstruct the mapped-drive alias
+        # from the already validated canonical knowledge path.
+        if context.get('knowledge_directory') is not None:
+            fixture_path = str(knowledge_directory(context))
+            paths = {'s_path': fixture_path, 'unc_path': fixture_path}
+        else:
+            directory = knowledge_directory(context).resolve()
+            share = mapped_s_drive_root().resolve()
+            relative = ntpath.relpath(str(directory), str(share))
+            if relative == '..' or relative.startswith('..\\'):
+                raise PolicyError('The Discoveries knowledge folder resolved outside the live S: share')
+            paths = {'s_path': str(Path('S:/') / Path(relative)), 'unc_path': str(directory)}
+    prepared.update(storage_path_s=paths['s_path'], storage_path_unc=paths['unc_path'])
     if name == "site_knowledge.save":
         incoming = _sanitize_knowledge(args)
         existing = _retrieve(context, scope)
@@ -666,25 +685,37 @@ class _KnowledgeStageError(OSError):
 def _verified_write(context, scope, value):
     """Classify failures from an authoritative readback of the active record."""
     before = _read(context, scope)
-    stage = "write"
-    try:
-        _write(context, scope, value)
-    except Exception as error:
-        stage = getattr(error, "stage", "storage_access")
+    last_error = None
+    for attempt in range(1, 4):
+        callback = context.get('storage_attempt_notice')
+        if callable(callback):
+            callback(attempt, 3, knowledge_directory(context))
         try:
-            after = _read(context, scope)
-        except Exception:
-            raise KnowledgeWriteError(True, "readback_after_failure", error) from error
-        if after == value:  # Replace committed; cleanup or later reporting failed.
-            return
-        raise KnowledgeWriteError(after != before, stage, error) from error
-    try:
-        if _read(context, scope) != value:
+            _write(context, scope, value)
+        except Exception as error:
+            last_error = error
+            stage = getattr(error, "stage", "storage_access")
+            try:
+                after = _read(context, scope)
+            except Exception as read_error:
+                raise KnowledgeWriteError(True, "readback_after_failure", read_error) from error
+            if after == value:
+                return
+            if after != before:
+                raise KnowledgeWriteError(True, stage, error) from error
+            if attempt < 3:
+                continue
+            raise KnowledgeWriteError(False, stage, error) from error
+        try:
+            if _read(context, scope) == value:
+                return
             raise KnowledgeWriteError(True, "readback_mismatch")
-    except KnowledgeWriteError:
-        raise
-    except Exception as error:
-        raise KnowledgeWriteError(True, "readback", error) from error
+        except KnowledgeWriteError:
+            raise
+        except Exception as error:
+            raise KnowledgeWriteError(True, "readback", error) from error
+    if last_error is not None:
+        raise KnowledgeWriteError(False, "storage_access", last_error) from last_error
 
 
 def reconciliation_baseline(args, context, prepared):

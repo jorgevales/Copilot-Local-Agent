@@ -208,31 +208,20 @@ def tool_path_policy(name, context):
 def _write_target(name, args, policy, context):
     key = 'destination' if name == 'files.copy' else 'path'
     value = args[key]
+    # All agent-owned file mutations are restricted to the current S: mapping,
+    # including when the one-session navigation grant is active.
+    profile = config_value(context.get('config', {}), 'profile_dir')
     if isinstance(policy, SessionPathPolicy):
-        return policy.resolve(value), False
-    if is_s_drive_path(value):
-        profile = config_value(context.get('config', {}), 'profile_dir')
+        checked = policy.resolve(value)  # Retain the run's one-time navigation grant.
+        target = resolve_s_drive_output(str(checked), excluded_roots=[profile] if profile else [])
+    elif is_s_drive_path(value) or str(value).startswith('\\\\'):
         target = resolve_s_drive_output(value, excluded_roots=[profile] if profile else [])
         if policy.mapped_s_root is not None:
             policy.resolve(target)
-        return target, True
-    if str(value).startswith('\\\\') and policy.mapped_s_root is not None:
-        profile = config_value(context.get('config', {}), 'profile_dir')
-        try:
-            target = resolve_s_drive_output(value, excluded_roots=[profile] if profile else [])
-        except PolicyError:
-            pass  # A separately configured UNC root may be unrelated to S:.
-        else:
-            policy.resolve(target)
-            return target, True
-    try:
-        return policy.resolve(value), False
-    except (PolicyError, OSError):
-        if not (is_s_drive_path(value) or str(value).startswith('\\\\')):
-            raise
-        profile = config_value(context.get('config', {}), 'profile_dir')
-        target = resolve_s_drive_output(value, excluded_roots=[profile] if profile else [])
-        return target, True
+    else:
+        checked = policy.resolve(value)
+        target = resolve_s_drive_output(str(checked), excluded_roots=[profile] if profile else [])
+    return target, True
 
 
 def _approved_write_target(name, args, policy, context):

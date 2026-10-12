@@ -18,7 +18,7 @@
 | `debug_port` | Loopback CDP port; example `9443`. |
 | `attach_existing` | Whether to attach to an explicitly owned existing Edge endpoint; default false. |
 | `visible` | Visible Edge mode; required supported mode. |
-| `allowed_roots` | File roots such as `workspace` and `deliveries`. |
+| `allowed_roots` | Runtime file roots; agent-owned persistent knowledge is independently constrained to the project-adjacent S: `Discoveries knowledge` directory. |
 | `allowed_domains` | Third-party browser allowlist; example only `example.com`. |
 | `response_timeout` | Copilot response bound; example `180` seconds. |
 | `max_corrections` / `max_tool_rounds` | Recovery and tool-loop bounds; example `12` each. |
@@ -30,7 +30,7 @@
 
 ## Configuration precedence and storage
 
-The ordinary path is Setup/Start with settings remembered under the selected OneDrive. Advanced runs can pass `-B app.py --config <settings-file>`, `--attach-existing --port <port> --profile <dedicated-profile>`, or `--resume <session-path>`. The source checkout and mutable runtime are intentionally separate. Runtime/session/profile/workspace files and local settings are ignored by `.gitignore`.
+The normal path is Setup/Start. All agent-owned persistent knowledge and runtime temp storage are anchored to `Discoveries knowledge`, one directory beside the project root's parent, on the live S: mapping. Startup passes both the mapped S: filesystem path and its resolved UNC path to Copilot. If this project checkout is not under S:, startup fails closed instead of choosing C: or OneDrive. Advanced runs can pass `-B app.py --config <settings-file>`, `--attach-existing --port <port> --profile <dedicated-profile>`, or `--resume <session-path>`. User-requested OneDrive paths remain explicit inputs only. Runtime/session/profile/workspace files and local settings are ignored by `.gitignore`.
 
 Environment-variable values are not included in this handoff. Any names required by a future change must be identified from source and documented without values before use.
 
