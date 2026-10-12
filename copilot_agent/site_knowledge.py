@@ -95,7 +95,7 @@ KNOWLEDGE_SPECS = {
     "site_knowledge.bind": (BIND, "user_approval", "Select the current HTTPS site's exact tenant, user/sharing scope and environment through local approval. Scope labels are user-declared; never infer an authenticated identity. No website knowledge is saved."),
     "site_knowledge.retrieve": (_object({"origin": ORIGIN}), "read_only", "Retrieve unexpired approved navigation knowledge for the current locally selected site namespace; a namespace must first be bound by the user."),
     "site_knowledge.query": (QUERY, "read_only", "Filter approved fresh navigation knowledge by category and/or exact generic route template inside the selected namespace."),
-    "site_knowledge.save": (SAVE, "user_approval", "Ask the local user whether to merge exact sanitized navigation knowledge into this Windows user's approved site namespace. Existing fresh entries are retained unless a new entry updates the same generic key. Customer data and secrets are rejected."),
+    "site_knowledge.save": (SAVE, "user_approval", "Review and merge sanitized navigation knowledge into this Windows user's site namespace. Valid discovered items can be saved when other items are rejected; the exact saved payload and exclusions are shown before approval."),
     "site_knowledge.invalidate": (_object({"origin": ORIGIN}), "user_approval", "After local approval, mark the selected namespace's knowledge unusable. It remains on disk as an invalidated record; never automatically re-use it."),
     "site_knowledge.export": (_object({"origin": ORIGIN}), "read_only", "Return a bounded structured summary of fresh knowledge for the approved namespace through the tool result; no arbitrary file export."),
 }
@@ -111,8 +111,8 @@ KNOWLEDGE_EXAMPLES = {
     "site_knowledge.export": {"origin": "https://example.com"},
 }
 
-# Deliberately closed vocabulary: generic navigation knowledge must not become
-# a free-text customer store. Unusual website labels can stay in ephemeral maps.
+# These words help distinguish navigation labels from possible personal names.
+# Route segments are validated by shape and context rather than this vocabulary.
 SAFE_WORDS = frozenset("""
     a an the to of for and or by with all my your our current previous next first last
     home landing dashboard portal workspace main index navigation menu breadcrumb
@@ -244,22 +244,54 @@ def _safe_route(value):
         raise ValueError("Persist only generic route templates without URL parameters or concrete identifiers")
     parts = [part for part in value.split("/") if part]
     def generic(part):
-        words=re.sub(r'([a-z])([A-Z])',r'\1 \2',part).lower().replace('-',' ').replace('_',' ').split()
-        return part in PLACEHOLDERS or bool(words) and all(word in SAFE_WORDS for word in words)
-    if len(parts) > 12 or any(not generic(part) for part in parts):
-        raise ValueError("Route contains unsupported or customer-specific segments; use generic navigation routes and parameter placeholders")
+        # Application route names are open vocabulary. A fixed English word
+        # list rejected real FNZ pages and pages in other languages.
+        return (part in PLACEHOLDERS or
+                bool(re.fullmatch(r'[A-Za-z][A-Za-z_-]{0,63}', part)) or
+                bool(re.fullmatch(r'v[0-9]{1,2}', part, re.I)))
+    if len(parts) > 16 or any(part in {'.', '..'} or not generic(part) for part in parts):
+        raise ValueError("Route contains concrete identifiers or unsupported segments; use parameter placeholders")
     for parent, child in zip(parts, parts[1:]):
         if parent.lower() in ENTITY_SEGMENTS and child.lower() not in STATIC_CHILDREN and child not in PLACEHOLDERS:
             raise ValueError("Concrete entity route parameters are excluded; use a generic parameter placeholder")
     return original
 
 
+def _template_route(value, origin):
+    """Turn an observed same-origin URL into a reusable path before review."""
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc:
+        if parsed.scheme != 'https' or parsed.netloc.lower() != urlsplit(origin).netloc:
+            raise ValueError('Only routes on the approved website can be saved')
+        path = parsed.path or '/'
+    else:
+        path = parsed.path
+    if not path.startswith('/') or '%' in path or '\\' in path:
+        raise ValueError('A plain same-origin route path is required')
+    parts = path.split('/')
+    for index in range(1, len(parts)):
+        part = parts[index]
+        parent = parts[index - 1].lower()
+        if not part or part in PLACEHOLDERS:
+            continue
+        if parent in ENTITY_SEGMENTS and part.lower() not in STATIC_CHILDREN | SAFE_SEGMENTS:
+            entity = parent.rstrip('s')
+            parts[index] = '{' + (entity if '{' + entity + '}' in PLACEHOLDERS else 'item') + '}'
+        elif re.search(r'[0-9]', part) and not re.fullmatch(r'v[0-9]{1,2}', part, re.I):
+            parts[index] = '{item}'
+    templated = '/'.join(parts)
+    _safe_route(templated)
+    return templated
+
+
 def _safe_label(value):
     if not re.fullmatch(r"[A-Za-z][A-Za-z /()_-]{0,99}", value):
         raise ValueError("Navigation labels must exclude identifiers, contact details and secrets")
     words = re.findall(r"[a-z]+", value.lower())
-    if not words or any(word not in SAFE_WORDS for word in words):
-        raise ValueError("Only generic navigation labels are reusable; customer names and free text are excluded")
+    if (not words or re.search(r'\b(?:token|bearer|password|secret|cookie|api.?key)\b', value, re.I)
+            or (not any(word in SAFE_WORDS for word in words)
+                and not re.search(r'\b[A-Z]{2,}\b', value))):
+        raise ValueError("Navigation labels must contain a generic navigation term or application acronym")
 
 
 def _safe_locator(item):
@@ -283,6 +315,13 @@ class KnowledgeValidationError(ValueError):
         value = value if path.endswith(('.purpose','.strategy','.role')) else '[excluded sha256='+_hash(value)+']'
         self.detail={'path':path,'value':value,'reason':reason}
         super().__init__(path+' rejected '+repr(value)+': '+reason)
+
+
+class KnowledgeWriteError(RuntimeError):
+    def __init__(self, uncertain: bool):
+        self.side_effects_uncertain = uncertain
+        super().__init__('Website knowledge write could not be verified' if uncertain
+                         else 'Website knowledge active record was unchanged after the failed write')
 
 
 def _sanitize_knowledge(args):
@@ -330,12 +369,20 @@ def safe_proposal(args):
         for index,item in enumerate(items):
             try:
                 if not isinstance(item,dict): raise ValueError('Knowledge item must be an object')
-                _sanitize_knowledge({'categories':[category],'knowledge':{category:[item]}})
-                safe.setdefault(category,[]).append(deepcopy(item))
+                candidate = deepcopy(item)
+                for key in ('path', 'parent_path'):
+                    if isinstance(candidate.get(key), str):
+                        candidate[key] = _template_route(candidate[key], args['origin'])
+                _sanitize_knowledge({'categories':[category],'knowledge':{category:[candidate]}})
+                safe.setdefault(category,[]).append(candidate)
             except ValueError as exc:
-                detail=deepcopy(getattr(exc,'detail',{'path':'knowledge.'+category+'[0]','value':item,'reason':str(exc)}))
+                detail=deepcopy(getattr(exc,'detail',{
+                    'path':'knowledge.'+category+'[0]',
+                    'value':'[excluded sha256='+_hash(item)+']',
+                    'reason':str(exc)}))
                 detail['path']=detail['path'].replace('[0]','['+str(index)+']',1)
-                if not args.get('allow_partial'): raise KnowledgeValidationError(detail['path'],detail['value'],detail['reason']) from exc
+                if args.get('allow_partial', True) is False:
+                    raise KnowledgeValidationError(detail['path'],detail['value'],detail['reason']) from exc
                 rejected.append(detail)
     if set(args['categories'])!=set(args['knowledge']): raise ValueError('Consent categories must match submitted knowledge categories')
     if not safe: raise ValueError('No safe items remain; nothing was saved. '+str(rejected))
@@ -543,6 +590,81 @@ def _write(context, scope, value):
             PathPolicy([checked.parent]).resolve(temporary, True).unlink()
 
 
+def _verified_write(context, scope, value):
+    """Classify failures from an authoritative readback of the active record."""
+    before = _read(context, scope)
+    try:
+        _write(context, scope, value)
+    except Exception as error:
+        try:
+            after = _read(context, scope)
+        except Exception:
+            raise KnowledgeWriteError(True) from error
+        if after == value:  # Replace committed; cleanup or later reporting failed.
+            return
+        raise KnowledgeWriteError(after != before) from error
+    try:
+        if _read(context, scope) != value:
+            raise KnowledgeWriteError(True)
+    except KnowledgeWriteError:
+        raise
+    except Exception as error:
+        raise KnowledgeWriteError(True) from error
+
+
+def reconciliation_baseline(args, context, prepared):
+    """Retain only hashes needed to resolve a later uncertain approved save."""
+    scope = _scope('site_knowledge.save', args, context)
+    before = _read(context, scope)
+    return {'kind': 'knowledge_save', 'namespace_id': _hash(scope),
+            'before_sha256': _hash(before) if before is not None else None,
+            'payload_sha256': prepared['payload_sha256'], 'revision': prepared['revision'],
+            'approval_sha256': context['approval_hash'], 'review_sha256': _hash(prepared),
+            'request_sha256': _hash(context.get('source_request_id', 'local'))}
+
+
+def reconcile_knowledge_call(state, context, call_id):
+    """Use the active namespace record, never a model-provided outcome."""
+    call = state.data['calls'].get(call_id)
+    if call is None:
+        from .web_privacy import private_id
+        call_id = private_id(call_id)
+        call = state.data['calls'].get(call_id)
+    if call is None or call.get('status') != 'uncertain':
+        raise ValueError('Choose one uncertain knowledge save')
+    baseline = call.get('reconciliation_baseline') or {}
+    if baseline.get('kind') != 'knowledge_save':
+        raise ValueError('This operation has no recorded knowledge readback baseline')
+    origin = _current_origin(context)
+    scope = _scope('site_knowledge.retrieve', {'origin': origin}, context)
+    if _hash(scope) != baseline['namespace_id']:
+        raise PolicyError('Current site namespace differs from the original save')
+    current = _read(context, scope)
+    current_hash = _hash(current) if current is not None else None
+    if current_hash == baseline['before_sha256']:
+        outcome = 'not_executed'
+    elif (current is not None and current.get('revision') == baseline['revision']
+          and current.get('payload_sha256') == baseline['payload_sha256']
+          and current.get('consent', {}).get('approval_hash') == baseline['approval_sha256']
+          and current.get('consent', {}).get('review_sha256') == baseline['review_sha256']
+          and current.get('provenance', {}).get('request') == baseline['request_sha256']):
+        outcome = 'completed'
+    else:
+        raise PolicyError('Fresh knowledge readback conflicts with both recorded states')
+    proof = {'kind': 'fresh_knowledge_readback', 'session_id': state.session_id,
+             'call_id_sha256': hashlib.sha256(call_id.encode()).hexdigest(),
+             'namespace_id': baseline['namespace_id'], 'record_sha256': current_hash,
+             'payload_sha256': current.get('payload_sha256') if current else None,
+             'revision': current.get('revision') if current else None,
+             'approval_sha256': current.get('consent', {}).get('approval_hash') if current else None,
+             'review_sha256': current.get('consent', {}).get('review_sha256') if current else None,
+             'request_sha256': current.get('provenance', {}).get('request') if current else None,
+             'outcome': outcome, 'observed_at': _timestamp(_now(context))}
+    state.reconcile_call(call_id, outcome, proof=proof)
+    return {'status': outcome, 'call_id': call_id, 'record_sha256': current_hash,
+            'completion_credited': outcome == 'completed'}
+
+
 def _retrieve(context, scope):
     value = _read(context, scope)
     base = {"namespace_id": _hash(scope), "schema_version": SCHEMA_VERSION}
@@ -593,10 +715,7 @@ def execute_knowledge(name, args, context, policy=None):
                  "provenance": {"source_urls": _sources(scope, knowledge), "session": _session(context),
                                 "request": _hash(context.get("source_request_id", "local")),
                                 "source": "local_user_approved_navigation_templates"}}
-        _write(context, scope, value)
-        verified = _read(context, scope)
-        if verified != value:
-            raise PolicyError("Website knowledge save did not verify against the approved payload")
+        _verified_write(context, scope, value)
         return {"status": "saved", "namespace_id": _hash(scope), "categories": prepared["categories"],
                 'revision':prepared['revision'],'rejected_items':prepared['rejected_items'],
                 "item_counts": prepared["item_counts"], "expires_at": value["expires_at"],
@@ -607,9 +726,7 @@ def execute_knowledge(name, args, context, policy=None):
         if value is None:
             return {"status": "missing", "namespace_id": _hash(scope)}
         value["invalidated_at"] = _timestamp(_now(context))
-        _write(context, scope, value)
-        if _read(context, scope) != value:
-            raise PolicyError("Website knowledge invalidation did not verify")
+        _verified_write(context, scope, value)
         return {"status": "invalidated", "namespace_id": _hash(scope),
                 "invalidated_at": value["invalidated_at"], "retained_locally": True}
     result = _retrieve(context, scope)

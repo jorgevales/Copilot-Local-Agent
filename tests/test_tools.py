@@ -1,10 +1,15 @@
 import asyncio
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from copilot_agent.tools import ToolRegistry, validate
 from copilot_agent.tools import STRUCTURE_SCRIPT
 from copilot_agent.policy import PathPolicy, URLPolicy, PolicyError
+from copilot_agent.policy import resolve_s_drive_output
+from copilot_agent.state import SessionState
+from copilot_agent.config import Config
 
 
 class ToolTests(unittest.TestCase):
@@ -15,6 +20,56 @@ class ToolTests(unittest.TestCase):
 
     def run_tool(self,name,args): return asyncio.run(self.registry.execute(name,args,self.context))
 
+    def test_mapped_s_share_is_an_optional_permitted_root(self):
+        share = self.root / 'mapped-share'
+        share.mkdir()
+        config = Config(root=self.root, allowed_roots=['workspace'])
+        with patch('copilot_agent.config.mapped_s_drive_root', return_value=share):
+            config.validate()
+            config.validate()
+        expected = [str((self.root / 'workspace').resolve())]
+        if os.name == 'nt':
+            expected.append(str(Path('C:/')))
+        expected.append(str(share))
+        self.assertEqual(config.allowed_roots, expected)
+        self.assertEqual(config._auto_s_drive_root, str(share))
+        with patch('copilot_agent.config.mapped_s_drive_root', side_effect=PolicyError('unmapped')):
+            config.validate()
+        self.assertEqual(config.allowed_roots, expected[:-1])
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows C: drive scope')
+    def test_local_c_drive_allows_approved_save_outside_workspace(self):
+        config = Config(root=self.root, allowed_roots=['workspace'])
+        config.validate()
+        outside = self.root / 'other-folder'
+        outside.mkdir()
+        self.context['config'] = config
+        args = {'path': str(outside / 'report.md'), 'text': 'Local report.'}
+        self.assertTrue(self.registry.validate_call('files.create', args, self.context)['valid'])
+        self.context['approved'] = True
+        self.assertTrue(self.run_tool('files.create', args)['ok'])
+        self.assertEqual((outside / 'report.md').read_text(), 'Local report.')
+
+    def test_mapped_s_root_allows_read_and_approved_create(self):
+        share = self.root / 'mapped-share'
+        share.mkdir()
+        existing = share / 'existing.md'
+        existing.write_text('From S.', encoding='utf-8')
+        self.context['config']['allowed_roots'].append(str(share))
+        self.context['config']['_auto_s_drive_root'] = str(share)
+        args = {'path': r'S:\new.md', 'text': 'Saved to S.'}
+        with patch('copilot_agent.policy.mapped_s_drive_root', return_value=share), \
+             patch('copilot_agent.policy.resolve_s_drive_output', side_effect=lambda path, **kw: share / Path(path).name), \
+             patch('copilot_agent.tools.resolve_s_drive_output', side_effect=lambda path, **kw: share / Path(path).name):
+            read = self.run_tool('files.read', {'path': r'S:\existing.md'})
+            self.assertEqual(read['result']['text'], 'From S.')
+            prepared = self.registry.validate_call('files.create', args, self.context)
+            self.assertEqual(prepared['s_drive_destination'], str(share / 'new.md'))
+            self.context.update(approved=True, s_drive_destination=prepared['s_drive_destination'])
+            created = self.run_tool('files.create', args)
+            self.assertTrue(created['ok'])
+            self.assertEqual((share / 'new.md').read_text(encoding='utf-8'), 'Saved to S.')
+
     def test_approval_and_create_only(self):
         args={"path":"new.txt","text":"original"}
         self.assertFalse(self.run_tool("files.create",args)["ok"])
@@ -23,6 +78,100 @@ class ToolTests(unittest.TestCase):
         self.assertTrue(self.run_tool("files.create",args)["ok"])
         self.assertFalse(self.run_tool("files.create",{**args,"text":"replacement"})["ok"])
         self.assertEqual((self.root/"new.txt").read_text(),"original")
+        crlf = {'path': 'windows-lines.md', 'text': 'First\r\nSecond\r\n'}
+        self.assertTrue(self.run_tool('files.create', crlf)['result']['verified'])
+        self.assertEqual(crlf['text'].encode('utf-8'), (self.root / 'windows-lines.md').read_bytes())
+
+    def test_exact_s_output_is_bound_to_approved_unc_identity(self):
+        folder = self.root / 'simulated-share'
+        folder.mkdir()
+        target = folder / 'report.md'
+        args = {'path': r'S:\Reports\report.md', 'text': 'Verified findings.\n'}
+        with patch('copilot_agent.tools.resolve_s_drive_output', return_value=target):
+            prepared = self.registry.validate_call('files.create', args, self.context)
+            self.assertEqual(str(target), prepared['s_drive_destination'])
+            self.context['approved'] = True
+            self.assertFalse(self.run_tool('files.create', args)['ok'])
+            self.assertFalse(target.exists())
+            self.context['s_drive_destination'] = prepared['s_drive_destination']
+            result = self.run_tool('files.create', args)
+        self.assertTrue(result['ok'])
+        self.assertTrue(result['result']['verified'])
+        self.assertEqual(args['text'], target.read_text(encoding='utf-8'))
+
+    def test_s_mapping_change_after_approval_prevents_creation(self):
+        first = self.root / 'first'
+        second = self.root / 'second'
+        first.mkdir(); second.mkdir()
+        args = {'path': r'S:\Reports\report.md', 'text': 'No misplaced output.'}
+        self.context.update(approved=True, s_drive_destination=str(first / 'report.md'))
+        with patch('copilot_agent.tools.resolve_s_drive_output', return_value=second / 'report.md'):
+            result = self.run_tool('files.create', args)
+        self.assertFalse(result['ok'])
+        self.assertFalse(result['result']['side_effects_uncertain'])
+        self.assertFalse((first / 'report.md').exists())
+        self.assertFalse((second / 'report.md').exists())
+
+    def test_copy_to_approved_s_destination(self):
+        source = self.root / 'source.md'
+        source.write_text('Reviewed export.', encoding='utf-8')
+        folder = self.root / 'simulated-share'
+        folder.mkdir()
+        target = folder / 'export.md'
+        args = {'source': 'source.md', 'destination': r'S:\Exports\export.md'}
+        self.context.update(approved=True, s_drive_destination=str(target))
+        with patch('copilot_agent.tools.resolve_s_drive_output', return_value=target):
+            result = self.run_tool('files.copy', args)
+        self.assertTrue(result['ok'])
+        self.assertEqual(source.read_bytes(), target.read_bytes())
+
+    def test_s_resolver_accepts_only_live_mapped_share_identity(self):
+        import os
+        if os.name != 'nt':
+            self.skipTest('Windows mapped-drive identity')
+        class CheckedPolicy:
+            def __init__(self, roots, excluded_roots=()):
+                self.assert_root = roots[0]
+            def resolve(self, path, must_exist=False):
+                self_root = self.assert_root
+                if self_root != r'\\server\share':
+                    raise AssertionError(self_root)
+                return path
+        observed = {
+            'S:\\': r'\\server\share',
+            r'S:\Reports': r'\\server\share\Reports',
+            r'\\server\share\Reports': r'\\server\share\Reports',
+            r'\\other\share\Reports': r'\\other\share\Reports',
+        }
+        def final(value, strict=True):
+            return observed[value]
+        with patch('copilot_agent.policy.os.path.realpath', side_effect=final), \
+             patch('copilot_agent.policy.reject_path_redirection'), \
+             patch('copilot_agent.policy.PathPolicy', CheckedPolicy):
+            self.assertEqual(str(resolve_s_drive_output(r'S:\Reports\report.md')),
+                             r'\\server\share\reports\report.md')
+            self.assertEqual(str(resolve_s_drive_output(r'\\server\share\Reports\report.md')),
+                             r'\\server\share\reports\report.md')
+            with self.assertRaises(PolicyError):
+                resolve_s_drive_output(r'\\other\share\Reports\report.md')
+            with self.assertRaises(PolicyError):
+                resolve_s_drive_output(r'S:relative.md')
+
+    def test_quarantine_requires_approval_and_retains_unknown_outcome(self):
+        state = SessionState(self.root / 'session')
+        uncertain = {'call_id': 'prior-save', 'name': 'site_knowledge.save', 'version': '1.0',
+                     'arguments': {'origin': 'https://example.com'}}
+        state.begin_call(uncertain)
+        state.finish_call('prior-save', {'ok': False, 'error': {'code': 'timeout'}})
+        self.context['session_state'] = state
+        denied = self.run_tool('operation.quarantine', {'call_id': 'prior-save'})
+        self.assertFalse(denied['ok'])
+        self.assertEqual('uncertain', state.data['calls']['prior-save']['status'])
+        self.context['approved'] = True
+        result = self.run_tool('operation.quarantine', {'call_id': 'prior-save'})
+        self.assertTrue(result['ok'])
+        self.assertFalse(result['result']['completion_credited'])
+        self.assertEqual('abandoned_unverifiable', state.data['calls']['prior-save']['status'])
 
     def test_path_escape_and_unsupported_arguments(self):
         self.assertFalse(self.run_tool("files.read",{"path":"../outside.txt"})["ok"])

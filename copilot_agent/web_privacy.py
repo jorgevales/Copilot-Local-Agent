@@ -7,6 +7,7 @@ import re
 
 PRIVATE_TOOLS = {
     'browser.reconcile', 'browser.recover_uncertain', 'browser.diagnostics',
+    'operation.quarantine', 'operation.reconcile',
     'browser.recon', 'browser.plan', 'browser.tabs', 'browser.customer_summary',
     'browser.route', 'browser.documents', 'browser.download_batch',
     'files.transfer_to_copilot',

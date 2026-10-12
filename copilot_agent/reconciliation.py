@@ -16,6 +16,9 @@ from .policy import PolicyError, URLPolicy
 
 class ReconciliationRequired(RuntimeError):
     """A state-changing action is blocked until fresh evidence resolves its ledger entry."""
+    def __init__(self, message: str, side_effects_uncertain: bool = False):
+        super().__init__(message)
+        self.side_effects_uncertain = side_effects_uncertain
 
 
 def _hash(value: str) -> str:
@@ -270,7 +273,8 @@ async def abandon_uncertain_browser_call(state, browser, call_id: str, checkpoin
         raise PolicyError('Fresh recovery checkpoint is not an owned website tab')
     await asyncio.wait_for(page.goto(checkpoint_url, wait_until='domcontentloaded', timeout=15000), timeout=17)
     if page.is_closed() or _origin(page.url) != _origin(checkpoint_url):
-        raise ReconciliationRequired('Fresh checkpoint navigation was not verified on the approved origin')
+        raise ReconciliationRequired('Fresh checkpoint navigation was not verified on the approved origin',
+                                     side_effects_uncertain=True)
     URLPolicy(state.data.get('approved_domains', [])).resolve(page.url)
     title = await asyncio.wait_for(page.title(), timeout=3)
     browser.tool_page = page

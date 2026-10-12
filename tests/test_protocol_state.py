@@ -265,6 +265,47 @@ class StateAndPromptTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             state.begin_call(dict(original, call_id='reviewed-next-write'))
 
+    def test_knowledge_uncertainty_does_not_block_independent_file_creation(self):
+        state = SessionState(retained_root('knowledge-isolation-'))
+        save = {'call_id': 'save', 'name': 'site_knowledge.save', 'version': '1.0',
+                'arguments': {'origin': 'https://example.com'}}
+        state.begin_call(save)
+        state.finish_call('save', {'ok': False, 'error': {'code': 'timeout'}})
+        file_call = {'call_id': 'export', 'name': 'files.create', 'version': '1.0',
+                     'arguments': {'path': 'findings.md'}}
+        state.begin_call(file_call)
+        state.finish_call('export', {'ok': True, 'result': {'status': 'created'}})
+        self.assertEqual('completed', state.data['calls']['export']['status'])
+        with self.assertRaises(RuntimeError):
+            state.begin_call(dict(save, call_id='same-save'))
+        with self.assertRaises(RuntimeError):
+            state.begin_call(dict(save, call_id='different-save', arguments={'origin': 'https://other.test'}))
+
+    def test_approved_quarantine_preserves_unknown_outcome_and_no_replay(self):
+        state = SessionState(retained_root('knowledge-quarantine-'))
+        save = {'call_id': 'save', 'name': 'site_knowledge.save', 'version': '1.0',
+                'arguments': {'origin': 'https://example.com'}}
+        state.begin_call(save)
+        state.finish_call('save', {'ok': False, 'error': {'code': 'timeout'}})
+        state.quarantine_call('save')
+        retained = SessionState(state.directory, resume=True)
+        self.assertEqual('abandoned_unverifiable', retained.data['calls']['save']['status'])
+        self.assertFalse(retained.data['calls']['save']['completion_credited'])
+        with self.assertRaises(RuntimeError):
+            retained.begin_call(dict(save, call_id='replay'))
+        retained.begin_call(dict(save, call_id='new-payload', arguments={'origin': 'https://other.test'}))
+
+    def test_private_resume_can_quarantine_original_call_id(self):
+        state = SessionState(retained_root('private-quarantine-'))
+        state.data['website_private'] = True
+        save = {'call_id': 'save', 'name': 'site_knowledge.save', 'version': '1.0',
+                'arguments': {'origin': 'https://example.com'}}
+        state.begin_call(save)
+        state.finish_call('save', {'ok': False, 'error': {'code': 'timeout'}})
+        resumed = SessionState(state.directory, resume=True)
+        resumed.quarantine_call('save')
+        self.assertEqual('abandoned_unverifiable', next(iter(resumed.data['calls'].values()))['status'])
+
     def test_verified_failed_call_does_not_remain_uncertain_and_domain_grant_persists(self):
         state = SessionState(retained_root('verified-failure-recovery-'))
         call = {'call_id': 'failed-capture', 'name': 'code_runner', 'version': '1.0',

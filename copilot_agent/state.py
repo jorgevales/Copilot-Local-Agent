@@ -13,6 +13,21 @@ def canonical_hash(value) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':')).encode('utf-8')).hexdigest()
 
 
+def operation_domains(name: str) -> frozenset[str]:
+    """Conservative effect domains; unknown tools retain the global gate."""
+    if name.startswith('site_knowledge.') or name.startswith('discovery.knowledge_'):
+        return frozenset({'knowledge'})
+    if name in {'files.transfer_to_copilot', 'copilot.download'}:
+        return frozenset({'browser', 'filesystem'})
+    if name.startswith(('files.', 'archives.')):
+        return frozenset({'filesystem'})
+    if name.startswith(('browser.', 'documents.', 'research.', 'navigation.')):
+        return frozenset({'browser'})
+    if name.startswith('discovery.'):
+        return frozenset({'browser', 'knowledge'})
+    return frozenset({'global'})
+
+
 class SessionState:
     def __init__(self, directory: Path, resume: bool = False):
         self.directory = Path(directory)
@@ -103,22 +118,54 @@ class SessionState:
                    uncertainty_recovery: bool = False):
         call_id = request['call_id']
         from .web_privacy import private_id
-        if uncertainty_recovery and request.get('name') != 'browser.recover_uncertain':
+        if uncertainty_recovery and request.get('name') not in {'browser.recover_uncertain', 'operation.quarantine'}:
             raise RuntimeError('Only the uncertainty recovery tool may bypass the pending-effect gate')
         if call_id in self.data['calls'] or private_id(call_id) in self.data['calls']:
             raise RuntimeError('Duplicate call ID cannot execute again')
+        domains = operation_domains(request['name'])
         if (state_changing and not uncertainty_recovery
                 and any(c['status'] == 'uncertain' and c.get('state_changing', True)
+                        and ('global' in domains or 'global' in operation_domains(c['request']['name'])
+                             or bool(domains & operation_domains(c['request']['name'])))
                         for c in self.data['calls'].values())):
             raise RuntimeError('A previous state-changing operation remains uncertain; inspect and reconcile before another change')
         action_hash = canonical_hash({k: request[k] for k in ('name', 'version', 'arguments')})
-        if any(c.get('action_hash') == action_hash and c['status'] == 'uncertain' for c in self.data['calls'].values()):
+        if any(c.get('action_hash') == action_hash and c['status'] in {'uncertain', 'abandoned_unverifiable'} for c in self.data['calls'].values()):
             raise RuntimeError('An identical action has uncertain effects; reconcile before requesting it again')
         self.data['calls'][call_id] = {'status': 'executing', 'request_hash': canonical_hash(request), 'action_hash': action_hash, 'state_changing': state_changing, 'request': request, 'started_at': now()}
         if reconciliation_baseline is not None:
             self.data['calls'][call_id]['reconciliation_baseline'] = deepcopy(reconciliation_baseline)
         self.event('tool_intent', call_id=call_id, name=request['name'], request_hash=canonical_hash(request))
         self.save()
+
+    def quarantine_call(self, call_id: str):
+        """Keep the unknown outcome in the audit while releasing its domain."""
+        call = self.data['calls'].get(call_id)
+        if call is None:
+            from .web_privacy import private_id
+            call_id = private_id(call_id)
+            call = self.data['calls'].get(call_id)
+        if call is None or call.get('status') != 'uncertain':
+            raise ValueError('Choose one uncertain operation')
+        domains = operation_domains(call.get('request', {}).get('name', ''))
+        if not domains <= {'knowledge', 'filesystem'}:
+            raise ValueError('This effect needs subsystem-specific verified recovery')
+        previous, prior_status = deepcopy(call), self.data['status']
+        call.update(status='abandoned_unverifiable', completion_credited=False,
+                    outcome_determined=False, quarantined_at=now())
+        if not any(item.get('status') == 'uncertain' for item in self.data['calls'].values()):
+            self.data['status'] = 'ready'
+        try:
+            self.save()
+        except Exception:
+            self.data['calls'][call_id], self.data['status'] = previous, prior_status
+            raise
+        try:
+            self.event('operation_quarantined', call_id=call_id, completion_credited=False,
+                       outcome_determined=False)
+        except OSError:
+            pass  # The durable state is authoritative; event logging is secondary.
+        return True
 
     def abandon_browser_uncertainty(self, call_id: str, proof: dict):
         """Quarantine an unknowable browser effect after a fresh approved checkpoint."""
@@ -228,7 +275,21 @@ class SessionState:
             raise ValueError('The call was already reconciled with a different outcome')
         if call['status'] != 'uncertain':
             raise ValueError('Only an uncertain call may be reconciled')
-        if (type(proof) is not dict or proof.get('kind') != 'fresh_browser_observation'
+        baseline = call.get('reconciliation_baseline') or {}
+        if (type(proof) is dict and proof.get('kind') == 'fresh_knowledge_readback'
+                and baseline.get('kind') == 'knowledge_save'):
+            if (proof.get('outcome') != outcome or proof.get('session_id') != self.session_id
+                    or proof.get('call_id_sha256') != hashlib.sha256(call_id.encode()).hexdigest()
+                    or proof.get('namespace_id') != baseline.get('namespace_id')
+                    or proof.get('record_sha256') != (baseline.get('before_sha256') if outcome == 'not_executed'
+                                                       else proof.get('record_sha256'))
+                    or (outcome == 'completed' and (
+                        not re.fullmatch(r'[a-f0-9]{64}', proof.get('record_sha256', ''))
+                        or any(proof.get(key) != baseline.get(key) for key in
+                               ('payload_sha256', 'revision', 'approval_sha256',
+                                'review_sha256', 'request_sha256'))))):
+                raise ValueError('Fresh matching knowledge readback evidence is required')
+        elif (type(proof) is not dict or proof.get('kind') != 'fresh_browser_observation'
                 or proof.get('outcome') != outcome or proof.get('session_id') != self.session_id
                 or proof.get('call_id_sha256') != hashlib.sha256(call_id.encode()).hexdigest()
                 or (call.get('reconciliation_baseline') or {}).get('kind') != 'navigation_only'
@@ -237,7 +298,7 @@ class SessionState:
                 or not (proof.get('observed_url_sha256') == proof.get('proposed_url_sha256')
                         or proof.get('proposal_query_free') is True and proof.get('proposed_url_sha256') == proof.get('observed_query_free_url_sha256'))
                 or proof.get('baseline_url_sha256') != call.get('reconciliation_baseline', {}).get('url_sha256')):
-            raise ValueError('Fresh matching browser reconciliation evidence is required')
+            raise ValueError('Fresh matching reconciliation evidence is required')
         previous, prior_status = deepcopy(call), self.data['status']
         call.update(status=outcome, reconciliation=deepcopy(proof), reconciled_at=now())
         if not any(item['status'] == 'uncertain' for item in self.data['calls'].values()):
@@ -248,7 +309,8 @@ class SessionState:
             self.data['calls'][call_id] = previous
             self.data['status'] = prior_status
             raise
-        self.event('call_reconciled_from_fresh_browser_evidence', call_id=call_id, outcome=outcome)
+        self.event('call_reconciled_from_fresh_evidence', call_id=call_id, outcome=outcome,
+                   evidence_kind=proof['kind'])
         return True
 
     def grant(self, plan_hash: str, decision: str):

@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import json
+import os
 import platform
 import re
 import shutil
@@ -11,7 +12,7 @@ from importlib.metadata import version, PackageNotFoundError
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-from .policy import PathPolicy, URLPolicy, PolicyError, config_value
+from .policy import PathPolicy, URLPolicy, PolicyError, config_value, is_s_drive_path, resolve_s_drive_output
 from .code_runner import CodeRunner, REQUIRED, FIELDS
 from .sync import CreatedSync
 from .logging_utils import redact
@@ -19,7 +20,7 @@ from .archives import ArchiveService, inspect_zip, ArchiveError
 from .downloads import DownloadError
 from .web_navigation import NAVIGATION_SPECS, validate_navigation, execute_navigation, clear_navigation_state
 from .web_documents import DOCUMENT_SPECS, DOCUMENT_EXAMPLES, validate_documents, execute_documents
-from .site_knowledge import KNOWLEDGE_SPECS, KNOWLEDGE_EXAMPLES, validate_knowledge, execute_knowledge, safe_proposal, KnowledgeValidationError
+from .site_knowledge import KNOWLEDGE_SPECS, KNOWLEDGE_EXAMPLES, validate_knowledge, execute_knowledge, safe_proposal, KnowledgeValidationError, KnowledgeWriteError, reconcile_knowledge_call
 from .discovery_engine import DISCOVERY_SPECS, validate_discovery, execute_discovery
 from .reconciliation import (reconcile_browser_call, abandon_uncertain_browser_call,
                              ReconciliationRequired, browser_diagnostics)
@@ -124,7 +125,7 @@ SPECS = {
     "files.list": (obj(PATH), "read_only", "List up to 200 immediate children inside allowed roots."),
     "files.exists": (obj(PATH), "read_only", "Check a path inside allowed roots."),
     "files.read": (obj({"path":S,"max_chars":N},["path"]), "read_only", "Read bounded UTF-8 text; binary or oversized reads fail."),
-    "files.create": (obj({"path":S,"text":{"type":"string","maxLength":100000}}), "user_approval", "Create a new UTF-8 file exclusively. Never overwrite."),
+    "files.create": (obj({"path":S,"text":{"type":"string","maxLength":100000}}), "user_approval", "Create a new UTF-8 file exclusively. Never overwrite. An exact approved S: output can resolve to its current UNC share."),
     "files.append": (obj({"path":S,"text":{"type":"string","maxLength":100000}}), "user_approval", "Append text to an existing file after explicit approval; preserves prior content."),
     "files.copy": (obj({"source":S,"destination":S}), "user_approval", "Copy one bounded file to a new exclusive destination."),
     "files.metadata": (obj(PATH), "read_only", "Read size, modification time and type."),
@@ -140,6 +141,8 @@ SPECS = {
     "browser.diagnostics": (obj({}), "read_only", "Read sanitized authoritative browser registration, connection, owned-tab count and uncertain/quarantined ledger states. No URLs, titles, cookies or page content."),
     "browser.reconcile": (obj({"call_id":S,"outcome":{"type":"string","enum":["completed","not_executed"]},"observed_url":S,"observed_title":{"type":"string","maxLength":300}},["call_id","outcome","observed_url"]), "read_only", "Resolve an uncertain navigation-only browser call automatically after fresh local inspection confirms the exact observed URL and pre-action fingerprint. No click or navigation; never use for forms or writes."),
     "browser.recover_uncertain": (obj({"call_id":S,"checkpoint_url":S}), "user_approval", "Quarantine one uncertain non-navigation browser action without crediting its outcome, open a fresh approved same-origin checkpoint, and resume the current run. Never replays the action."),
+    "operation.quarantine": (obj({"call_id":S}), "user_approval", "Quarantine one uncertain non-browser operation without replay or outcome credit. The identical action remains barred; inspect effects before proposing a different action."),
+    "operation.reconcile": (obj({"call_id":S}), "read_only", "Resolve an uncertain site-knowledge save from a fresh readback against the recorded pre-write and approved target hashes. Other operation types require their subsystem recovery."),
     "browser.read": (obj({"frame_selector":S},[]), "read_only", "Read bounded visible body text from the managed tab or one explicit iframe."),
     "browser.structure": (obj({"frame_selector":S},[]), "read_only", "Read visible controls without input values from the managed tab or one explicit iframe."),
     "browser.click": (obj({"selector":S,"frame_selector":S},["selector"]), "user_approval", "Click one unique selector in the managed tab or explicit iframe. May change third-party state."),
@@ -183,7 +186,44 @@ def validate(value, schema):
 
 def configured_path_policy(config, session_dir):
     profile=config_value(config,"profile_dir")
-    return PathPolicy(config_value(config,"allowed_roots",[session_dir]),excluded_roots=[profile] if profile else [])
+    return PathPolicy(config_value(config,"allowed_roots",[session_dir]),
+                      excluded_roots=[profile] if profile else [],
+                      mapped_s_root=config_value(config, '_auto_s_drive_root'))
+
+
+def _write_target(name, args, policy, context):
+    key = 'destination' if name == 'files.copy' else 'path'
+    value = args[key]
+    if is_s_drive_path(value):
+        profile = config_value(context.get('config', {}), 'profile_dir')
+        target = resolve_s_drive_output(value, excluded_roots=[profile] if profile else [])
+        if policy.mapped_s_root is not None:
+            policy.resolve(target)
+        return target, True
+    if str(value).startswith('\\\\') and policy.mapped_s_root is not None:
+        profile = config_value(context.get('config', {}), 'profile_dir')
+        try:
+            target = resolve_s_drive_output(value, excluded_roots=[profile] if profile else [])
+        except PolicyError:
+            pass  # A separately configured UNC root may be unrelated to S:.
+        else:
+            policy.resolve(target)
+            return target, True
+    try:
+        return policy.resolve(value), False
+    except (PolicyError, OSError):
+        if not (is_s_drive_path(value) or str(value).startswith('\\\\')):
+            raise
+        profile = config_value(context.get('config', {}), 'profile_dir')
+        target = resolve_s_drive_output(value, excluded_roots=[profile] if profile else [])
+        return target, True
+
+
+def _approved_write_target(name, args, policy, context):
+    target, is_s_output = _write_target(name, args, policy, context)
+    if is_s_output and context.get('s_drive_destination') != str(target):
+        raise PolicyError('The mapped S: destination differs from the exact approved output')
+    return target
 
 
 class ToolRegistry:
@@ -199,6 +239,10 @@ class ToolRegistry:
         if name == "browser.open": examples = [{"arguments":{"url":"https://example.com/"}}]
         if name == "browser.reconcile": examples = [{"arguments":{"call_id":"prior-navigation-call-id","outcome":"completed","observed_url":"https://example.com/actual-page"}}]
         if name == "browser.recover_uncertain": examples = [{"arguments":{"call_id":"prior-form-call-id","checkpoint_url":"https://example.com/start"}}]
+        if name == "operation.quarantine": examples = [{"arguments":{"call_id":"prior-uncertain-call-id"}}]
+        if name == "operation.reconcile": examples = [{"arguments":{"call_id":"prior-knowledge-save-id"}}]
+        if name == 'permissions.grant':
+            examples = []  # A synthetic schema example cannot represent reviewed customer identity evidence.
         if name == "copilot.download": examples = [{"arguments":{"expected_name":"package.zip"}}]
         if name == "archives.extract": examples = [{"arguments":{"path":"package.zip","destination":"delivered-project","expected_sha256":"0"*64,"expected_files":["README.md"]}}]
         if name in KNOWLEDGE_EXAMPLES: examples = [{'arguments': KNOWLEDGE_EXAMPLES[name]}]
@@ -276,11 +320,22 @@ class ToolRegistry:
             return {'valid': True}
         if name.startswith("files.") or name in {"system.disk","ocr.image"}:
             keys=("source","destination") if name=="files.copy" else ("path",)
-            resolved={key:policy.resolve(args[key]) for key in keys}
+            write_names={'files.create','files.mkdir','files.append','files.copy'}
+            destination='destination' if name=='files.copy' else 'path'
+            resolved={}
+            s_destination=None
+            for key in keys:
+                if name in write_names and key==destination:
+                    resolved[key], is_s_output = _write_target(name,args,policy,context)
+                    if is_s_output: s_destination=str(resolved[key])
+                else:
+                    resolved[key]=policy.resolve(args[key])
             creates=("destination",) if name=="files.copy" else ("path",) if name in {"files.create","files.mkdir"} else ()
             for key in creates:
                 if resolved[key].exists(): raise PolicyError("Create destination already exists")
                 if not resolved[key].parent.is_dir(): raise PolicyError("Create destination parent must exist")
+            if s_destination is not None:
+                return {'valid': True, 's_drive_destination': s_destination}
         if name=="browser.open":
             URLPolicy.website_domain(args["url"])
             for domain in args.get('allowed_domains', []):
@@ -389,6 +444,8 @@ class ToolRegistry:
 
     async def execute(self, name, args, context):
         if name=='research.perform': context['research_effects_started']=False
+        if name in {'files.create','files.mkdir','files.append','files.copy'}:
+            context['filesystem_effect_started']=False
         if name in DISCOVERY_SPECS or name in DISCOVERY_KNOWLEDGE_SPECS:
             context['discovery_effects_started'] = False
         try:
@@ -428,6 +485,10 @@ class ToolRegistry:
             if name in {"archives.extract", "copilot.download"} and result.get("status") not in {"verified", "verified_with_limitations", "downloaded"}:
                 return self._limit({"ok":False,"tool":name,"result":result,"error":{"code":"operation_failed","message":"Delivery verification failed; inspect retained outputs before retry."}},context)
             return self._limit({"ok":True,"tool":name,"result":result},context)
+        except KnowledgeWriteError as error:
+            return {'ok':False,'tool':name,'result':{'status':'uncertain' if error.side_effects_uncertain else 'failed_before_commit',
+                    'side_effects_uncertain':error.side_effects_uncertain},
+                    'error':{'code':'knowledge_write_failed','message':str(error)}}
         except DownloadError as error:
             return redact({"ok":False,"tool":name,"result":{"status":"uncertain" if error.side_effects_uncertain else "not_started","side_effects_uncertain":error.side_effects_uncertain},"error":{"code":error.code,"message":str(error)}})
         except DiscoveryError as error:
@@ -437,13 +498,22 @@ class ToolRegistry:
                                               context.get('discovery_effects_started') is True),
                     'error': {'code': error.code, 'message': error.message}}
         except PolicyError as error:
-            return redact({'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {},'error':{'code':'policy_denied','message':str(error)}})
-        except ReconciliationRequired as error: return {"ok":False,"tool":name,"error":{"code":"reconciliation_conflict","message":str(error)}}
+            certain_preflight = (name == 'operation.quarantine'
+                                or name in {'files.create','files.mkdir','files.append','files.copy'}
+                                and not context.get('filesystem_effect_started'))
+            return redact({'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {'status':'not_started','side_effects_uncertain':False} if certain_preflight else {},'error':{'code':'policy_denied','message':str(error)}})
+        except ReconciliationRequired as error: return {"ok":False,"tool":name,"result":{"status":"uncertain" if error.side_effects_uncertain else "not_started","side_effects_uncertain":error.side_effects_uncertain},"error":{"code":"reconciliation_conflict","message":str(error)}}
         except (ValueError,TypeError) as error:
             return redact({'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {},'error':{'code':'invalid_arguments','message':str(error)}})
         except asyncio.TimeoutError:
+            if name in {'files.create','files.mkdir','files.append','files.copy'} and not context.get('filesystem_effect_started'):
+                return {'ok':False,'tool':name,'result':{'status':'not_started','side_effects_uncertain':False},
+                        'error':{'code':'timeout','message':'File validation timed out before any write was attempted'}}
             return {'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {},'error':{'code':'timeout','message':'Local operation timed out; inspect partial effects before retrying'}}
         except Exception as error:
+            if name in {'files.create','files.mkdir','files.append','files.copy'} and not context.get('filesystem_effect_started'):
+                return {'ok':False,'tool':name,'result':{'status':'not_started','side_effects_uncertain':False},
+                        'error':{'code':'operation_failed','message':str(error)[:1000]}}
             if name=='research.perform':
                 return {'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)},'error':{'code':'operation_failed','message':'Research stopped; inspect partial effects before any retry.'}}
             if name in DISCOVERY_SPECS or name in DISCOVERY_KNOWLEDGE_SPECS:
@@ -460,6 +530,12 @@ class ToolRegistry:
             raise PolicyError('Use research.perform for bounded, category-controlled customer reads under the matching grant')
         if name == 'browser.reconcile':
             return await reconcile_browser_call(context['session_state'], context['browser'], **args)
+        if name == 'operation.quarantine':
+            context['session_state'].quarantine_call(args['call_id'])
+            return {'status': 'abandoned_unverifiable', 'call_id': args['call_id'],
+                    'completion_credited': False, 'outcome_determined': False}
+        if name == 'operation.reconcile':
+            return reconcile_knowledge_call(context['session_state'], context, args['call_id'])
         if name == 'browser.recover_uncertain':
             return await abandon_uncertain_browser_call(context['session_state'], context['browser'], **args)
         if name == 'browser.diagnostics':
@@ -480,21 +556,39 @@ class ToolRegistry:
         if name=="archives.extract": return ArchiveService(policy,context["session_dir"]).extract(args,approved=context.get("approved",False))
         if name.startswith("files."):
             if name=="files.copy":
-                source=policy.resolve(args["source"],True); target=policy.resolve(args["destination"])
+                source=policy.resolve(args["source"],True); target=_approved_write_target(name,args,policy,context)
                 if not source.is_file() or source.stat().st_size>20971520: raise PolicyError("Copy source must be a file of at most 20 MB")
+                context['filesystem_effect_started']=True
                 with source.open("rb") as incoming, target.open("xb") as outgoing:
                     shutil.copyfileobj(incoming,outgoing,65536)
                 return {"path":str(target),"size":target.stat().st_size}
-            path=policy.resolve(args["path"])
+            path=(_approved_write_target(name,args,policy,context)
+                  if name in {'files.create','files.mkdir','files.append'} else policy.resolve(args["path"]))
             if name=="files.exists": return {"exists":path.exists(),"path":str(path)}
-            if name=="files.mkdir": path.mkdir(exist_ok=False); return {"path":str(path)}
+            if name=="files.mkdir":
+                context['filesystem_effect_started']=True
+                path.mkdir(exist_ok=False)
+                return {"path":str(path)}
             if name=="files.create":
-                with path.open("x",encoding="utf-8") as stream: stream.write(args["text"])
-                return {"path":str(path),"size":path.stat().st_size}
+                try:
+                    payload=args["text"].encode("utf-8")
+                except UnicodeError as error:
+                    raise ValueError('File text must be valid UTF-8') from error
+                context['filesystem_effect_started']=True
+                with path.open("xb") as stream:
+                    stream.write(payload)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                actual=path.read_bytes()
+                if actual != payload:
+                    raise OSError('Created file did not verify against approved text')
+                digest=hashlib.sha256(actual).hexdigest()
+                return {"path":str(path),"size":path.stat().st_size,"sha256":digest,"verified":True}
             if name=="files.append":
                 if not path.is_file(): raise PolicyError("Append requires an existing regular file")
                 if path.stat().st_size>20971520 or path.stat().st_nlink>1: raise PolicyError("Append requires a bounded file without hardlink aliases")
                 path.read_text(encoding="utf-8")
+                context['filesystem_effect_started']=True
                 with path.open("a",encoding="utf-8") as stream: stream.write(args["text"])
                 return {"path":str(path),"size":path.stat().st_size}
             if name=="files.list":
@@ -532,7 +626,6 @@ class ToolRegistry:
         if name=="system.disk":
             usage=shutil.disk_usage(policy.resolve(args["path"],True)); return dict(zip(("total","used","free"),usage))
         if name=="system.processes":
-            import os
             processes=[{"pid":os.getpid(),"name":"Copilot Local Agent","python":platform.python_version()}]
             owned=getattr(context.get("browser"),"_launched_process",None)
             if owned is not None and isinstance(getattr(owned,"pid",None),int):

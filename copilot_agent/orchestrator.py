@@ -19,7 +19,7 @@ from .presentation import exchange_summary, call_summary
 from .research_permissions import prepare_permissions
 from .prompts import PromptBuilder
 from .protocol import ProtocolError, parse_response, correction_message
-from .state import canonical_hash
+from .state import canonical_hash, operation_domains
 from .sync import CreatedSync
 from .attachments import AttachmentQueue, SUPPORTED_EXTENSIONS, TEXT_EXTENSIONS, upload_name
 from .storage import discover_onedrive_accounts
@@ -32,7 +32,8 @@ class Orchestrator:
         browser.website_private = True
         self.findings = Findings(state.directory)
         self.prompts = PromptBuilder(config, registry, state, self.findings)
-        self.policy = PathPolicy(config.allowed_roots, excluded_roots=[config.profile_dir])
+        self.policy = PathPolicy(config.allowed_roots, excluded_roots=[config.profile_dir],
+                                 mapped_s_root=getattr(config, '_auto_s_drive_root', None))
         self.display = display
         self.event_sink = event_sink
         self.cancel_event = cancel_event if cancel_event is not None else threading.Event()
@@ -147,7 +148,7 @@ class Orchestrator:
         return {'path': str(path), 'sha256': digest, 'size': size, 'upload_name': upload_name(path)}
 
     def attachment_queue(self):
-        """Selected account/S: sources do not expand the local tools' file roots."""
+        """Prepare attachment sources using the selected storage account."""
         account_root = None
         if self.config.storage_dir is not None:
             accounts = getattr(self.config, '_storage_candidates', None) or discover_onedrive_accounts()
@@ -479,16 +480,19 @@ class Orchestrator:
             if call['call_id'] in self.state.data['calls'] or private_id(call['call_id']) in self.state.data['calls']:
                 raise PolicyError('Previously processed call ID must not be replayed')
             action_hash = canonical_hash({k: call[k] for k in ('name', 'version', 'arguments')})
-            if any(c.get('action_hash') == action_hash and c['status'] == 'uncertain' for c in self.state.data['calls'].values()):
-                raise PolicyError('An identical action may have changed the page; only inspection is allowed. Request browser.info, then browser.reconcile with the pending call ID and observed final URL before any new navigation.')
+            if any(c.get('action_hash') == action_hash and c['status'] in {'uncertain', 'abandoned_unverifiable'} for c in self.state.data['calls'].values()):
+                raise PolicyError('An identical action has unresolved or quarantined effects. Inspect the relevant subsystem and reconcile from fresh evidence where supported; do not replay it.')
             if any(c.get('action_hash') == action_hash and c['status'] == 'completed'
                    and not c.get('result', {}).get('ok') for c in self.state.data['calls'].values()):
                 raise PolicyError('This method already failed; propose a materially different safe recovery approach')
             if (catalog[call['name']]['approval_policy'] != 'read_only'
-                    and call['name'] != 'browser.recover_uncertain'
+                    and call['name'] not in {'browser.recover_uncertain', 'operation.quarantine'}
                     and any(c['status'] == 'uncertain' and c.get('state_changing', True)
+                            and ('global' in operation_domains(call['name'])
+                                 or 'global' in operation_domains(c['request']['name'])
+                                 or bool(operation_domains(call['name']) & operation_domains(c['request']['name'])))
                             for c in self.state.data['calls'].values())):
-                raise PolicyError('A prior action has uncertain effects. Reconcile navigation-only calls from fresh evidence, or request separately approved browser.recover_uncertain for an unreconcilable non-navigation browser action. Other effects remain blocked.')
+                raise PolicyError('A prior action in this operation domain has uncertain effects. Reconcile navigation-only calls from fresh evidence, use approved browser.recover_uncertain for browser effects, or approved operation.quarantine for non-browser effects.')
             # Validate argument shape before execution; page/filesystem state may
             # depend on an earlier successful step in this same ordered batch.
             if hasattr(self.registry, 'validate_input'):
@@ -659,6 +663,24 @@ class Orchestrator:
                     context['navigation_scope_granted'] = True
                 prepared = None
                 artifact = None
+                if call['name'] == 'operation.quarantine':
+                    from .web_privacy import private_id
+                    target_id = call['arguments']['call_id']
+                    target = (self.state.data['calls'].get(target_id)
+                              or self.state.data['calls'].get(private_id(target_id)))
+                    if target is None or target.get('status') != 'uncertain':
+                        raise PolicyError('Choose an uncertain operation for quarantine')
+                    if not operation_domains(target['request']['name']) <= {'knowledge', 'filesystem'}:
+                        raise PolicyError('This effect needs subsystem-specific verified recovery')
+                    prepared = {'uncertain_operation': {'tool': target['request']['name'],
+                                'status': target['status'],
+                                'effect_domains': sorted(operation_domains(target['request']['name'])),
+                                'outcome_credited': False}}
+                if call['name'] in {'files.create', 'files.mkdir', 'files.append', 'files.copy'}:
+                    file_preflight = self.registry.validate_call(call['name'], call['arguments'], context)
+                    if isinstance(file_preflight, dict) and file_preflight.get('s_drive_destination'):
+                        prepared = {'mapped_s_drive_destination': file_preflight['s_drive_destination'],
+                                    'identity_checked': True, 'write_scope': 'one exact approved output'}
                 if call['name'] == 'code_runner':
                     needs_approval = True
                     prepared = self._code_runner().prepare(call['arguments'])
@@ -771,6 +793,8 @@ class Orchestrator:
                     if prepared:
                         if 'proposal_hash' in prepared:
                             context['approved_hash'] = prepared['proposal_hash']
+                        if 'mapped_s_drive_destination' in prepared:
+                            context['s_drive_destination'] = prepared['mapped_s_drive_destination']
                     if artifact:
                         self.approved_attachment_hashes[artifact['path']] = artifact['sha256']
                     if call['name'].startswith('browser.'):
@@ -784,8 +808,11 @@ class Orchestrator:
                             if call['name'] in {'browser.open', 'browser.back', 'browser.forward', 'browser.plan'}
                             and not context.get('consequential_approved_plan_hash')
                             and hasattr(self.browser, 'tool_page') else None)
+                if call['name'] == 'site_knowledge.save':
+                    from .site_knowledge import reconciliation_baseline
+                    baseline = reconciliation_baseline(call['arguments'], context, prepared)
                 self.state.begin_call(call, state_changing=effectful, reconciliation_baseline=baseline,
-                                      uncertainty_recovery=call['name'] == 'browser.recover_uncertain')
+                                      uncertainty_recovery=call['name'] in {'browser.recover_uncertain', 'operation.quarantine'})
                 if effectful or call['name']=='research.perform':
                     self.feedback.emit('Action', 'APPROVED ACTION\n'+call_summary(call))
                     if self.event_sink:
@@ -869,6 +896,9 @@ class Orchestrator:
                 'with fresh evidence. If a non-navigation browser effect cannot be reconciled, request the separately '
                 'approved browser.recover_uncertain action; it quarantines the unknown outcome, verifies a fresh '
                 'same-origin checkpoint, and permits this original run to continue without replay. '
+                'For uncertain site_knowledge.save, request operation.reconcile after a fresh bound-namespace readback. '
+                'For uncertain filesystem or other knowledge effects, inspect the result and request approved '
+                'operation.quarantine when the outcome cannot be established; unrelated effect domains remain available. '
                 'Stop only at success, denial, cancellation, or a genuine safety/permission boundary.')}
             if self.base_context.get('discovery_synthesis_pending'):
                 content['instruction'] = ('This consolidated discovery/navigation run is terminal. Produce final evidence-ID-grounded synthesis or a blocked error with material gaps. '

@@ -271,7 +271,9 @@ async def run(args):
         'sync_timeout', 'max_delivery_retries', 'download_timeout', 'copilot_download_hosts'}}
     settings['config']['allowed_roots'] = [str(Path(path).relative_to(config.storage_dir))
                                           if Path(path).is_relative_to(config.storage_dir) else path
-                                          for path in config.allowed_roots]
+                                          for path in config.allowed_roots
+                                          if path not in {getattr(config, '_auto_s_drive_root', None),
+                                                          getattr(config, '_auto_local_drive_root', None)}]
     persist_runtime_settings(config, settings)
     if getattr(args, 'setup_only', False):
         system('Setup verified. Personal storage: ' + str(config.storage_dir))
@@ -280,7 +282,9 @@ async def run(args):
     await choose_browser_endpoint(config, args, settings)
     persist_runtime_settings(config, settings)
     for root in config.allowed_roots:
-        Path(root).mkdir(parents=True, exist_ok=True)
+        if root not in {getattr(config, '_auto_s_drive_root', None),
+                        getattr(config, '_auto_local_drive_root', None)}:
+            Path(root).mkdir(parents=True, exist_ok=True)
     directory = args.resume or config.runtime_dir / 'sessions' / uuid.uuid4().hex
     if args.resume and not Path(args.resume).resolve().is_relative_to(config.runtime_dir.resolve()):
         raise ValueError('Resume sessions must be inside your selected per-user runtime directory.')
@@ -292,6 +296,7 @@ async def run(args):
     system('Session records are kept in your selected OneDrive storage.')
     system('Browser: Visible. Non-visible Copilot operation has not passed acceptance and is unavailable.')
     system('Permitted file roots: ' + ', '.join(Path(root).name for root in config.allowed_roots))
+    system('C: and the currently mapped S: share are permitted file roots when available; writes require approval.')
     system('Third-party browser domains: ' + ', '.join(config.allowed_domains))
     system('No files will be deleted. Generated-code execution always requires approval.')
     system('Useful Findings are saved on any valid turn; their file is attached every ten messages.')

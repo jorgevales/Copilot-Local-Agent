@@ -12,8 +12,10 @@ from copilot_agent.policy import PolicyError
 from copilot_agent.protocol import validate_schema
 from copilot_agent.site_knowledge import (
     KNOWLEDGE_EXAMPLES, KNOWLEDGE_SPECS, execute_knowledge, knowledge_directory,
-    prepare_knowledge, validate_knowledge,
+    KnowledgeWriteError, prepare_knowledge, validate_knowledge,
+    reconciliation_baseline, reconcile_knowledge_call,
 )
+from copilot_agent.state import SessionState
 
 
 class SiteKnowledgeTests(unittest.TestCase):
@@ -55,6 +57,55 @@ class SiteKnowledgeTests(unittest.TestCase):
 
     def record(self):
         return next((self.root / "private-memory").glob("*.json"))
+
+    def test_failed_save_readback_classifies_no_active_effect(self):
+        self.bind()
+        self.approve("site_knowledge.save", self.save_args)
+        with patch("copilot_agent.site_knowledge._write", side_effect=OSError("before replace")):
+            with self.assertRaises(KnowledgeWriteError) as caught:
+                execute_knowledge("site_knowledge.save", self.save_args, self.context)
+        self.assertFalse(caught.exception.side_effects_uncertain)
+        self.assertEqual("missing", self.retrieve()["status"])
+
+    def test_save_committed_before_cleanup_error_is_verified(self):
+        self.bind()
+        self.approve("site_knowledge.save", self.save_args)
+        from copilot_agent.site_knowledge import _write
+        def committed_then_failed(context, scope, value):
+            _write(context, scope, value)
+            raise OSError("after replace")
+        with patch("copilot_agent.site_knowledge._write", side_effect=committed_then_failed):
+            result = execute_knowledge("site_knowledge.save", self.save_args, self.context)
+        self.assertEqual("saved", result["status"])
+        self.assertEqual(self.save_args["knowledge"], self.retrieve()["knowledge"])
+
+    def test_uncertain_save_reconciles_from_fresh_record_without_replay(self):
+        self.bind()
+        prepared = self.approve("site_knowledge.save", self.save_args)
+        self.context['source_request_id'] = 'request-one'
+        baseline = reconciliation_baseline(self.save_args, self.context, prepared)
+        state = SessionState(self.root / 'ledger')
+        call = {'call_id': 'save-call', 'name': 'site_knowledge.save', 'version': '1.0',
+                'arguments': self.save_args}
+        state.begin_call(call, reconciliation_baseline=baseline)
+        execute_knowledge('site_knowledge.save', self.save_args, self.context)
+        state.finish_call('save-call', {'ok': False, 'error': {'code': 'timeout'}})
+        resolved = reconcile_knowledge_call(state, self.context, 'save-call')
+        self.assertEqual('completed', resolved['status'])
+        self.assertEqual('completed', state.data['calls']['save-call']['status'])
+
+    def test_missing_record_resolves_uncertain_save_as_not_executed(self):
+        self.bind()
+        prepared = self.approve("site_knowledge.save", self.save_args)
+        baseline = reconciliation_baseline(self.save_args, self.context, prepared)
+        state = SessionState(self.root / 'ledger')
+        call = {'call_id': 'save-call', 'name': 'site_knowledge.save', 'version': '1.0',
+                'arguments': self.save_args}
+        state.begin_call(call, reconciliation_baseline=baseline)
+        state.finish_call('save-call', {'ok': False, 'error': {'code': 'timeout'}})
+        resolved = reconcile_knowledge_call(state, self.context, 'save-call')
+        self.assertEqual('not_executed', resolved['status'])
+        self.assertFalse(resolved['completion_credited'])
 
     def test_catalog_examples_have_strict_supported_schemas(self):
         self.assertEqual(set(KNOWLEDGE_SPECS), set(KNOWLEDGE_EXAMPLES))
@@ -130,6 +181,32 @@ class SiteKnowledgeTests(unittest.TestCase):
         self.assertEqual({item["path"] for item in prepared["knowledge"]["routes"]}, {"/inicio", "/consultas"})
         execute_knowledge("site_knowledge.save", later, self.context)
         self.assertEqual({item["path"] for item in self.retrieve()["knowledge"]["routes"]}, {"/inicio", "/consultas"})
+
+    def test_application_specific_static_routes_survive_knowledge_save(self):
+        self.bind()
+        knowledge = {"routes": [
+            {"path": "/FNZPortal/WorkQueues/InterestedParties.aspx", "purpose": "navigation",
+             "label": "FNZ work queues"},
+            {"path": "/Operations/CorporateActions/ReviewDashboard", "purpose": "landing",
+             "label": "Corporate actions dashboard"},
+        ]}
+        args = {"origin": "https://example.com", "categories": ["routes"], "knowledge": knowledge}
+        self.assertEqual(self.save(args)["status"], "saved")
+        self.assertEqual(self.retrieve()["knowledge"], knowledge)
+
+    def test_valid_discovery_routes_save_when_one_item_is_unsafe(self):
+        self.bind()
+        args = {"origin": "https://example.com", "categories": ["routes"], "knowledge": {"routes": [
+            {"path": "/FNZPortal/OperationsQueue", "purpose": "navigation"},
+            {"path": "/customers/%4aane/documents", "purpose": "documents"},
+        ]}}
+        prepared = self.approve("site_knowledge.save", args)
+        self.assertEqual([item["path"] for item in prepared["knowledge"]["routes"]],
+                         ["/FNZPortal/OperationsQueue"])
+        self.assertEqual(len(prepared["rejected_items"]), 1)
+        self.assertNotIn("%4aane", str(prepared["rejected_items"]))
+        self.assertEqual(execute_knowledge("site_knowledge.save", args, self.context)["status"], "saved")
+        self.assertEqual(self.retrieve()["knowledge"], prepared["knowledge"])
 
     def test_all_allowed_categories_and_generic_parameter_templates(self):
         self.bind()
@@ -232,10 +309,23 @@ class SiteKnowledgeTests(unittest.TestCase):
 
     def test_ids_queries_names_contact_details_and_tokens_rejected_without_echo(self):
         self.bind()
-        rejected_paths = ["/customers/12345/documents", "/customers/jane-smith/documents",
-                          "/customers/secret/documents", "/customers/lookup?customer=12345",
-                          "/documents#private", "/customers/%4aane", "/documents/123.pdf",
-                          "/customers/{customer}/documents?token=TOPSECRET", "/../documents"]
+        sanitized_paths = {
+            "/customers/12345/documents": "/customers/{customer}/documents",
+            "/customers/jane-smith/documents": "/customers/{customer}/documents",
+            "/customers/secret/documents": "/customers/{customer}/documents",
+            "/customers/lookup?customer=12345": "/customers/lookup",
+            "/documents#private": "/documents",
+            "/documents/123.pdf": "/documents/{document}",
+            "/customers/{customer}/documents?token=TOPSECRET": "/customers/{customer}/documents",
+            "https://example.com/customers/987654/documents?token=TOPSECRET": "/customers/{customer}/documents",
+        }
+        for path, expected in sanitized_paths.items():
+            args = deepcopy(self.save_args)
+            args["knowledge"]["routes"][0]["path"] = path
+            prepared = prepare_knowledge(args, self.context, name="site_knowledge.save")
+            self.assertEqual(prepared["knowledge"]["routes"][0]["path"], expected)
+            self.assertNotIn("TOPSECRET", str(prepared))
+        rejected_paths = ["/customers/%4aane", "/../documents", "https://other.test/private"]
         for path in rejected_paths:
             args = deepcopy(self.save_args)
             args["knowledge"]["routes"][0]["path"] = path

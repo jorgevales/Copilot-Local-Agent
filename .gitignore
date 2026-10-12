@@ -4,6 +4,7 @@
 __pycache__/
 *.pyc
 runtime/
+.test-runtime/
 workspace/
 Copilot handoff/archive/
 config.local.json

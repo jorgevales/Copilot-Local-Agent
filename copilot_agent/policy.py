@@ -1,5 +1,6 @@
 """Resolved-path and navigation boundaries shared by all local capabilities."""
 from pathlib import Path
+import ntpath
 import os
 import stat
 from urllib.parse import urlsplit, urlunsplit
@@ -39,16 +40,24 @@ def reject_path_redirection(path):
 
 
 class PathPolicy:
-    def __init__(self, roots, excluded_roots=()):
+    def __init__(self, roots, excluded_roots=(), mapped_s_root=None):
         self.roots = tuple(Path(p).expanduser().resolve() for p in roots)
         self.excluded_roots = tuple(Path(p).expanduser().resolve() for p in excluded_roots)
+        self.mapped_s_root = Path(mapped_s_root).resolve() if mapped_s_root else None
         if not self.roots:
             raise PolicyError("At least one allowed root is required")
 
     def resolve(self, path, must_exist=False):
         if not isinstance(path, (str, Path)) or not str(path).strip():
             raise PolicyError("A nonempty path is required")
-        raw = Path(path).expanduser()
+        original = str(path)
+        if is_s_drive_path(original):
+            # S: is a drive mapping, not a filesystem junction. Resolve its
+            # current UNC identity before checking the configured roots.
+            raw = (mapped_s_drive_root() if ntpath.normpath(original).casefold() == 's:\\'
+                   else resolve_s_drive_output(original, must_exist=must_exist))
+        else:
+            raw = Path(path).expanduser()
         if not raw.is_absolute():
             raw = self.roots[0] / raw
         # Windows alternate streams and device paths are not filesystem capabilities.
@@ -59,6 +68,10 @@ class PathPolicy:
             raise PolicyError("Windows device names are forbidden")
         reject_path_redirection(raw)
         resolved = raw.resolve(strict=must_exist)
+        if (self.mapped_s_root is not None
+                and (resolved == self.mapped_s_root or self.mapped_s_root in resolved.parents)
+                and mapped_s_drive_root().resolve() != self.mapped_s_root):
+            raise PolicyError('The S: mapping changed since file roots were configured')
         if any(resolved==root or root in resolved.parents for root in self.excluded_roots):
             raise PolicyError("Protected profile or credential root is outside file capabilities")
         if not any(resolved == root or root in resolved.parents for root in self.roots):
@@ -81,6 +94,59 @@ class PathPolicy:
             if stat.S_ISREG(info.st_mode) and info.st_nlink>1:
                 raise PolicyError("Files with hardlink aliases are outside file capabilities")
         return resolved
+
+
+def is_s_drive_path(path) -> bool:
+    """Recognize an absolute operator-facing S: path, never S:relative."""
+    value = str(path)
+    return ntpath.splitdrive(value)[0].casefold() == 's:' and ntpath.isabs(value)
+
+
+def _final_s_path(value):
+    try:
+        resolved = os.path.realpath(value, strict=True)
+    except (OSError, ValueError) as error:
+        raise PolicyError('The mapped S: share or selected path is unavailable') from error
+    if resolved.casefold().startswith('\\\\?\\unc\\'):
+        resolved = '\\\\' + resolved[8:]
+    elif resolved.startswith('\\\\?\\'):
+        resolved = resolved[4:]
+    return ntpath.normcase(ntpath.normpath(resolved)).rstrip('\\')
+
+
+def mapped_s_drive_root():
+    """Return the share currently mapped as S:, or fail closed."""
+    if os.name != 'nt':
+        raise PolicyError('S: is available only on Windows')
+    share = _final_s_path('S:\\')
+    if not share.startswith('\\\\'):
+        raise PolicyError('S: must currently resolve to a UNC share')
+    return Path(share)
+
+
+def resolve_s_drive_output(path, excluded_roots=(), *, must_exist=False):
+    """Bind a proposed output to the live UNC identity of mapped S:."""
+    value = str(path)
+    if os.name != 'nt' or not value or value != value.strip() or value.startswith(('\\\\?\\', '\\\\.\\')):
+        raise PolicyError('An absolute S: path or its live UNC share is required')
+    raw = ntpath.normpath(value.replace('/', '\\'))
+    if not (is_s_drive_path(raw) or raw.startswith('\\\\')):
+        raise PolicyError('The output must be on S: or its currently mapped UNC share')
+    name = ntpath.basename(raw)
+    if not name or name in {'.', '..'}:
+        raise PolicyError('Select a file or directory inside the mapped S: share')
+    share = ntpath.normpath(str(mapped_s_drive_root())).rstrip('\\')
+    parent_raw = ntpath.dirname(raw)
+    # The drive mapping itself can redirect to UNC. Inspect the equivalent UNC
+    # child chain, where a junction inside the share cannot hide behind S:.
+    checked_parent = (ntpath.join(share, ntpath.relpath(parent_raw, 'S:\\'))
+                      if is_s_drive_path(raw) else parent_raw)
+    reject_path_redirection(Path(checked_parent))
+    parent = _final_s_path(parent_raw)
+    if parent != share and not parent.startswith(share + '\\'):
+        raise PolicyError('The destination is outside the share currently mapped to S:')
+    target = Path(parent) / name
+    return PathPolicy([share], excluded_roots=excluded_roots).resolve(target, must_exist=must_exist)
 
 
 class URLPolicy:

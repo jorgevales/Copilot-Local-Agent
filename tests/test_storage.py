@@ -82,7 +82,10 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(source, config.root)
         self.assertEqual(selected / 'runtime', config.runtime_dir)
         self.assertEqual(selected / 'workspace', config.workspace_dir)
-        self.assertEqual([str(selected / 'workspace'), str(selected / 'deliveries')], config.allowed_roots)
+        expected = [str(selected / 'workspace'), str(selected / 'deliveries')]
+        if os.name == 'nt':
+            expected.append(str(Path('C:/')))
+        self.assertEqual(expected, config.allowed_roots)
         self.assertTrue(config.profile_dir.is_relative_to(selected / 'runtime' / 'edge-profiles'))
         self.assertFalse((source / 'runtime').exists())
 

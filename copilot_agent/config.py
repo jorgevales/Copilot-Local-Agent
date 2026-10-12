@@ -3,6 +3,7 @@ from dataclasses import asdict, dataclass, field
 import json
 import os
 from pathlib import Path
+from .policy import PolicyError, mapped_s_drive_root
 from .storage import discover_onedrive_accounts, profile_directory, saved_storage_choice, validate_storage_directory
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -172,7 +173,25 @@ class Config:
             raise ValueError('created_sync_enabled requires an explicit OneDrive Documents/Copilot/Created path')
         # Pure path construction: disabled sync must not probe any OneDrive folder.
         self.created_dir = Path(self.created_dir).absolute() if self.created_dir else None
-        self.allowed_roots = [str((base / p).resolve()) if not Path(p).is_absolute() else str(Path(p).resolve()) for p in self.allowed_roots]
+        previous_s_root = getattr(self, '_auto_s_drive_root', None)
+        previous_c_root = getattr(self, '_auto_local_drive_root', None)
+        configured_roots = [p for p in self.allowed_roots if p not in {previous_s_root, previous_c_root}]
+        self.allowed_roots = [str((base / p).resolve()) if not Path(p).is_absolute() else str(Path(p).resolve()) for p in configured_roots]
+        self._auto_local_drive_root = None
+        if os.name == 'nt':
+            local_drive = Path('C:/')
+            if local_drive.is_dir() and str(local_drive) not in self.allowed_roots:
+                self.allowed_roots.append(str(local_drive))
+                self._auto_local_drive_root = str(local_drive)
+        self._auto_s_drive_root = None
+        try:
+            s_root = str(mapped_s_drive_root())
+        except PolicyError:
+            pass  # S: is optional on hosts outside the VDI.
+        else:
+            if s_root not in self.allowed_roots:
+                self.allowed_roots.append(s_root)
+                self._auto_s_drive_root = s_root
 
     def as_dict(self) -> dict:
         data = asdict(self)
