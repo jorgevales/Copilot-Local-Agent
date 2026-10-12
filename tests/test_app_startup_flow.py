@@ -86,8 +86,7 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ), \
              patch('copilot_agent.app._UI_PERMISSION_CONTEXT'), \
              patch('copilot_agent.app.Config.load', return_value=config), \
-             patch('copilot_agent.app.discover_onedrive_accounts', return_value=[]), \
-             patch('copilot_agent.app.validate_storage_directory', side_effect=lambda path, accounts: Path(path)), \
+             patch('copilot_agent.app.validate_user_storage_directory', side_effect=lambda path: Path(path)), \
              patch('copilot_agent.app.read_user_settings', return_value={}), \
              patch('copilot_agent.app.save_user_settings'), \
              patch('copilot_agent.app.choose_edge', new=AsyncMock()), \

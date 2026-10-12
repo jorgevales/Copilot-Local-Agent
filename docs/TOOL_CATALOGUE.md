@@ -9,11 +9,11 @@ The complete versioned machine-readable definitions are in `schemas/tool-catalog
 | System | Exact current Python executable/version, OS/package/browser versions, allowed-path disk capacity, current agent process | Read-only; no unrelated environment variables or credentials |
 | Browser | URL/title, visible text, structured controls, errors and observed downloads | Read-only on an owned guarded tab in the verified Edge profile |
 | Browser | Open/back/forward, click, fill, scroll, screenshots | Explicit approval; exact HTTPS domain policy covers redirects, resources and popups |
-| Copilot delivery | Actual current-response artifact download after inspecting Edge settings; permanent verified OneDrive target | Immutable observed-artifact approval; strict HTTPS/native-blob binding |
+| Copilot delivery | Actual current-response artifact download after inspecting Edge settings; permanent verified configured-storage target | Immutable observed-artifact approval; strict HTTPS/native-blob binding |
 | Archives | ZIP manifest and hash inspection | Read-only within permitted roots |
-| Archives | Complete-manifest extraction and static output verification | Reviewed hash/destination approval; create-only inside selected OneDrive; no code execution |
+| Archives | Complete-manifest extraction and static output verification | Reviewed hash/destination approval; create-only inside configured storage; no code execution |
 | Images | Supported local image queued for verified Copilot attachment/analysis | Approval bound to exact file hash; does not claim local OCR or guaranteed integrated availability |
-| Created files | Baseline snapshot and stable/readable matching-output polling | Disabled until explicitly configured/enabled for the chosen OneDrive directory; no access while disabled and no cloud-delivery assumption |
+| Created files | Baseline snapshot and stable/readable matching-output polling | Disabled until an exact path is explicitly configured/enabled; no access while disabled and no cloud-delivery assumption |
 | Code Runner | Restricted default `python_subset`; or explicit `local_python` with declared imports, installed libraries, scoped files/HTTPS/processes/desktop effects, bounded runtime and independent output/window verification | Full immutable generated proposal review; user denial/once/exact displayed plan; no standing approval |
 
 Ordinary browser tools cannot control the Copilot chat tab. Website tabs share its verified Edge profile and existing site logins; focus returns to Copilot after tool execution. Owned-tab WebSockets are blocked, and HTTP requests are filtered by the exact approved host policy. Service-worker traffic in an existing shared profile is not fully intercepted by page routes. Downloads need exact observed-source grants; other download events are canceled. Oversized private observations stay ephemeral with scoped follow-up references. Policies and verification failures are returned honestly.

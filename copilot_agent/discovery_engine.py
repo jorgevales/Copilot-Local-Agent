@@ -80,7 +80,7 @@ def prepare_discovery(args, context):
     if enabled(context, 'persistent_graph'):
         from .discovery_store import directory
         directory(context)
-        storage = 'sanitised local-device/user transactional ledger; seven-day evidence; no OneDrive store'
+        storage = 'sanitised shared S: Discoveries knowledge ledger; seven-day evidence; separate from per-user runtime storage'
     return {'kind': 'discovery.manifest', 'manifest_sha256': graph.digest,
             'request_id': m['request_id'], 'accepted_at': accepted,
             'scope': deepcopy(m['scope']),

@@ -68,7 +68,7 @@ class PromptBuilder:
                                      ('Preconfigured browser domains: ' + ', '.join(config.allowed_domains) +
                                       '. Any other HTTPS hostname and its subdomains may be added only by an explicitly approved browser.open request.'),
                                      'Useful Findings accepted anytime; current file sent every tenth submitted message.']
-        state.data['constraints'].append('Created-file monitoring is ' + ('enabled for the configured OneDrive path.' if config.created_sync_enabled else 'disabled; OneDrive verification is deferred to the live run.'))
+        state.data['constraints'].append('Created-file monitoring is ' + ('enabled for the explicitly configured path.' if config.created_sync_enabled else 'disabled; it remains inactive until explicitly configured.'))
         state.save()
         self.context_file = state.directory / 'session-context.md'
 

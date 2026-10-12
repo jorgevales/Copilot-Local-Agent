@@ -6,13 +6,21 @@ execution, authentication bypass, website transactions or arbitrary file changes
 File navigation probes the current local/mapped/network volume and reports sanitized
 OS errors. Browser-profile access remains protected.
 
-Knowledge defaults to `Discoveries` inside selected storage. `knowledge_directory`
-can select an explicit root. Startup creates a unique probe, flushes it, checks its
-hash, removes it, and checks the SQLite schema and integrity. The result is pinned
-as the first operational Useful Finding and included in every agent message.
+Knowledge defaults to the shared `Discoveries knowledge` folder beside the
+project's parent on the currently mapped S: share. It does not follow runtime,
+workspace, profile or OneDrive storage. On a machine where the project is not on
+the mapped S: share, durable knowledge is unavailable and the agent reports that
+instead of silently writing elsewhere. `knowledge_directory` is an explicit
+operator path override. Startup creates a unique probe, flushes it, checks its
+hash, removes it, and checks the SQLite schema and integrity. `knowledge_directory`
+may be set only to that exact S: project-sibling location; it cannot redirect
+persistent knowledge to OneDrive. The result is pinned as the first operational
+Useful Finding and included in every agent message.
 
-Website knowledge and discovery records share the SQLite ledger. Earlier local
-records are read through a compatibility path and promoted on approved saves.
+Website knowledge and discovery records share the SQLite ledger. Compatible JSON
+records already under the selected S: Discoveries root are read through a
+compatibility path and promoted on approved saves. The app no longer searches
+legacy OneDrive or LocalAppData knowledge stores automatically.
 Known columns in newer stores remain readable; incompatible writes return a
 specific diagnostic. Executable website hints retain privacy and authentication
 checks. Custom bounded JSON categories support ordinary knowledge.

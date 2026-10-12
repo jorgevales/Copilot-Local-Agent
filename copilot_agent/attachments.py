@@ -34,7 +34,7 @@ class AttachmentError(PolicyError):
 
 
 class AttachmentQueue:
-    """Validate only selected sources; caller validates the discovered account root.
+    """Validate only explicitly selected sources against configured local roots.
 
     No queue operation deletes or alters files. Verification is not OS isolation
     from another local process changing paths or bytes during upload.
@@ -42,13 +42,12 @@ class AttachmentQueue:
     def __init__(self,config,account_root=None):
         self.config=config
         root=account_root if account_root is not None else config_value(config,'storage_dir')
-        if root is None:
-            configured=config_value(config,'allowed_roots',[])
-            root=configured[0] if configured else None
-        if root is None: raise AttachmentError('Select your OneDrive account before adding files')
-        self.account_root=Path(root).expanduser().resolve(strict=True)
-        if not self.account_root.is_dir(): raise AttachmentError('Attachment account root must be a directory')
-        roots=[self.account_root]
+        configured=config_value(config,'allowed_roots',[])
+        roots=[Path(value).expanduser() for value in configured]
+        if root is not None: roots.append(Path(root).expanduser())
+        if not roots: raise AttachmentError('Configure local file roots before adding files')
+        self.account_root=Path(root).expanduser().resolve() if root is not None else roots[0].resolve()
+        if root is not None and not self.account_root.is_dir(): raise AttachmentError('Configured storage root must be a directory')
         if os.name=='nt': roots.append(Path('S:/'))
         excluded=[]
         for value in [config_value(config,'profile_dir'),config_value(config,'runtime_dir')]:

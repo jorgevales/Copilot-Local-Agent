@@ -182,7 +182,7 @@ class SharedRuntimeProbeTests(unittest.TestCase):
 class PythonSetupChoiceTests(unittest.TestCase):
     def run_helpers(self, body):
         source = (Path(__file__).resolve().parents[1] / 'Launcher.ps1').read_text(encoding='utf-8-sig')
-        helpers = source[source.index('function Add-PythonCandidate'):source.index('function Get-OneDriveRoots')]
+        helpers = source[source.index('function Add-PythonCandidate'):source.index('\ntry {', source.index('function Initialize-AgentEnvironment'))]
         script = "$ErrorActionPreference='Stop'; $productionShare=$false; " + source[source.index('$candidates ='):source.index('function Add-PythonCandidate')] + helpers + body
         result = subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', script], capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

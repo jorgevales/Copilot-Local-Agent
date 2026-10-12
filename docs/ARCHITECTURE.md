@@ -5,7 +5,7 @@ This project preserves the CDD workflow and uses Microsoft Copilot Chat through 
 ## Components and ownership
 
 - `app.py`, `copilot_agent/app.py`: interactive visible setup, console conversation, approval previews, clean exit and live-test entry points.
-- `config.py`: shared source paths and per-user OneDrive runtime paths, explicit OneDrive Created configuration, allowed roots/domains, browser settings and limits. Defaults restrict file tools to the workspace and disable all Created monitoring until the live run is configured.
+- `config.py`: shared source paths and per-user local app-data runtime paths, explicit operator storage paths, allowed roots/domains, browser settings and limits. Defaults restrict file tools to configured roots and disable Created monitoring until the user supplies its exact path.
 - `browser.py`, `reused_browser.py`: dedicated Edge lifecycle, bounded CDP attachment, owned chat and guarded website tabs in the same verified profile, discovered model names/modes and checked selection, exact file upload, correlated plain-text assistant capture, diagnostics. Reuse selected source helpers with provenance; do not invoke CDD run/cleanup.
 - `protocol.py`, `schemas/response-v1.schema.json`: one unique marker-delimited JSON envelope, strict schema and logical invariants, duplicate-key/stale-ID rejection, safe extraction and compact correction.
 - `state.py`: atomic snapshots with retained versions, append-only events, intent/outcome ledger, counters, pending actions and restart uncertainty.
@@ -44,7 +44,7 @@ The user starts an independent conversation with `:new` or `:new <first message>
 
 User intent and local policy govern actions. Copilot output, all ordinary attachments, webpages, OCR, tool outputs, and scripts are untrusted. Only validated current envelopes may request tools. Copilot cannot authorize itself. File reads stay inside configured roots; uploads, writes, clicks, forms and browser text input require narrow authorization. Never delete files, including tests or cleanup. Preserve original files when replacing mutable state.
 
-The native multi-selection picker is opened by **Attach files** or `:attach`; `:attach <path>` supports advanced selection. `:files` displays the pending queue, `:remove <number>` removes one entry, and `:clear` clears the queue without source deletion. Individually selected OneDrive-account or S-drive files receive narrow hash-bound upload approval; this does not broaden file-tool roots. Approval choices are 1 deny, 2 once and 3 exact plan. Denial retains the pending queue, and every selected source must still match its reviewed hash before sending.
+The native multi-selection picker is opened by **Attach files** or `:attach`; `:attach <path>` supports advanced selection. `:files` displays the pending queue, `:remove <number>` removes one entry, and `:clear` clears the queue without source deletion. Individually selected local or S-drive files, including an explicitly selected OneDrive file, receive narrow hash-bound upload approval; this does not broaden file-tool roots. Approval choices are 1 deny, 2 once and 3 exact plan. Denial retains the pending queue, and every selected source must still match its reviewed hash before sending.
 
 ZIP uploads are always rejected. Supported code/text extensions needing staging use the original filename plus `.txt`, with exact bytes retained and no execution. At most 10 user files are queued per request, reserving eight slots for startup references plus one each for findings and context. A separate guard checks the actual combined attachment list against the deployment's provided 20-file per-message limit. This is not a cumulative chat limit. See [ATTACHMENTS.md](ATTACHMENTS.md).
 
@@ -64,7 +64,7 @@ The Copilot control page is not exposed to ordinary browser tools. `copilot.down
 
 Authentication interruptions require manual user sign-in. UI errors, throttling, absent controls, upload mismatch, truncated/malformed/stale envelopes, unknown tools and unsafe paths fail closed. Connection, capture, correction and turn loops each have finite configurable limits. Screenshots and small sanitized DOM excerpts are retained locally on capture failures. A timed-out send with uncertain acceptance is never repeated automatically.
 
-OneDrive Created monitoring is disabled during engineering at the user's request. It requires an explicit directory inside the selected OneDrive account and `created_sync_enabled: true` for the real live run. Once enabled, a missing directory is a reported condition, not permission to fabricate synchronized outputs. Polling only reports success for a locally stable/readable matching file; cloud previews and zero exit codes are insufficient.
+Created monitoring is disabled unless the user explicitly configures a path and sets `created_sync_enabled: true`. The application does not discover OneDrive roots or Created folders. Once enabled, a missing directory is a reported condition, not permission to fabricate synchronized outputs. Polling only reports success for a locally stable/readable matching file; cloud previews and zero exit codes are insufficient.
 
 ## Dependencies and validation
 
@@ -74,7 +74,7 @@ Implementation follows creation of guidance, protocol and threat-model documenta
 
 ## Shared deployment and delivery
 
-`storage.py` discovers known OneDrive roots and remembers the user's selected account. The S-drive source and shared Python remain read-only during ordinary runs; personal sessions, profiles, findings, approvals, temporary artifacts and permanent outputs live in the chosen OneDrive. Profiles/remembered debugging ports are scoped by VDI machine; reused Edge endpoints require exact profile ownership proof.
+`storage.py` provides per-user local app-data storage and explicit path support; it does not discover or restore a OneDrive account automatically. Runtime sessions, profiles, settings and delivery artifacts live in that per-user storage unless the operator supplies an absolute `storage_dir`. Durable website/discovery knowledge uses the S:-hosted project's sibling `Discoveries knowledge` directory by default, independent of runtime storage. Profiles/remembered debugging ports are scoped by VDI machine; reused Edge endpoints require verified ownership proof.
 
 `delivery.py` adds compact format requests and bounds link-recovery messages. `downloads.py` reads actual Edge settings, binds a current generated HTTPS/native blob anchor, captures the event and creates a verified permanent artifact. `archives.py` inspects the complete ZIP before approved create-only extraction and verifies content without executing code. The final delivery gate rechecks current hashes and links extraction evidence to a download from that same task. A denied or unverified delivery cannot become a completed task because Copilot asserts it succeeded.
 

@@ -22,7 +22,6 @@ from .protocol import ProtocolError, parse_response, correction_message
 from .state import canonical_hash, operation_domains
 from .sync import CreatedSync
 from .attachments import AttachmentQueue, SUPPORTED_EXTENSIONS, TEXT_EXTENSIONS, upload_name
-from .storage import discover_onedrive_accounts
 
 
 class Orchestrator:
@@ -229,15 +228,8 @@ class Orchestrator:
         return {'path': str(path), 'sha256': digest, 'size': size, 'upload_name': upload_name(path)}
 
     def attachment_queue(self):
-        """Prepare attachment sources using the selected storage account."""
-        account_root = None
-        if self.config.storage_dir is not None:
-            accounts = getattr(self.config, '_storage_candidates', None) or discover_onedrive_accounts()
-            matches = [account.path for account in accounts if self.config.storage_dir.is_relative_to(account.path)]
-            if not matches:
-                raise PolicyError('The selected OneDrive attachment account is no longer available.')
-            account_root = max(matches, key=lambda path: len(path.parts))
-        return AttachmentQueue(self.config, account_root)
+        """Prepare selected attachment sources without discovering cloud roots."""
+        return AttachmentQueue(self.config)
 
     def _bounded_hash(self, path: Path) -> str:
         if not path.is_file() or path.stat().st_size > self.config.max_attachment_bytes:

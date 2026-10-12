@@ -26,8 +26,8 @@ Start with the session's structured events and current status. Keep diagnostic d
 | Tool effect is uncertain after interruption | Inspect safe local evidence and intent/outcome records. Seek user review before repeating a write/click/script. |
 | Findings seem absent | Check response validity, entry schema/provenance, privacy filtering and deduplication. Findings save immediately; their cumulative file is attached every tenth submitted message. |
 | Counter differs from visible expectations | Count confirmed submitted user messages, including initialization/corrections/tool results. Do not count assistant responses, uploads, local approvals or polling. Inspect the persisted submission ledger. |
-| Created monitoring says disabled | For the real live run only, configure `created_dir` inside your correct OneDrive account and enable `created_sync_enabled`. Engineering verification is deferred at the user's request; do not discover or inspect FNZ OneDrive folders. |
-| Created file never appears locally after enabling | Check your explicitly configured OneDrive path, actual available creation capability and organizational delivery status. A preview is insufficient; bounded timeout is reported honestly. |
+| Created monitoring says disabled | Configure an absolute `created_dir` path and enable `created_sync_enabled` explicitly. The application does not discover OneDrive folders. |
+| Created file never appears locally after enabling | Check the explicitly configured path, actual available creation capability and organizational delivery status. A preview is insufficient; bounded timeout is reported honestly. |
 | Live reply preview appears before validation | Expected: it is attributed to Copilot and marked unvalidated. Only a complete validated envelope can dispatch actions. |
 | Public text arrives in groups | The Copilot UI may buffer code-editor rendering. Field previews emit when readable; visible generation/status feedback continues. No hidden reasoning is requested. |
 | Several synchronized files match | Request explicit disambiguation. Do not select arbitrarily or generate another duplicate file. |

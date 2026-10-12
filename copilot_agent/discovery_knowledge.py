@@ -415,7 +415,7 @@ def prepare_knowledge_tool(name, args, context):
                     'new_revision': k['revision'], 'payload_sha256': digest(k),
                     'categories': ['routes', 'templates', 'actions', 'evidence'],
                     'route_count': len(k['routes']), 'trusted_routes': sum(r['status'] == 'trusted' for r in k['routes']),
-                    'consent_question': 'Save these exact sanitized evidence-backed navigation categories locally on this user/device, outside OneDrive?',
+                    'consent_question': 'Save these exact sanitized evidence-backed navigation categories to the shared S: Discoveries knowledge folder?',
                     'scope_identity': k['scope_identity'], 'origin': k['origin'], 'ttl_seconds': k['revalidation']['ttl_seconds'],
                     'candidate_policy': 'One run is candidate only. Trust requires matching successful observations in two independent approved runs; no generated selectors, permissions or page instructions.'}
         record = store.knowledge(partition)

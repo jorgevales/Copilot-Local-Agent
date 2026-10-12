@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 from .policy import PolicyError, mapped_s_drive_root
-from .storage import discover_onedrive_accounts, profile_directory, saved_storage_choice, validate_storage_directory
+from .storage import default_local_storage, profile_directory, validate_user_storage_directory
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -73,8 +73,7 @@ class Config:
         return (Path(self.storage_dir) if self.storage_dir is not None else Path(self.root)) / 'workspace'
 
     def select_storage(self, directory: Path):
-        accounts = getattr(self, '_storage_candidates', None) or discover_onedrive_accounts()
-        self.storage_dir = validate_storage_directory(Path(directory), accounts)
+        self.storage_dir = validate_user_storage_directory(Path(directory))
         if not getattr(self, '_profile_explicit', False):
             self.profile_dir = None
         elif getattr(self, '_configured_profile_dir', None) is not None:
@@ -120,13 +119,10 @@ class Config:
         cfg._profile_explicit = bool(data.get('profile_dir'))
         cfg._configured_profile_dir = Path(data['profile_dir']) if data.get('profile_dir') else None
         cfg._configured_allowed_roots = list(data.get('allowed_roots', ['workspace', 'deliveries']))
-        cfg._storage_candidates = discover_onedrive_accounts()
         if cfg.storage_dir is None:
-            cfg.storage_dir = (saved_storage_choice(cfg._storage_candidates, testing=True)
-                               if os.environ.get('COPILOT_AGENT_EXECUTION_MODE') == 'testing'
-                               else saved_storage_choice(cfg._storage_candidates))
-        if cfg.storage_dir is not None:
-            cfg.storage_dir = validate_storage_directory(cfg.storage_dir, cfg._storage_candidates)
+            cfg.storage_dir = default_local_storage()
+        else:
+            cfg.storage_dir = validate_user_storage_directory(cfg.storage_dir)
         cfg.validate()
         return cfg
 
@@ -171,9 +167,10 @@ class Config:
             profile = Path(self.profile_dir)
             self.profile_dir = (base / profile).resolve() if not profile.is_absolute() else profile.resolve()
         if self.created_sync_enabled and not self.created_dir:
-            raise ValueError('created_sync_enabled requires an explicit OneDrive Documents/Copilot/Created path')
-        # Pure path construction: disabled sync must not probe any OneDrive folder.
-        self.created_dir = Path(self.created_dir).absolute() if self.created_dir else None
+            raise ValueError('created_sync_enabled requires an explicitly configured Created directory path')
+        self.created_dir = Path(self.created_dir).expanduser() if self.created_dir else None
+        if self.created_dir is not None and not self.created_dir.is_absolute():
+            raise ValueError('created_dir must be an absolute path supplied by the user')
         previous_s_root = getattr(self, '_auto_s_drive_root', None)
         previous_c_root = getattr(self, '_auto_local_drive_root', None)
         configured_roots = [p for p in self.allowed_roots if p not in {previous_s_root, previous_c_root}]

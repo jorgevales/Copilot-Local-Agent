@@ -23,7 +23,7 @@ The verified execution path is:
 - Browser work stays in owned tabs in a verified Edge profile. Public discovery uses a separate exact-origin, DNS/peer-pinned GET/HEAD transport.
 - `discovery_*` modules compile bounded manifests, enforce scope and budgets, retain evidence, and persist versioned knowledge.
 - `site_knowledge` retains approved browser navigation knowledge. Existing graph/knowledge remains the primary model.
-- Session state, diagnostic events, approvals and immutable evidence are retained under configured OneDrive storage.
+- Session state, diagnostic events, approvals and immutable evidence are retained under configured per-user storage.
 
 The material gap was between discovery and reuse. Existing discovery could collect public evidence and existing browser knowledge could retain routes, but `api_patterns` were deliberately rejected by the current knowledge semantics. A later task therefore had no narrowly governed direct-HTTP operation to reuse.
 

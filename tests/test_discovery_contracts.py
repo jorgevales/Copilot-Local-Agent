@@ -108,9 +108,7 @@ class ContractTests(unittest.TestCase):
         with workspace() as (root, _):
             path = root / 'testing-config.json'
             path.write_text(json.dumps({'root': str(root / 'remembered-live-root')}))
-            with patch.dict('os.environ', {'COPILOT_AGENT_EXECUTION_MODE': 'testing', 'COPILOT_AGENT_DISCOVERY_FLAGS': 'manifest_path'}), \
-                    patch('copilot_agent.config.discover_onedrive_accounts', return_value=[]), \
-                    patch('copilot_agent.config.saved_storage_choice', return_value=None):
+            with patch.dict('os.environ', {'COPILOT_AGENT_EXECUTION_MODE': 'testing', 'COPILOT_AGENT_DISCOVERY_FLAGS': 'manifest_path'}):
                 cfg = Config.load(path)
             self.assertEqual(cfg.root, PROJECT_ROOT.resolve())
             self.assertTrue(cfg.manifest_path)

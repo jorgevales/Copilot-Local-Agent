@@ -23,34 +23,6 @@ def pasted_path(text):
     return Path(value).resolve()
 
 
-async def choose_account(accounts, ask, emit):
-    if not accounts:
-        raise RuntimeError('No configured OneDrive account is available. Sign in to OneDrive and run setup again; no local-storage fallback is used.')
-    emit('Choose OneDrive once for personal settings, sessions and delivered files.')
-    mode = await choice('OneDrive account', ask, emit)
-    if mode == '2':
-        for _ in range(5):
-            try:
-                path = pasted_path(await ask('Paste the OneDrive account folder path: '))
-                selected = next((account for account in accounts if path == account.path.resolve()), None)
-                if selected is not None:
-                    return selected
-                emit('That path is not a registered OneDrive account root. Paste the account folder, not a workspace subfolder.')
-            except (ValueError, OSError) as error:
-                emit(str(error))
-        raise RuntimeError('OneDrive path selection stopped after five attempts; no files were created.')
-    for index, account in enumerate(accounts, 1):
-        emit(f'{index}. {account.label}: {account.path}')
-    for _ in range(5):
-        answer = (await ask('Choose an account number' + (' [Enter for 1]' if len(accounts) == 1 else '') + ': ')).strip()
-        if not answer and len(accounts) == 1:
-            return accounts[0]
-        if answer.isdigit() and 1 <= int(answer) <= len(accounts):
-            return accounts[int(answer) - 1]
-        emit('Choose a displayed account number.')
-    raise RuntimeError('OneDrive selection stopped after five attempts; no files were created.')
-
-
 async def choose_edge(config, settings, ask, emit, force=False):
     if config.attach_existing:
         return  # An authorized existing Edge session needs no executable launch.

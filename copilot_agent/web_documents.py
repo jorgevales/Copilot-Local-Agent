@@ -162,8 +162,8 @@ def validate_documents(name, args, context=None, policy=None):
         if name=='browser.download_batch':
             destination=policy.resolve(args['destination'])
             storage=config_value(context.get('config',{}),'storage_dir')
-            if storage is None: raise PolicyError('Select approved OneDrive storage before downloading website documents')
-            if not destination.is_relative_to(Path(storage).resolve()): raise PolicyError('Website downloads must stay inside the selected storage')
+            if storage is None: raise PolicyError('Configure an explicit user storage path before downloading website documents')
+            if not destination.is_relative_to(Path(storage).resolve()): raise PolicyError('Website downloads must stay inside the configured user storage')
             if destination.exists() and not destination.is_dir(): raise PolicyError('Document destination must be a directory')
             if not destination.exists() and not destination.parent.is_dir(): raise PolicyError('Document destination parent must already exist')
             if 'resume_manifest' in args: policy.resolve(args['resume_manifest'],True)

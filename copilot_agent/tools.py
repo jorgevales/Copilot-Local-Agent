@@ -157,8 +157,8 @@ SPECS = {
     "browser.errors": (obj({}), "read_only", "Report captured tool-page console errors if the browser adapter supplies them."),
     "browser.downloads": (obj({}), "read_only", "Report observed tool-page download events; absence is not delivery proof."),
     "ocr.image": (obj(PATH), "user_approval", "Check a local image; OCR requires an explicitly available integrated image capability."),
-    "created.snapshot": (obj({}), "read_only", "When explicitly enabled, record a baseline of the configured OneDrive Copilot Created files. Otherwise report disabled without filesystem access."),
-    "created.wait": (obj({"baseline_id":S,"pattern":S,"expected_names":{"type":"array","items":S,"maxItems":100}},[]), "read_only", "When explicitly enabled, wait for stable readable new or changed local OneDrive Created files. Report disabled without filesystem access otherwise."),
+    "created.snapshot": (obj({}), "read_only", "When explicitly enabled, record a baseline of files in the user-configured Created directory. Otherwise report disabled without filesystem access."),
+    "created.wait": (obj({"baseline_id":S,"pattern":S,"expected_names":{"type":"array","items":S,"maxItems":100}},[]), "read_only", "When explicitly enabled, wait for stable readable new or changed files in the configured Created directory. Report disabled without filesystem access otherwise."),
     "copilot.download": (obj({"expected_name":S,"link_text":S,"expected_sha256":S},["expected_name"]), "user_approval", "Download one real file link in this exact Copilot response. Inspect Edge download settings first; save and verify an exclusive local artifact. Plaintext and sandbox links are not delivery."),
     "archives.inspect": (obj(PATH), "read_only", "Inspect a bounded ZIP manifest, archive SHA-256 and native Office container type without extracting."),
     "archives.extract": (obj({"path":S,"destination":S,"expected_files":{"type":"array","items":S,"maxItems":1000},"expected_sha256":S},["path","destination","expected_sha256"]), "user_approval", "Extract a reviewed SHA-256-bound ZIP exclusively inside allowed roots; preflight paths and verify all files without executing code. Preserve original and partial outputs."),
@@ -374,9 +374,9 @@ class ToolRegistry:
             if name=="archives.extract":
                 destination=policy.resolve(args["destination"])
                 storage=config_value(config,"storage_dir")
-                if storage is None: raise PolicyError("Choose your OneDrive storage before ZIP extraction")
+                if storage is None: raise PolicyError("Configure an explicit user storage path before ZIP extraction")
                 try: destination.relative_to(Path(storage).resolve())
-                except ValueError: raise PolicyError("ZIP extraction must stay inside your selected OneDrive storage")
+                except ValueError: raise PolicyError("ZIP extraction must stay inside the configured user storage")
                 manifest=inspect_zip(source)
                 if args["expected_sha256"] != manifest["archive_sha256"]: raise PolicyError("Archive does not match reviewed SHA-256")
                 if manifest.get("office"): raise PolicyError("This is a native Office container; request an outer ZIP containing the Office file, not its internal XML.")
@@ -683,7 +683,7 @@ class ToolRegistry:
             return {"status":"unavailable","path":str(path),"reason":"No local OCR engine is configured. Attach this approved image to Copilot for supported image analysis."}
         if name.startswith("created."):
             if not config_value(config,"created_sync_enabled",False):
-                return {"status":"disabled","files":[],"reason":"OneDrive Created monitoring is disabled until explicitly configured for the live run."}
+                return {"status":"disabled","files":[],"reason":"Created monitoring is disabled until the user explicitly configures its path and enables it."}
             directory=config_value(config,"created_dir")
             if not directory: return {"status":"missing_directory","files":[]}
             watcher=CreatedSync(directory,poll_interval=config_value(config,"sync_poll_interval",.5))

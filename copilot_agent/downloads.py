@@ -256,7 +256,7 @@ class DownloadService:
                 raise DownloadError('ticket_limit', 'Fifty unused approval previews are already pending; resolve an existing preview before preparing another.')
         args = validate_download_args(args)
         settings = await self._settings()
-        await self._notify('Observed Edge download location: '+settings['configured_directory']+'. Preferences remain unchanged. Approved permanent delivery will be retained in the selected OneDrive storage.', source_request_id)
+        await self._notify('Observed Edge download location: '+settings['configured_directory']+'. Preferences remain unchanged. Approved permanent delivery will be retained in the configured user storage.', source_request_id)
         source = self._source(source_request_id)
         observed = await self._links(source)
         links = [item for item in observed['links'] if item.get('enabled', True)]
@@ -317,7 +317,7 @@ class DownloadService:
         if _canonical(settings) != _canonical(ticket.preview['settings']):
             raise DownloadError('settings_changed', 'Edge download settings changed after the preview; prepare and approve again.')
         if settings['ask_before_download'] is not False:
-            message = ('Edge may ask you to choose Save or complete its native Save As window. Complete that browser UI yourself; download settings will not be changed. The approved OneDrive staging destination is: '+ticket.preview['destination'])
+            message = ('Edge may ask you to choose Save or complete its native Save As window. Complete that browser UI yourself; download settings will not be changed. The approved staging destination is: '+ticket.preview['destination'])
             await self._notify(message, ticket.source['request_id'])
         destination = self.policy.resolve(ticket.preview['destination'])
         if str(destination) != ticket.preview['destination'] or destination.exists() or destination.parent.exists():
@@ -368,7 +368,7 @@ class DownloadService:
                         if total > ticket.preview['max_bytes']:
                             raise DownloadError('size_exceeded', 'The artifact grew beyond the approved byte limit during exclusive copy; partial files were preserved.', True)
                         output_handle.write(chunk)
-                save_method = 'exclusive copy of completed observed browser artifact to approved OneDrive staging'
+                save_method = 'exclusive copy of completed observed browser artifact to approved staging'
             else:
                 await asyncio.wait_for(item.save_as(str(destination)), timeout)
                 save_method = 'Playwright download event save_as to approved staging destination'

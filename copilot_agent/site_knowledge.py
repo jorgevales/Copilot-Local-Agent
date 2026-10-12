@@ -12,13 +12,12 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
-import os
 from pathlib import Path
 import re
 import uuid
 from urllib.parse import urlsplit
 
-from .policy import PathPolicy, PolicyError, URLPolicy, reject_path_redirection
+from .policy import PathPolicy, PolicyError, URLPolicy, mapped_s_drive_root, reject_path_redirection
 from .protocol import validate_schema
 
 SCHEMA_VERSION = 1
@@ -201,21 +200,25 @@ def _session(context):
 
 
 def knowledge_directory(context):
-    """Context-only test override; never an LLM tool argument or shared runtime."""
+    """Resolve the single durable knowledge root beside the S: project."""
+    # This private context hook exists only for isolated unit fixtures. It is
+    # never populated from model arguments or normal runtime configuration.
     selected = context.get("knowledge_directory")
     if selected is None:
-        config = context.get("config")
-        if config is not None:
-            get = config.get if isinstance(config, dict) else lambda key: getattr(config, key, None)
-            selected = get("knowledge_directory")
-            base = get("storage_dir") or get("root")
-            if selected is None and base:
-                selected = Path(base) / "Discoveries"
-    if selected is None:
-        local = os.environ.get("LOCALAPPDATA")
-        if not local:
-            raise PolicyError("Per-user LocalAppData storage is unavailable; keep website knowledge ephemeral")
-        selected = Path(local) / "CopilotLocalAgent" / "site-knowledge"
+        configured = context.get('config')
+        project = configured.get('root') if isinstance(configured, dict) else getattr(configured, 'root', None)
+        project_root = Path(project or Path(__file__).resolve().parents[1]).resolve()
+        try:
+            share = mapped_s_drive_root().resolve()
+        except (PolicyError, OSError) as error:
+            raise PolicyError("The mapped S: share is unavailable; durable knowledge remains in session evidence") from error
+        if project_root != share and share not in project_root.parents:
+            raise PolicyError("The project is not located on the mapped S: share; durable knowledge remains in session evidence")
+        selected = project_root.parent / "Discoveries knowledge"
+        configured_directory = (configured.get('knowledge_directory') if isinstance(configured, dict)
+                                else getattr(configured, 'knowledge_directory', None))
+        if configured_directory is not None and Path(configured_directory).expanduser().resolve() != selected.resolve():
+            raise PolicyError("Persistent knowledge must use the S: project sibling Discoveries knowledge folder")
     raw = Path(selected).expanduser().absolute()
     reject_path_redirection(raw)
     return raw
@@ -554,32 +557,13 @@ def storage_error_code(error):
 
 
 def _read(context, scope):
-    # Both discovery knowledge generations now share the same per-user SQLite
-    # ledger. Read old JSON records only as a migration fallback; a successful
-    # approved save promotes the namespace into the ledger transactionally.
+    # Both discovery knowledge generations share the selected Discoveries root.
+    # Never search an old user storage root: migration must be explicitly reviewed.
     from .discovery_store import Store
     store = None
     try:
         store = Store(context, persistent=True, readonly=True, allow_missing=True)
         value = store.site_knowledge(_hash(scope))
-        if value is None and not context.get('knowledge_directory'):
-            local = os.environ.get('LOCALAPPDATA')
-            legacy = Path(local) / 'CopilotLocalAgent' / 'site-knowledge' if local else None
-            if legacy is not None and legacy.absolute() != knowledge_directory(context):
-                old_context = dict(context, knowledge_directory=legacy)
-                old_store = Store(old_context, persistent=True, readonly=True, allow_missing=True)
-                try:
-                    value = old_store.site_knowledge(_hash(scope))
-                finally:
-                    old_store.close()
-                if value is None:
-                    old_path = _record_path(old_context, scope)
-                    if old_path.is_file():
-                        checked = PathPolicy([legacy]).resolve(old_path, True)
-                        if checked.stat().st_size > MAX_BYTES:
-                            raise ValueError('Bounded legacy knowledge limit exceeded')
-                        value = json.loads(checked.read_text(encoding='utf-8'), object_pairs_hook=_json_pairs,
-                                           parse_constant=_reject_json_constant)
     except Exception as error:
         raise KnowledgeStorageError(storage_error_code(error)) from error
     finally:

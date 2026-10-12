@@ -447,17 +447,20 @@ class SiteKnowledgeTests(unittest.TestCase):
         self.replace_record_text(original)
         self.assertEqual(self.retrieve()["status"], "fresh")
 
-    def test_local_device_storage_not_config_runtime_or_developer_memory(self):
+    def test_default_knowledge_uses_project_sibling_on_mapped_s_share(self):
         context = dict(self.context)
         del context["knowledge_directory"]
-        context["config"] = {"runtime_dir": str(self.root / "OneDrive" / "runtime")}
-        with patch.dict("os.environ", {"LOCALAPPDATA": str(self.root / "local")}, clear=True):
+        share = self.root / 'share'
+        project = share / 'Scripts and projects' / 'Copilot Local Agent'
+        project.mkdir(parents=True)
+        context["config"] = {"root": str(project), "storage_dir": str(self.root / "OneDrive" / "Copilot Agent")}
+        with patch('copilot_agent.site_knowledge.mapped_s_drive_root', return_value=share):
             directory = knowledge_directory(context)
-            self.assertEqual(directory, self.root / "local" / "CopilotLocalAgent" / "site-knowledge")
+            self.assertEqual(directory, (share / 'Scripts and projects' / 'Discoveries knowledge').resolve())
             prepared = prepare_knowledge(self.bind_args, context, name="site_knowledge.bind")
-            self.assertIn("Discoveries", prepared["storage_scope"])
+            self.assertIn("Discoveries knowledge", prepared["storage_scope"])
             self.assertFalse(directory.exists())
-        with patch.dict("os.environ", {}, clear=True):
+        with patch('copilot_agent.site_knowledge.mapped_s_drive_root', side_effect=PolicyError('unavailable')):
             with self.assertRaises(PolicyError):
                 knowledge_directory(context)
 

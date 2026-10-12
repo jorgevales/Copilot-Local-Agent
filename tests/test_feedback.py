@@ -113,5 +113,5 @@ class FeedbackIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(app.base_context['created_baseline'])
 
     async def test_enabling_sync_requires_explicit_account_path(self):
-        with self.assertRaisesRegex(ValueError,'explicit OneDrive'):
+        with self.assertRaisesRegex(ValueError,'explicitly configured'):
             Config(created_sync_enabled=True,created_dir=None).validate()

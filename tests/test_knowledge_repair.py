@@ -1,5 +1,6 @@
 import json
 import unittest
+from unittest.mock import patch
 from copilot_agent.discovery_store import Store
 from copilot_agent.knowledge_health import check_knowledge_health
 from copilot_agent.knowledge_notes import execute_note
@@ -32,8 +33,20 @@ class KnowledgeRepairTests(unittest.IsolatedAsyncioTestCase):
 
     def fixture(self, responders=()):
         root, config, state, _ = make_fixture('knowledge-repair-')
-        config.knowledge_directory = root / 'Discoveries'
+        source_root = config.root
+        project = root / 'project'
+        project.mkdir()
+        for name in ('guidance', 'schemas'):
+            import shutil
+            shutil.copytree(source_root / name, project / name)
+        config.root = project
+        config.storage_dir = root
+        config.knowledge_directory = root / 'Discoveries knowledge'
+        config.validate()
         config._local_navigation_confirmed = True
+        mapped_share = patch('copilot_agent.site_knowledge.mapped_s_drive_root', return_value=root)
+        mapped_share.start()
+        self.addCleanup(mapped_share.stop)
         config._knowledge_capability = check_knowledge_health({'config': config})
         app = Orchestrator(config, MockBrowser(responders), ToolRegistry(), state,
                            approval_decider=lambda *args: self.fail('Unexpected repeated approval'), display=lambda text: None)

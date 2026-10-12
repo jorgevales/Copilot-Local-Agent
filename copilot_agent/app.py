@@ -22,9 +22,9 @@ from .diagnostics import DiagnosticReports
 from .browser import BrowserUIError
 from .protocol import ProtocolError
 from .policy import PolicyError
-from .storage import default_storage, discover_onedrive_accounts, machine_key, read_user_settings, save_user_settings, validate_storage_directory
+from .storage import default_local_storage, machine_key, read_user_settings, save_user_settings, validate_user_storage_directory
 from . import reused_browser as edge
-from .setup_resources import choose_account, choose_edge
+from .setup_resources import choose_edge
 
 _TERMINAL = Feedback()
 _UI_ASK = None
@@ -238,7 +238,7 @@ async def start_new_session(config, previous, model_label, registry=None):
         state.data['status'] = 'blocked'
         state.save()
         await browser.close()
-        raise RuntimeError('New session setup stopped; previous records and new diagnostics are retained in your selected OneDrive storage.') from exc
+        raise RuntimeError('New session setup stopped; previous records and new diagnostics are retained in the configured local storage.') from exc
 
 
 def read_runtime_settings(config):
@@ -258,9 +258,7 @@ async def run(args):
     if config.visible is not True:
         raise ValueError('Copilot runs require a visible Microsoft Edge window; invisible operation is disabled.')
     if config.storage_dir is None:
-        accounts = getattr(config, '_storage_candidates', None) or discover_onedrive_accounts()
-        selected = await choose_account(accounts, ask, system)
-        config.select_storage(default_storage(selected))
+        config.select_storage(default_local_storage())
     settings = read_runtime_settings(config)
     if args.config is None and isinstance(settings.get('config'), dict):
         personal = settings['config']
@@ -285,10 +283,9 @@ async def run(args):
         # model value so startup consistently preselects the product default.
         config.model = 'GPT-6 Sol'
     config.validate()
-    accounts = getattr(config, '_storage_candidates', None) or discover_onedrive_accounts()
-    validate_storage_directory(config.storage_dir, accounts)
+    validate_user_storage_directory(config.storage_dir)
     if not config.profile_dir.is_relative_to(config.storage_dir) and not (config.attach_existing and config.root.drive.upper() != 'S:'):
-        raise ValueError('The persistent Edge profile must be inside your selected OneDrive storage.')
+        raise ValueError('The persistent Edge profile must be inside the configured user storage.')
     transient = config.runtime_dir / 'temp'
     transient.mkdir(parents=True, exist_ok=True)
     os.environ['TEMP'] = str(transient)
@@ -323,7 +320,7 @@ async def run(args):
     orchestrator = None
     bug_reports = []
     system('Copilot Local Agent — reasoning through Microsoft 365 Copilot web UI')
-    system('Session records are kept in your selected OneDrive storage.')
+    system('Session records are kept in the configured per-user storage.')
     system('Browser: Visible. Non-visible Copilot operation has not passed acceptance and is unavailable.')
     system('Permitted file roots: ' + ', '.join(Path(root).name for root in config.allowed_roots))
     system('C: and the currently mapped S: share are permitted file roots when available; writes require approval.')
@@ -428,7 +425,7 @@ async def run(args):
                     browser, state = orchestrator.browser, orchestrator.state
                     directory = state.directory
                     pending_files = orchestrator.attachment_queue()
-                    system('New independent session started; its records are kept in your selected OneDrive storage.')
+                    system('New independent session started; its records are kept in the configured user storage.')
                     if first_message:
                         await orchestrator.turn(first_message)
                     continue
@@ -470,12 +467,12 @@ async def run(args):
             except CaptureTimeoutError as exc:
                 _record_turn_error(state, exc)
                 error('Copilot reply capture timed out. No local action ran for this reply.')
-                system('The sent message and capture details were retained in your selected OneDrive storage.')
+                system('The sent message and capture details were retained in the configured user storage.')
                 _record_bug_fix(state, config, exc, 'Copilot response capture', 'turn', bug_reports)
             except (ValueError, RuntimeError, OSError) as exc:
                 _record_turn_error(state, exc)
                 error('Action stopped: ' + str(exc))
-                system('Session evidence was retained in your selected OneDrive storage.')
+                system('Session evidence was retained in the configured user storage.')
                 if _actionable(exc):
                     _record_bug_fix(state, config, exc, 'Interactive agent operation', 'turn', bug_reports)
                 if state.data['status'] == 'closed':
@@ -512,7 +509,7 @@ def main():
     parser.add_argument('--profile', type=Path)
     parser.add_argument('--model', help='Exact currently displayed UI label')
     parser.add_argument('--yes-setup', action='store_true', help='Accept supplied browser settings; does not approve tools or scripts')
-    parser.add_argument('--setup-only', action='store_true', help='Select/verify personal OneDrive storage without opening Copilot')
+    parser.add_argument('--setup-only', action='store_true', help='Verify configured per-user storage and Edge without opening Copilot')
     args = parser.parse_args()
     try:
         asyncio.run(run(args))

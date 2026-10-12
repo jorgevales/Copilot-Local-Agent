@@ -208,23 +208,6 @@ function Initialize-AgentEnvironment([string]$BasePython, [string[]]$PythonFlags
     } finally { if ($setupLock) { $setupLock.Dispose() } }
 }
 
-function Get-OneDriveRoots {
-    $roots = [System.Collections.Generic.List[string]]::new()
-    $unique = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($name in @('OneDrive','OneDriveCommercial','OneDriveConsumer')) {
-        $path = [Environment]::GetEnvironmentVariable($name)
-        if ($path -and (Test-Path -LiteralPath $path -PathType Container) -and $unique.Add($path)) { $roots.Add($path) }
-    }
-    $accountKey = 'HKCU:\Software\Microsoft\OneDrive\Accounts'
-    if (Test-Path -LiteralPath $accountKey) {
-        foreach ($entry in @(Get-ChildItem -LiteralPath $accountKey -ErrorAction SilentlyContinue | Select-Object -First 32)) {
-            $path = (Get-ItemProperty -LiteralPath $entry.PSPath -Name UserFolder -ErrorAction SilentlyContinue).UserFolder
-            if ($path -and (Test-Path -LiteralPath $path -PathType Container) -and $unique.Add($path)) { $roots.Add($path) }
-        }
-    }
-    return $roots.ToArray()
-}
-
 try {
     $projectVersion = $null
     if ($Mode -in @('Start','UI')) {
@@ -233,16 +216,18 @@ try {
         if ($projectVersion -notin @('1','2')) { throw 'Enter 1 or 2; no version was started.' }
     }
     $savedInterpreters = [System.Collections.Generic.List[string]]::new()
-    foreach ($account in @(Get-OneDriveRoots)) {
-        $settingsPath = Join-Path $account 'Copilot Agent\settings.json'
-        if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
-            if ((Get-Item -LiteralPath $settingsPath).Length -le 65536) {
-                try {
-                    $settings = Get-Content -LiteralPath $settingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
-                    if ($settings.selected_account -eq $true -and $settings.python_executable) { $savedInterpreters.Add([string]$settings.python_executable) }
-                } catch { Write-Host 'A saved account setting could not be read; the application will ask for an account choice.' }
-            }
-        }
+    $localSettings = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CopilotLocalAgent\settings.json'
+    if ((Test-Path -LiteralPath $localSettings -PathType Leaf) -and (Get-Item -LiteralPath $localSettings).Length -le 65536) {
+        try {
+            $settings = Get-Content -LiteralPath $localSettings -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($settings.python_executable) { $savedInterpreters.Add([string]$settings.python_executable) }
+        } catch { Write-Host 'Local app settings could not be read; choose a Python path if the project environment is unavailable.' }
+    }
+    if ($Mode -eq 'Tests') {
+        $env:COPILOT_TEST_ROOT = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CopilotLocalAgent\runtime\test-runs'
+        New-Item -ItemType Directory -Path $env:COPILOT_TEST_ROOT -Force | Out-Null
+        $env:TEMP = $env:COPILOT_TEST_ROOT
+        $env:TMP = $env:COPILOT_TEST_ROOT
     }
     if ($env:COPILOT_PYTHON) {
         Add-PythonCandidate $env:COPILOT_PYTHON
@@ -470,21 +455,7 @@ print('Python runtime and Playwright verified.')
             }
         } else {
             & $python @pythonArgs (Join-Path $repoRoot 'app.py') --setup-only
-            if ($LASTEXITCODE -ne 0) { throw 'Personal storage setup must complete before running tests.' }
-            $stores = [System.Collections.Generic.List[string]]::new()
-            foreach ($account in @(Get-OneDriveRoots)) {
-                $directory = Join-Path $account 'Copilot Agent'
-                $settingsPath = Join-Path $directory 'settings.json'
-                if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
-                    $settings = Get-Content -LiteralPath $settingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
-                    if ($settings.selected_account -eq $true) { $stores.Add($directory) }
-                }
-            }
-            if ($stores.Count -ne 1) { throw 'A single selected OneDrive account is required for per-user test storage.' }
-            $env:COPILOT_TEST_ROOT = Join-Path $stores[0] 'runtime\test-runs'
-            New-Item -ItemType Directory -Path $env:COPILOT_TEST_ROOT -Force | Out-Null
-            $env:TEMP = $env:COPILOT_TEST_ROOT
-            $env:TMP = $env:COPILOT_TEST_ROOT
+            if ($LASTEXITCODE -ne 0) { throw 'Per-user storage setup must complete before running tests.' }
             & $python @pythonArgs -m unittest discover -s tests -v
             if ($LASTEXITCODE -ne 0) { throw 'Core agent tests failed.' }
             & $python @pythonArgs -m unittest discover -s agent_ui/tests -v
