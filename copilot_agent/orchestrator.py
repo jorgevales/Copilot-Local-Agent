@@ -1762,6 +1762,17 @@ class Orchestrator:
                     self.state.save()
                 if result.get('ok') and call['name'] in {'copilot.download', 'archives.extract'}:
                     delivery_reports.append({'tool': call['name'], **self._delivery_result(call['name'], result)})
+                if call['name'] == 'automation.inspect' and self._review_passed(result):
+                    # Explicit inspection is the same local evidence as the
+                    # automatic download handoff. The delivery gate rechecks
+                    # its recorded call, exact archive path and current hash.
+                    inspected = result.get('result', {})
+                    delivery_reports.append({
+                        'tool': 'automation.inspect', 'status': 'verified', 'review_status': 'passed',
+                        'path': inspected.get('archive'),
+                        'sha256': inspected.get('archive_sha256'),
+                        'inspection_call_id': call['call_id'],
+                    })
                 if (result.get('ok') and call['name'] == 'copilot.download'
                         and route.get('route') == 'package'):
                     package_review = await self._inspect_downloaded_package(result, response['request_id'])
