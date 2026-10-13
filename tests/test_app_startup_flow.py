@@ -6,16 +6,18 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from copilot_agent.app import run
+from copilot_agent.state import SessionState, latest_committed_request_id
 from tests.test_protocol_state import make_fixture
 
 
 class StartupBrowser:
-    def __init__(self, events):
+    def __init__(self, events, reconciled_draft=None):
         self.events = events
         self.model_label = None
+        self.reconciled_draft = reconciled_draft
 
-    async def start(self):
-        self.events.append('browser:start')
+    async def start(self, resume_request_id=None):
+        self.events.append('browser:start' + (':' + resume_request_id if resume_request_id else ''))
 
     async def discover_models(self):
         self.events.append('browser:discover')
@@ -29,9 +31,19 @@ class StartupBrowser:
         self.model_label = label
         return {'label': label, 'checked': True}
 
-    async def verify_interaction_ready(self, expected_model):
+    async def verify_interaction_ready(self, expected_model, request_id=None):
         self.events.append('browser:ready:' + expected_model)
         return True
+
+    async def read_reconciled_draft(self, request_id, expected_sha256):
+        self.events.append('browser:read-draft:' + request_id)
+        return self.reconciled_draft
+
+    async def exchange(self, text, request_id, on_submitted=None):
+        self.events.append('browser:exchange:' + request_id)
+        if on_submitted:
+            on_submitted()
+        return 'captured response'
 
     async def close(self):
         self.events.append('browser:close')
@@ -57,6 +69,16 @@ class StartupOrchestrator:
         self.state.data['status'] = 'ready'
         return {'response_type': 'final'}
 
+    async def recover_capture_failed_turn(self):
+        self.events.append('orchestrator:recover_capture')
+        self.state.data['status'] = 'ready'
+        return {'response_type': 'final'}
+
+    async def turn(self, user_input, recovered_response=None):
+        self.events.append('orchestrator:resume-draft')
+        self.asserted_recovered_response = recovered_response
+        return {'response_type': 'final'}
+
     def attachment_queue(self):
         return SimpleNamespace(records=lambda: [], verify=lambda: None,
                                paths=lambda: [], clear=lambda: None)
@@ -66,13 +88,30 @@ class StartupOrchestrator:
 
 
 class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
-    async def run_flow(self, answers, explicit_model=None, configured_model='GPT-6 Sol'):
+    async def run_flow(self, answers, explicit_model=None, configured_model='GPT-6 Sol',
+                       resume=False, resume_capture=False, resume_unsent=False):
         root, config, _, _ = make_fixture('app-startup-flow-')
         config.storage_dir = root
         config.model = configured_model
         config.profile_dir = root / 'profile'
+        resume_path = None
+        if resume:
+            resume_path = config.runtime_dir / 'sessions' / 'existing'
+            saved = SessionState(resume_path)
+            saved.data['message_count'] = 1
+            saved.message('copilot_outbound', 'Initialization already committed.', request_id='prior-request')
+            reconciled_draft = 'Exact previously unsent request request_id reconciled-draft'
+            if resume_unsent:
+                saved.begin_submission('reconciled-draft', reconciled_draft)
+                saved.reconcile_submission(False)
+            if resume_capture:
+                saved.event('capture_failed', request_id='prior-request')
+                saved.data['status'] = 'closed'
+            else:
+                saved.data['status'] = 'ready'
+            saved.save()
         events = []
-        browser = StartupBrowser(events)
+        browser = StartupBrowser(events, reconciled_draft if resume_unsent else None)
         StartupOrchestrator.events = events
         replies = iter(answers)
 
@@ -82,7 +121,7 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
 
         args = SimpleNamespace(config=None, attach_existing=False, port=None,
                                profile=None, model=explicit_model, setup_only=False,
-                               resume=None, yes_setup=True)
+                               resume=resume_path, yes_setup=True)
         with patch.dict(os.environ), \
              patch('copilot_agent.app._UI_PERMISSION_CONTEXT'), \
              patch('copilot_agent.app.Config.load', return_value=config), \
@@ -102,6 +141,15 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
              patch('copilot_agent.app.system'):
             await run(args)
         return events
+
+    async def test_resume_page_binding_uses_last_confirmed_request_not_uncommitted_tail(self):
+        root, config, _, _ = make_fixture('app-resume-binding-')
+        state = SessionState(config.runtime_dir / 'sessions' / 'existing')
+        state.data['message_count'] = 1
+        state.message('copilot_outbound', 'confirmed request', request_id='confirmed')
+        state.message('copilot_outbound', 'unconfirmed pending request', request_id='pending')
+
+        self.assertEqual('confirmed', latest_committed_request_id(state))
 
     async def test_single_tab_discovery_precedes_preload_and_readiness_precedes_prompt(self):
         events = await self.run_flow(['', ':exit'])
@@ -134,6 +182,38 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
         events = await self.run_flow(['', ':exit'], configured_model='')
 
         self.assertEqual(1, events.count('browser:select:GPT-6 Sol'))
+
+    async def test_resuming_existing_conversation_does_not_reinitialize_or_send(self):
+        events = await self.run_flow([':exit'], explicit_model='GPT-6 Sol', resume=True)
+
+        self.assertIn('browser:start:prior-request', events)
+        self.assertNotIn('orchestrator:preload', events)
+        self.assertNotIn('orchestrator:initialize', events)
+        self.assertNotIn('browser:exchange', events)
+        self.assertIn('browser:ready:GPT-6 Sol', events)
+
+    async def test_resume_recovers_closed_capture_failure_without_initializing(self):
+        events = await self.run_flow([':exit'], explicit_model='GPT-6 Sol', resume=True,
+                                     resume_capture=True)
+
+        self.assertIn('orchestrator:recover_capture', events)
+        self.assertIn('browser:start:prior-request', events)
+        self.assertNotIn('orchestrator:preload', events)
+        self.assertNotIn('orchestrator:initialize', events)
+        self.assertNotIn('browser:exchange', events)
+
+    async def test_resume_resends_only_hash_matched_draft_confirmed_not_sent(self):
+        events = await self.run_flow([':exit'], explicit_model='GPT-6 Sol', resume=True,
+                                     resume_unsent=True)
+
+        self.assertIn('browser:read-draft:reconciled-draft', events)
+        self.assertIn('browser:exchange:reconciled-draft', events)
+        self.assertIn('orchestrator:resume-draft', events)
+        self.assertLess(events.index('browser:read-draft:reconciled-draft'),
+                        events.index('browser:exchange:reconciled-draft'))
+        self.assertLess(events.index('browser:exchange:reconciled-draft'),
+                        events.index('orchestrator:resume-draft'))
+        self.assertLess(events.index('orchestrator:resume-draft'), events.index('browser:ready:GPT-6 Sol'))
 
 
 if __name__ == '__main__':

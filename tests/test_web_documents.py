@@ -4,7 +4,6 @@ import hashlib
 import json
 import tempfile
 from pathlib import Path
-from types import SimpleNamespace
 import unittest
 
 from copilot_agent.policy import PathPolicy, PolicyError
@@ -73,6 +72,19 @@ class FakeContext:
         return page
 
 
+class FakeBrowser:
+    def __init__(self, context, page):
+        self.tool_context=context; self.tool_page=page; self.tool_domains={'fixture.test'}
+        self._tool_pages=[page]; self._approved_web_downloads={}
+
+    async def new_tool_page(self):
+        if sum(not page.is_closed() for page in self._tool_pages)>=6:
+            raise RuntimeError('Owned tool-tab limit reached.')
+        page=await self.tool_context.new_page()
+        self._tool_pages.append(page)
+        return page
+
+
 class DocumentTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(prefix='copilot_documents_'); self.addCleanup(self.temp.cleanup)
@@ -80,7 +92,7 @@ class DocumentTests(unittest.IsolatedAsyncioTestCase):
         native=self.root/'native'; native.mkdir()
         self.browser_context=FakeContext(native)
         self.page=FakePage(self.browser_context,True); self.browser_context.pages.append(self.page)
-        self.browser=SimpleNamespace(tool_context=self.browser_context,tool_page=self.page,tool_domains={'fixture.test'})
+        self.browser=FakeBrowser(self.browser_context,self.page)
         self.browser_context.browser=self.browser
         self.config={'storage_dir':str(self.root),'allowed_roots':[str(self.root)],'max_tool_tabs':4}
         self.context={'browser':self.browser,'config':self.config,'approved_domains':['fixture.test'],

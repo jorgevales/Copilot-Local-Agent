@@ -52,6 +52,231 @@ class PackageError(ValueError):
     """A package was incomplete, incompatible, unsafe or unverifiable."""
 
 
+class PackageReviewError(PackageError):
+    """A read-only ZIP review found one or more actionable problems."""
+
+    def __init__(self, report: dict):
+        self.report = report
+        failed = sum(item.get("status") == "failed" for item in report.get("checks", []))
+        super().__init__(f"Package review found {failed} issue(s); the ZIP was not run.")
+
+
+def _review_check(checks, item, status, detail=None, next_step=None):
+    result = {"item": item, "status": status}
+    if detail:
+        result["detail"] = str(detail)[:1000]
+    if next_step:
+        result["next_step"] = next_step
+    checks.append(result)
+
+
+def _package_review_report(checks, archive=None, digest=None):
+    failures = [item for item in checks if item.get("status") == "failed"]
+    skipped = sum(item.get("status") == "not_checked" for item in checks)
+    status = "failed" if failures else "passed"
+    summary = (f"{len(failures)} issue(s) need attention; the ZIP was reviewed but not run."
+               if failures else "All package checks passed; the ZIP remains unrun pending user approval.")
+    return {"status": status, "summary": summary, "archive": str(archive) if archive else None,
+            "archive_sha256": digest, "checks": checks, "failures": failures,
+            "not_checked_count": skipped,
+            "future_review_options": [
+                "A later update can make a nonessential format preference a warning if it blocks a useful package. Keep checks for changed files, safe locations, declared outputs, resource limits and separate local run approval in place."
+            ]}
+
+
+def _preflight_package_review(manifest, archive_files, checks, registry, limits, python_version):
+    """Collect independent, common package issues before strict validation."""
+    if not isinstance(manifest, dict):
+        _review_check(checks, "Package description", "failed", "The manifest must be a JSON object.",
+                      "Ask Copilot to rebuild the ZIP with a valid manifest.json.")
+        return
+
+    declared = manifest.get("files")
+    file_map_ok = isinstance(declared, dict) and bool(declared) and len(declared) <= 1000
+    if not file_map_ok:
+        _review_check(checks, "Files listed in the package", "failed",
+                      "The manifest needs a bounded list of the files included in the ZIP.",
+                      "List each payload file and its SHA-256 in manifest.json.")
+    else:
+        bad_names = []
+        hash_failures = []
+        for name, expected in declared.items():
+            try:
+                normalized = _relative(name, "file path")
+            except PackageError:
+                bad_names.append(str(name))
+                continue
+            if normalized == "manifest.json":
+                bad_names.append(normalized)
+                continue
+            data = archive_files.get(normalized)
+            if (not isinstance(expected, str) or not re.fullmatch(r"[a-f0-9]{64}", expected)
+                    or data is None or _sha256(data) != expected):
+                hash_failures.append(normalized)
+        if bad_names:
+            _review_check(checks, "Safe file names", "failed", ", ".join(sorted(set(bad_names))),
+                          "Use unique relative file names; keep manifest.json at the package root. README.md may also be listed and hashed at the package root.")
+        else:
+            _review_check(checks, "Safe file names", "passed")
+        if hash_failures:
+            _review_check(checks, "File list and contents match", "failed",
+                          "Missing or mismatched file(s): " + ", ".join(sorted(set(hash_failures))),
+                          "Include every file named in the manifest and refresh its SHA-256 after edits.")
+        else:
+            _review_check(checks, "File list and contents match", "passed")
+        expected_members = set()
+        for name in declared:
+            try:
+                expected_members.add(_relative(name, "file path"))
+            except PackageError:
+                pass
+        expected_members.update({"manifest.json", "README.md"})
+        actual_members = set(archive_files)
+        extra = sorted(actual_members - expected_members)
+        missing = sorted(expected_members - actual_members)
+        if extra or missing:
+            pieces = []
+            if extra:
+                pieces.append("not listed in the manifest: " + ", ".join(extra[:20]))
+            if missing:
+                pieces.append("listed but absent from the ZIP: " + ", ".join(missing[:20]))
+            _review_check(checks, "ZIP contents are all accounted for", "failed", "; ".join(pieces),
+                          "List intentional files in the manifest or remove unintended extras.")
+        else:
+            _review_check(checks, "ZIP contents are all accounted for", "passed")
+
+    stages = manifest.get("stages")
+    stage_ids = [stage.get("id") for stage in stages
+                 if isinstance(stage, dict) and isinstance(stage.get("id"), str)] if isinstance(stages, list) else []
+    syntax_failures = []
+    if isinstance(stages, list):
+        for stage in stages:
+            if not isinstance(stage, dict) or stage.get("kind") != "python":
+                continue
+            script_name = stage.get("script")
+            try:
+                script_name = _relative(script_name, "stage script")
+                source = archive_files.get(script_name)
+                if source is None:
+                    syntax_failures.append(f"{script_name}: script file is missing")
+                    continue
+                compile(source.decode("utf-8", errors="strict"), script_name, "exec")
+            except UnicodeError:
+                syntax_failures.append(f"{script_name}: file is not valid UTF-8")
+            except SyntaxError as error:
+                syntax_failures.append(f"{script_name}: line {error.lineno or '?'}: {error.msg}")
+            except PackageError as error:
+                syntax_failures.append(f"stage {stage.get('id', '?')}: {error}")
+    if syntax_failures:
+        _review_check(checks, "Python step files can be read", "failed", "; ".join(syntax_failures),
+                      "Fix the listed script lines and rebuild the ZIP; this is a code issue, not an approval setting.")
+    elif isinstance(stages, list) and any(isinstance(stage, dict) and stage.get("kind") == "python" for stage in stages):
+        _review_check(checks, "Python step files can be read", "passed")
+    else:
+        _review_check(checks, "Python step files can be read", "not_checked", "The package does not declare Python steps.")
+    entrypoint = manifest.get("entrypoint")
+    if isinstance(stages, list) and isinstance(entrypoint, str):
+        matches = [stage for stage in stages if isinstance(stage, dict)
+                   and (entrypoint == stage.get("id")
+                        or stage.get("kind") == "python" and entrypoint == stage.get("script"))]
+        if len(matches) != 1:
+            _review_check(checks, "Starting workflow step", "failed",
+                          f"'{entrypoint}' does not match exactly one listed step or its Python script.",
+                          "Use the ID of one step or the exact script path for that step.")
+        else:
+            _review_check(checks, "Starting workflow step", "passed")
+    else:
+        _review_check(checks, "Starting workflow step", "not_checked",
+                      "The stage list or entrypoint is missing or malformed.")
+
+    capabilities = manifest.get("capabilities")
+    create_paths = capabilities.get("create_paths") if isinstance(capabilities, dict) else None
+    if isinstance(stages, list) and isinstance(create_paths, list):
+        outputs = []
+        malformed = []
+        for stage in stages:
+            if not isinstance(stage, dict) or not isinstance(stage.get("outputs", []), list):
+                malformed.append("a workflow step has no valid output list")
+                continue
+            outputs.extend(item for item in stage.get("outputs", []) if isinstance(item, str))
+        duplicates = sorted({item for item in outputs if outputs.count(item) > 1})
+        safe_create_paths = [item for item in create_paths if isinstance(item, str)]
+        undeclared = sorted(item for item in set(outputs)
+                            if not _within_declared_path(item, safe_create_paths))
+        if malformed or duplicates or undeclared:
+            detail = []
+            if duplicates:
+                detail.append("more than one step writes " + ", ".join(duplicates[:20]))
+            if undeclared:
+                detail.append("not allowed in the output list: " + ", ".join(undeclared[:20]))
+            detail.extend(malformed)
+            _review_check(checks, "Workflow output files", "failed", "; ".join(detail),
+                          "Give each step its own output file and place it inside a package output path.")
+        else:
+            _review_check(checks, "Workflow output files", "passed")
+    else:
+        _review_check(checks, "Workflow output files", "not_checked",
+                      "The workflow steps or allowed output list is missing or malformed.")
+
+    dependencies = manifest.get("dependencies")
+    if isinstance(dependencies, dict) and isinstance(dependencies.get("python_min"), str):
+        try:
+            required = tuple(int(part) for part in dependencies["python_min"].split("."))
+            current = tuple(python_version or sys.version_info[:2])
+            module_names = dependencies.get("modules", [])
+            missing_modules = []
+            if isinstance(module_names, list):
+                for module in module_names:
+                    try:
+                        if not isinstance(module, str) or importlib.util.find_spec(module) is None:
+                            missing_modules.append(str(module))
+                    except (ImportError, ModuleNotFoundError, ValueError):
+                        missing_modules.append(str(module))
+            if current < required or missing_modules:
+                reasons = []
+                if current < required:
+                    reasons.append("requires Python " + dependencies["python_min"])
+                if missing_modules:
+                    reasons.append("not installed here: " + ", ".join(sorted(set(missing_modules))))
+                _review_check(checks, "Required software", "failed", "; ".join(reasons),
+                              "Use available dependencies, or add an approved dependency setup route in a future policy update.")
+            else:
+                _review_check(checks, "Required software", "passed")
+        except (TypeError, ValueError):
+            _review_check(checks, "Required software", "not_checked", "The dependency declaration is malformed.")
+    else:
+        _review_check(checks, "Required software", "not_checked", "The dependency declaration is missing or malformed.")
+
+    tool_refs = manifest.get("tools")
+    if isinstance(tool_refs, list):
+        missing_tools = []
+        incompatible = []
+        for ref in tool_refs:
+            if not isinstance(ref, dict) or not isinstance(ref.get("id"), str):
+                missing_tools.append("invalid tool reference")
+                continue
+            try:
+                definition = registry.definition(ref["id"]) if registry is not None else None
+            except (ValueError, KeyError):
+                definition = None
+            if definition is None:
+                missing_tools.append(ref["id"])
+            elif definition.get("version") != ref.get("version"):
+                incompatible.append(ref["id"])
+        if missing_tools or incompatible:
+            detail = []
+            if missing_tools:
+                detail.append("unavailable: " + ", ".join(missing_tools))
+            if incompatible:
+                detail.append("version mismatch: " + ", ".join(incompatible))
+            _review_check(checks, "Tools needed by the workflow", "failed", "; ".join(detail),
+                          "Use registered tools and match the versions installed in this orchestrator.")
+        else:
+            _review_check(checks, "Tools needed by the workflow", "passed")
+    else:
+        _review_check(checks, "Tools needed by the workflow", "not_checked", "The tool list is malformed.")
+
+
 def _bounded_int(value, name, minimum, maximum):
     if type(value) is not int or not minimum <= value <= maximum:
         raise PackageError(f"{name} must be an integer from {minimum} to {maximum}")
@@ -61,10 +286,27 @@ def _bounded_int(value, name, minimum, maximum):
 def _relative(value, name="package path"):
     if not isinstance(value, str) or not value or len(value) > 240 or "\\" in value:
         raise PackageError(f"Invalid {name}")
+    # PurePosixPath normalizes empty and dot segments, hiding malformed paths.
+    if any(part in {"", ".", ".."} or ":" in part for part in value.split("/")):
+        raise PackageError(f"Unsafe {name}")
     path = PurePosixPath(value)
-    if path.is_absolute() or any(part in {"", ".", ".."} or ":" in part for part in path.parts):
+    if path.is_absolute():
         raise PackageError(f"Unsafe {name}")
     return path.as_posix()
+
+
+def _approved_output_path(output_root: Path, relative_path: str) -> Path:
+    """Resolve a declared output beneath the exact run output root, including symlinks."""
+    root = output_root.resolve()
+    candidate = root.joinpath(*PurePosixPath(_relative(relative_path, "output path")).parts).resolve()
+    if not candidate.is_relative_to(root):
+        raise PackageError(f"Output path {candidate} escapes approved output folder {root}")
+    return candidate
+
+
+def _within_declared_path(value: str, declarations) -> bool:
+    """A declared output may be an exact file or a directory-scoped path."""
+    return any(value == root or value.startswith(root.rstrip("/") + "/") for root in declarations)
 
 
 def _sha256(data: bytes) -> str:
@@ -174,8 +416,8 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
     normalized_files = {}
     for name, digest in declared.items():
         path = _relative(name, "file path")
-        if path in {"manifest.json", "README.md"} or path in normalized_files:
-            raise PackageError("Payload files cannot replace the manifest, README or duplicate a path")
+        if path == "manifest.json" or path in normalized_files:
+            raise PackageError("Payload files cannot replace the manifest or duplicate a path")
         if not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
             raise PackageError("Each payload needs a lowercase SHA-256")
         data = archive_files.get(path)
@@ -188,8 +430,8 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
     if not isinstance(archive_files["README.md"], bytes) or len(archive_files["README.md"]) > 100_000:
         raise PackageError("Package README is missing or exceeds its limit")
     entrypoint = manifest["entrypoint"]
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,119}", entrypoint):
-        raise PackageError("Entrypoint must name a valid stage ID")
+    if not isinstance(entrypoint, str) or len(entrypoint) > 240:
+        raise PackageError("Entrypoint must name a stage ID or a packaged Python stage script")
 
     dependencies = manifest["dependencies"]
     _check_object(dependencies, {"python_min", "modules"}, {"python_min", "modules"}, "Dependencies")
@@ -274,25 +516,31 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
             raise PackageError("Invalid stage ID")
         if stage["kind"] not in {"python", "tool"}:
             raise PackageError("Unsupported stage kind")
+        if stage.get("failure_policy", "stop") not in {"stop", "continue"}:
+            raise PackageError("Unsupported stage failure policy")
         stage["depends_on"] = list(stage["depends_on"])
         stage["inputs"] = [_relative(item, "stage input") for item in stage["inputs"]]
         stage["outputs"] = [_relative(item, "stage output") for item in stage["outputs"]]
         if len(set(stage["inputs"])) != len(stage["inputs"]) or len(set(stage["outputs"])) != len(stage["outputs"]):
             raise PackageError("Stage paths may not be duplicated")
         for output in stage["outputs"]:
-            if output not in caps["create_paths"] or output in output_owners:
-                raise PackageError("Stage outputs must be unique declared create paths")
+            if not _within_declared_path(output, caps["create_paths"]) or output in output_owners:
+                raise PackageError("Stage outputs must be unique files inside declared create paths")
             output_owners[output] = stage["id"]
         _bounded_int(stage["timeout_seconds"], "stage timeout", 1, caps["max_runtime_seconds"])
         _bounded_int(stage["retries"], "stage retries", 0, 3)
         if type(stage["idempotent"]) is not bool or type(stage["checkpoint"]) is not bool:
             raise PackageError("Stage idempotent and checkpoint values must be booleans")
         for inp in stage["inputs"]:
-            if inp not in normalized_files and inp not in caps["create_paths"]:
+            if inp not in normalized_files and inp not in output_owners:
                 raise PackageError("Stage input is neither a packaged file nor a declared output")
         if stage["kind"] == "python":
-            if set(stage) - (stage_required | {"script", "arguments_list", "imports", "network_destinations", "permissions"}) or "script" not in stage:
-                raise PackageError("Python stage fields do not match a runnable script stage")
+            allowed_python_fields = stage_required | {"script", "arguments_list", "imports",
+                                                      "network_destinations", "permissions", "failure_policy"}
+            unsupported = set(stage) - allowed_python_fields
+            if unsupported or "script" not in stage:
+                detail = ", ".join(sorted(unsupported)) if unsupported else "missing script"
+                raise PackageError("Python stage has unsupported or missing fields: " + detail)
             script = _relative(stage["script"], "stage script")
             if script not in normalized_files or not script.endswith(".py"):
                 raise PackageError("Python stage script must be a declared .py payload")
@@ -307,11 +555,14 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
                 raise PackageError("Stage network destinations exceed package capabilities")
             if stage.get("network_destinations") and "network" not in stage.get("permissions", []):
                 raise PackageError("Network destinations require the explicit network permission")
-            if not {"read_files", "create_files"} <= set(stage.get("permissions", [])):
-                raise PackageError("Python stages must explicitly declare read_files and create_files permissions")
-            if not {script, *stage["inputs"]} <= set(caps["read_paths"]):
-                raise PackageError("Python stage script and inputs must be declared in package read_paths")
-            if not set(stage["outputs"]) <= set(caps["create_paths"]):
+            required_permissions = {"create_files"}
+            if stage["inputs"]:
+                required_permissions.add("read_files")
+            if not required_permissions <= set(stage.get("permissions", [])):
+                raise PackageError("Python stages need create_files, and read_files when they have declared inputs")
+            if not set(stage["inputs"]) <= set(caps["read_paths"]):
+                raise PackageError("Python stage inputs must be declared in package read_paths")
+            if not all(_within_declared_path(output, caps["create_paths"]) for output in stage["outputs"]):
                 raise PackageError("Python stage outputs must be declared in package create_paths")
             if not isinstance(stage.get("arguments_list", []), list) or len(stage.get("arguments_list", [])) > 100:
                 raise PackageError("Invalid Python stage arguments")
@@ -322,14 +573,28 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
                 raise PackageError("Tool stage must call a versioned registered tool with object arguments")
             if stage["tool_id"] in {"automation.run", "automation.inspect", "automation.compare"}:
                 raise PackageError("Automation packages cannot recursively invoke the package runtime")
-            if stage.get("failure_policy", "stop") not in {"stop", "continue"}:
-                raise PackageError("Unsupported tool-stage failure policy")
     order = _topological(stages)
+    by_id = {stage["id"]: stage for stage in stages}
+    ancestors = {}
+    for stage_id in order:
+        stage = by_id[stage_id]
+        inherited = set(stage["depends_on"])
+        for dependency in list(inherited):
+            inherited.update(ancestors.get(dependency, set()))
+        ancestors[stage_id] = inherited
+        for input_path in stage["inputs"]:
+            producer = output_owners.get(input_path)
+            if producer is not None and producer not in inherited:
+                raise PackageError("Stage input must come from a packaged file or an earlier dependency output")
     for stage in stages:
         if any(dep not in order[:order.index(stage["id"])] for dep in stage["depends_on"]):
             raise PackageError("Stage order cannot satisfy declared dependencies")
-    if entrypoint not in {stage["id"] for stage in stages}:
-        raise PackageError("Entrypoint must name a declared stage ID")
+    entrypoint_matches = [stage for stage in stages
+                          if entrypoint == stage["id"]
+                          or stage["kind"] == "python" and entrypoint == stage.get("script")]
+    if len(entrypoint_matches) != 1:
+        raise PackageError("Entrypoint must match one declared stage ID or Python stage script")
+    entrypoint_stage_id = entrypoint_matches[0]["id"]
     expected = manifest["expected_outputs"]
     if not isinstance(expected, list) or len(expected) > 100 or not set(expected) <= set(output_owners):
         raise PackageError("Expected outputs must be a subset of stage-declared outputs")
@@ -348,6 +613,7 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
     result = dict(manifest)
     result["files"] = normalized_files
     result["stage_order"] = order
+    result["entrypoint_stage_id"] = entrypoint_stage_id
     result["tool_versions"] = tool_versions
     result["manifest_sha256"] = canonical_hash(manifest)
     result["missing_dependencies"] = []
@@ -357,24 +623,73 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
 def inspect_package(path: Path, expected_sha256: str | None = None, registry=None,
                     *, limits=None, python_version=None) -> dict:
     path = Path(path)
-    inspected = inspect_zip(path)
+    checks = []
+    try:
+        inspected = inspect_zip(path)
+    except (ArchiveError, OSError, ValueError) as error:
+        _review_check(checks, "ZIP can be opened safely", "failed", str(error),
+                      "Ask Copilot to provide a complete, readable ZIP and review it again.")
+        raise PackageReviewError(_package_review_report(checks, path)) from error
+    _review_check(checks, "ZIP can be opened safely", "passed",
+                  f"{inspected['entry_count']} files; {inspected['archive_bytes']} bytes.")
     if expected_sha256 is not None and inspected["archive_sha256"] != expected_sha256:
-        raise PackageError("Package ZIP SHA-256 differs from the reviewed artifact")
+        _review_check(checks, "Downloaded ZIP matches the promised file", "failed",
+                      "The downloaded file has a different fingerprint from the one Copilot reported.",
+                      "Download the current artifact again and check its reported fingerprint.")
+    else:
+        _review_check(checks, "Downloaded ZIP matches the promised file", "passed")
     if inspected.get("office"):
-        raise PackageError("An Office archive is not an automation package")
+        _review_check(checks, "Package type", "failed", "This is an Office document archive, not an automation ZIP.",
+                      "Ask Copilot to deliver the runnable package ZIP itself.")
+        raise PackageReviewError(_package_review_report(checks, path, inspected["archive_sha256"]))
     file_names = {item["path"] for item in inspected["entries"] if not item["directory"]}
-    if not {"manifest.json", "README.md"} <= file_names:
-        raise PackageError("Package ZIP must contain manifest.json and README.md")
+    required_missing = sorted({"manifest.json", "README.md"} - file_names)
+    if required_missing:
+        _review_check(checks, "Required package files", "failed",
+                      "Missing: " + ", ".join(required_missing),
+                      "Include both manifest.json and README.md in the ZIP.")
+    else:
+        _review_check(checks, "Required package files", "passed")
     if len(file_names) > 1002:
-        raise PackageError("Package has too many files")
+        _review_check(checks, "Package size limits", "failed", "The ZIP contains too many files.",
+                      "Keep the package within the configured file-count limit.")
+        raise PackageReviewError(_package_review_report(checks, path, inspected["archive_sha256"]))
     with zipfile.ZipFile(path) as archive:
         payloads = {name: archive.read(name) for name in file_names}
+    if "README.md" in payloads:
+        if len(payloads["README.md"]) > 100_000:
+            _review_check(checks, "README size", "failed", "README.md exceeds the allowed size.",
+                          "Keep README.md under 100 KB.")
+        else:
+            _review_check(checks, "README size", "passed")
+    else:
+        _review_check(checks, "README size", "not_checked", "README.md is missing.")
+    if "manifest.json" not in payloads:
+        _review_check(checks, "Package description", "not_checked", "manifest.json is missing.")
+        raise PackageReviewError(_package_review_report(checks, path, inspected["archive_sha256"]))
+    manifest = None
     try:
         manifest = json.loads(payloads["manifest.json"].decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError) as error:
-        raise PackageError("Manifest is not valid UTF-8 JSON") from error
-    normalized = validate_manifest(manifest, payloads, registry, limits=limits, python_version=python_version)
-    return {"status": "validated", "archive": str(path), "archive_sha256": inspected["archive_sha256"],
+        _review_check(checks, "Package description", "failed", "manifest.json is not valid UTF-8 JSON.",
+                      "Ask Copilot to rebuild the ZIP with a valid manifest.json.")
+    if manifest is not None:
+        _review_check(checks, "Package description", "passed")
+        _preflight_package_review(manifest, payloads, checks, registry, limits, python_version)
+    if any(item.get("status") == "failed" for item in checks):
+        raise PackageReviewError(_package_review_report(checks, path, inspected["archive_sha256"]))
+    try:
+        normalized = validate_manifest(manifest, payloads, registry, limits=limits, python_version=python_version)
+    except PackageError as error:
+        # The preflight covers common independent file, dependency, entrypoint,
+        # and output problems. Keep deeper rules visible when one is violated.
+        _review_check(checks, "Remaining workflow and safety rules", "failed", str(error),
+                      "Update the named declaration or stage, then request another read-only review.")
+        raise PackageReviewError(_package_review_report(checks, path, inspected["archive_sha256"])) from error
+    _review_check(checks, "Remaining workflow and safety rules", "passed")
+    review = _package_review_report(checks, path, inspected["archive_sha256"])
+    return {"status": "validated", "review": review,
+            "archive": str(path), "archive_sha256": inspected["archive_sha256"],
             "archive_bytes": inspected["archive_bytes"], "manifest": normalized,
             "manifest_sha256": normalized["manifest_sha256"], "file_count": len(payloads),
             "stages": [{"id": stage["id"], "kind": stage["kind"], "depends_on": stage["depends_on"],
@@ -512,7 +827,8 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
         workspace.mkdir(parents=True, exist_ok=True)
         extraction = ArchiveService(context["path_policy"], context["session_dir"]).extract(
             {"path": str(archive), "destination": str(package_dir),
-             "expected_sha256": inspection["archive_sha256"], "expected_files": list(manifest["files"]) + ["manifest.json", "README.md"]},
+             "expected_sha256": inspection["archive_sha256"],
+             "expected_files": sorted(set(manifest["files"]) | {"manifest.json", "README.md"})},
             approved=True)
         if extraction["status"] != "verified":
             raise PackageError("Safe package extraction did not verify every file: " + extraction["status"])
@@ -562,7 +878,7 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
                     continue
                 valid = True
                 for rel, digest in record.get("output_hashes", {}).items():
-                    src = prior_dir / "outputs" / rel
+                    src = _approved_output_path(prior_dir / "outputs", rel)
                     if not src.is_file() or _file_hash(src) != digest:
                         valid = False; break
                 stage = next(item for item in manifest["stages"] if item["id"] == stage_id)
@@ -575,7 +891,8 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
                 valid = valid and record.get("fingerprint") == expected_fingerprint
                 if valid:
                     for rel in record.get("output_hashes", {}):
-                        src, dest = prior_dir / "outputs" / rel, output_root / rel
+                        src, dest = (_approved_output_path(prior_dir / "outputs", rel),
+                                     _approved_output_path(output_root, rel))
                         dest.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copyfile(src, dest)
                         if _file_hash(dest) != record["output_hashes"][rel]:
@@ -590,7 +907,8 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
             stage = next((item for item in manifest["stages"] if item["id"] == stage_id), None)
             if stage is None or record.get("status") not in {"completed", "cached"}:
                 continue
-            valid = all((output_root / rel).is_file() and _file_hash(output_root / rel) == digest
+            valid = all(_approved_output_path(output_root, rel).is_file()
+                        and _file_hash(_approved_output_path(output_root, rel)) == digest
                         for rel, digest in record.get("output_hashes", {}).items())
             if valid:
                 stage_records[stage_id] = dict(record, status="cached", cache_source=run_id)
@@ -651,6 +969,7 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
         outcome = None
         max_attempts = stage["retries"] + 1 if stage["idempotent"] else 1
         for attempt in range(1, max_attempts + 1):
+            execution_started = False
             try:
                 if stage["kind"] == "tool":
                     subcontext = dict(context)
@@ -664,12 +983,15 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
                         break
                 else:
                     script_path = package_dir.joinpath(*PurePosixPath(stage["script"]).parts)
-                    expected = [str(output_root.joinpath(*PurePosixPath(path).parts)) for path in stage["outputs"]]
+                    expected = [str(_approved_output_path(output_root, path)) for path in stage["outputs"]]
                     for target in expected:
                         Path(target).parent.mkdir(parents=True, exist_ok=True)
-                    read_paths = [str(script_path)]
+                    # The orchestrator reads the hash-verified package script and
+                    # submits its text to Code Runner. Only stage data inputs need
+                    # the package's read_files grant.
+                    read_paths = []
                     for rel in stage["inputs"]:
-                        source = package_dir / rel if (package_dir / rel).is_file() else output_root / rel
+                        source = package_dir / rel if (package_dir / rel).is_file() else _approved_output_path(output_root, rel)
                         if source.exists(): read_paths.append(str(source))
                     permissions = list(stage.get("permissions", []))
                     code_args = {"script": script_path.read_text(encoding="utf-8"), "purpose": manifest["description"][:4000],
@@ -678,14 +1000,17 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
                                  "network_destinations": stage.get("network_destinations", []), "permissions": permissions,
                                  "risk_summary": "Execute this exact package stage under its reviewed manifest scope.",
                                  "recovery_notes": "Resume from the verified package checkpoint; do not repeat uncertain effects.",
-                                 "interpreter": sys.executable, "arguments": list(stage.get("arguments_list", [])) + [str(output_root)],
+                                  # Stable package ABI: the authoritative per-run output root
+                                  # is always sys.argv[-1], after stage-declared arguments.
+                                  "interpreter": sys.executable, "arguments": list(stage.get("arguments_list", [])) + [str(output_root.resolve())],
                                  "imports": list(stage.get("imports", [])), "modify_paths": [], "timeout_seconds": stage["timeout_seconds"],
                                  "max_output_chars": min(manifest["capabilities"]["max_output_chars"], 12000),
                                  "expected_effects": ["create declared outputs"], "viewer_windows": [],
-                                 "source_path": str(script_path), "source_sha256": manifest["files"][stage["script"]]}
+                                 }
                     runner = code_runner_factory(context["path_policy"], context["session_dir"], stage["timeout_seconds"],
                                                  min(manifest["capabilities"]["max_output_chars"], 12000))
                     proposed = runner.prepare(code_args)
+                    execution_started = True
                     outcome = await _await_stage(runner.run_async(code_args, proposed["proposal_hash"], process_registry=context.get("process_registry")),
                                                  stage["timeout_seconds"])
                     if outcome.get("status") != "completed":
@@ -698,10 +1023,11 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
             except asyncio.CancelledError:
                 raise
             except Exception as error:
-                outcome = {"ok": False, "status": "failed", "error": str(error)[:1000], "side_effects_uncertain": True}
+                outcome = {"ok": False, "status": "failed", "error": str(error)[:1000],
+                           "side_effects_uncertain": execution_started}
                 break
         if stage["kind"] == "python" and outcome and outcome.get("status") == "completed":
-            outputs = {rel: _file_hash(output_root / rel) for rel in stage["outputs"]}
+            outputs = {rel: _file_hash(_approved_output_path(output_root, rel)) for rel in stage["outputs"]}
         elif stage["kind"] == "tool" and outcome and outcome.get("ok"):
             outputs = {}
         success = outcome is not None and (outcome.get("ok", True) if stage["kind"] == "tool" else outcome.get("status") == "completed")
@@ -726,7 +1052,7 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
 
     if resume_id:
         for stage in manifest["stages"]:
-            if stage["id"] not in stage_records and any((output_root / rel).exists() for rel in stage["outputs"]):
+            if stage["id"] not in stage_records and any(_approved_output_path(output_root, rel).exists() for rel in stage["outputs"]):
                 raise PackageError("An interrupted stage left output files; resume into a fresh run directory to preserve them")
     try:
         pending = set(manifest["stage_order"]) - completed
@@ -773,7 +1099,10 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
         failures.extend(validation["errors"])
     output_evidence = []
     for rel in manifest["expected_outputs"]:
-        path = output_root / rel
+        try:
+            path = _approved_output_path(output_root, rel)
+        except PackageError:
+            continue  # The validation report carries the containment failure.
         if path.is_file(): output_evidence.append({"path": str(path), "size": path.stat().st_size, "sha256": _file_hash(path), "verified": True})
     state["outputs"] = output_evidence
     state["validation"] = validation
@@ -785,8 +1114,19 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
               "manifest_sha256": inspection["manifest_sha256"], "workspace": str(workspace),
               "package_path": str(package_dir), "output_root": str(output_root),
               "completed_stages": sorted(completed), "failed_stages": failures,
+              "stage_results": [
+                  {"stage_id": stage_id, "status": record.get("status"),
+                   **{key: record.get("result", {}).get(key)
+                      for key in ("error", "exit_code", "stdout", "stderr", "side_effects_uncertain")
+                      if isinstance(record.get("result"), dict) and record["result"].get(key) is not None},
+                   **({"error": record.get("error")} if record.get("error") and
+                      not (isinstance(record.get("result"), dict) and record["result"].get("error")) else {})}
+                  for stage_id, record in state.get("stages", {}).items()
+                  if stage_id in failures or record.get("status") == "failed"
+              ],
               "patch_decision": patch, "validation": validation, "outputs": output_evidence,
-              "state_path": str(state_path), "summary": manifest["result_contract"]["summary"]}
+              "state_path": str(state_path), "summary": _run_summary(
+                  manifest, state, completed, validation)}
     if context.get("session_state"):
         context["session_state"].event("automation_package_completed", package_id=manifest["package_id"],
                                          run_id=run_id, status=state["status"], archive_sha256=inspection["archive_sha256"],
@@ -796,20 +1136,44 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
     return result
 
 
+def _run_summary(manifest: dict, state: dict, completed: set[str], validation: dict) -> str:
+    """Use the package's success sentence only after the observed run passes."""
+    if state.get("status") == "completed" and validation.get("ok") is True:
+        return manifest["result_contract"]["summary"]
+    status = state.get("status", "failed")
+    completed_count = len(completed)
+    failed_steps = [stage_id for stage_id in manifest.get("stage_order", [])
+                    if state.get("stages", {}).get(stage_id, {}).get("status") == "failed"]
+    if completed_count:
+        message = f"Package run {status}: {completed_count} step(s) completed before it stopped."
+    else:
+        message = f"Package run {status}: no package steps completed."
+    if failed_steps:
+        message += " Failed step(s): " + ", ".join(failed_steps) + "."
+    errors = validation.get("errors", []) if isinstance(validation, dict) else []
+    if errors:
+        message += f" {len(errors)} expected output check(s) did not pass."
+    elif status != "completed" and not failed_steps:
+        message += " The run did not produce a verified completion result."
+    return message
+
+
 def _validate_outputs(manifest, package_dir, output_root):
     errors = []
     expected = manifest["expected_outputs"]
     for rel in expected:
-        target = output_root.joinpath(*PurePosixPath(rel).parts)
-        if not target.is_file(): errors.append("Missing expected output: " + rel)
-    for rule in manifest["validation"]:
-        target = output_root / rule["path"]
-        if rule["path"] not in expected:
-            target = package_dir / rule["path"]
         try:
+            target = _approved_output_path(output_root, rel)
+            if not target.is_file(): errors.append("Missing expected output: " + rel)
+        except PackageError as error:
+            errors.append(str(error))
+    for rule in manifest["validation"]:
+        try:
+            target = (_approved_output_path(output_root, rule["path"])
+                      if rule["path"] in expected else package_dir / rule["path"])
             if rule["kind"] == "exists" and not target.is_file(): errors.append("Validation file missing: " + rule["path"])
             elif rule["kind"] == "sha256" and (not target.is_file() or _file_hash(target) != rule["sha256"]): errors.append("Validation SHA-256 mismatch: " + rule["path"])
             elif rule["kind"] == "python_syntax": compile(target.read_text(encoding="utf-8"), str(target), "exec")
-        except (OSError, SyntaxError, UnicodeError):
+        except (OSError, SyntaxError, UnicodeError, PackageError):
             errors.append("Validation could not verify: " + rule["path"])
     return {"ok": not errors, "checked": len(expected) + len(manifest["validation"]), "errors": errors}

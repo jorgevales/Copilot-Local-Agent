@@ -97,6 +97,26 @@ class NewSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(fresh_browser._launched_process, owned_process)
         await new.close()
 
+    async def test_new_session_preserves_isolated_proof_boundaries(self):
+        root, config, state, registry, old_browser, old = self.previous()
+        config._automation_test_mode = True
+        config._s_storage_verified = False
+        config._local_navigation_confirmed = False
+        fresh_browser = SessionBrowser([final_response])
+        with patch('copilot_agent.app.BrowserAdapter', return_value=fresh_browser) as factory, \
+                patch('copilot_agent.app.check_knowledge_health') as knowledge_health:
+            new = await start_new_session(config, old, 'Synthetic model', registry)
+
+        fresh_config = factory.call_args.args[0]
+        self.assertTrue(fresh_config._automation_test_mode)
+        self.assertFalse(fresh_config._s_storage_verified)
+        self.assertFalse(fresh_config._local_navigation_confirmed)
+        self.assertFalse(new.base_context['local_navigation_grant'].approved)
+        self.assertEqual(config.allowed_roots, fresh_config.allowed_roots)
+        self.assertFalse(new.state.data['knowledge_capability']['available'])
+        knowledge_health.assert_not_called()
+        await new.close()
+
     async def test_uncertainty_cannot_be_erased_through_new_session(self):
         root, config, state, registry, old_browser, old = self.previous()
         state.data['calls']['uncertain'] = {'status': 'uncertain', 'state_changing': True}

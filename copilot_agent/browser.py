@@ -6,6 +6,7 @@ from collections import Counter
 import inspect
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import time
@@ -274,6 +275,17 @@ def fresh_assistant(messages: list[dict], baseline: dict, user_key, request_id: 
     return (correlated or candidates)[-1]["text"]
 
 
+def public_progress(messages: list[dict], user_key, request_id: str) -> list[dict]:
+    """Select plain, user-visible interim assistant messages, excluding protocol and reasoning UI."""
+    user = next((item for item in messages if item.get('key') == user_key and item.get('role') == 'user'
+                 and request_id in item.get('text', '')), None)
+    if user is None:
+        return []
+    return [item for item in messages if item.get('role') == 'assistant'
+            and item.get('order', -1) > user['order'] and item.get('text')
+            and BEGIN not in item['text'] and END not in item['text']]
+
+
 def uploads_verified(snapshot: dict, names: list[str], send_enabled: bool) -> bool:
     """Count equality is insufficient: identity, transfer/error state and Send agree."""
     return (Counter(snapshot.get('names', [])) == Counter(names)
@@ -302,6 +314,7 @@ class BrowserAdapter:
         self.last_diagnostics = None
         self.last_composer_comparison = None
         self.last_capture_observation = None
+        self.last_interaction_readiness = {}
         self.feedback_callback = None
         self._preloaded_exchange = None
         self.startup_stage = 'not_started'
@@ -366,6 +379,33 @@ class BrowserAdapter:
         self.page = await asyncio.wait_for(self.context.new_page(), 10)
         return self.page
 
+    async def _claim_committed_request_page(self, request_id: str):
+        """Select the one existing Copilot conversation containing a committed request."""
+        if not isinstance(request_id, str) or not request_id:
+            raise BrowserUIError('A committed request_id is required to resume its existing Copilot conversation.')
+        matches = []
+        for page in list(getattr(self.context, 'pages', ())):
+            closed = getattr(page, 'is_closed', None)
+            if callable(closed) and closed():
+                continue
+            parsed = urlparse(str(getattr(page, 'url', '')))
+            if parsed.hostname != 'm365.cloud.microsoft' or not parsed.path.startswith('/chat/conversation/'):
+                continue
+            try:
+                messages = await asyncio.wait_for(page.evaluate(_MESSAGE_SNAPSHOT), 5)
+            except Exception:
+                continue
+            matching_users = [item for item in messages if item.get('role') == 'user'
+                              and request_id in item.get('text', '')]
+            if len(matching_users) > 1:
+                raise BrowserUIError('The committed request appears multiple times in one Copilot conversation; recovery stopped without navigating.')
+            if matching_users:
+                matches.append(page)
+        if len(matches) != 1:
+            raise BrowserUIError('Recovery requires exactly one existing Copilot conversation containing the committed request_id; no chat was navigated.')
+        self.page = matches[0]
+        return self.page
+
     async def _connect_running_edge_fallback(self):
         """Retry verified running Edge endpoints after a failed selected route."""
         attempts = set()
@@ -405,7 +445,7 @@ class BrowserAdapter:
         host = (urlparse(str(url)).hostname or '').casefold().rstrip('.')
         return host == 'login.microsoftonline.com' or host == 'login.live.com' or host.endswith('.login.microsoftonline.com')
 
-    async def start(self):
+    async def start(self, resume_request_id=None):
         if not self.config.visible:
             raise BrowserUIError('This adapter supports visible Edge only; hidden/headless operation is unsupported.')
         parsed = urlparse(self.config.copilot_url)
@@ -416,6 +456,20 @@ class BrowserAdapter:
             self._acquire_controller()
             self.startup_stage = 'endpoint_probe'
             profile = Path(self.config.profile_dir).expanduser().resolve()
+            exact_endpoint = getattr(self.config, '_proof_exact_edge_endpoint', None)
+
+            def verify_exact_endpoint():
+                if exact_endpoint is None:
+                    return
+                if (not isinstance(exact_endpoint, tuple) or len(exact_endpoint) != 2
+                        or type(exact_endpoint[0]) is not int or not isinstance(exact_endpoint[1], str)
+                        or self.config.debug_port != exact_endpoint[0]
+                        or os.path.normcase(str(Path(self.config.profile_dir).expanduser().resolve()))
+                           != os.path.normcase(str(Path(exact_endpoint[1]).expanduser().resolve()))
+                        or not self.config.attach_existing):
+                    raise BrowserUIError('The proof requires its exact existing Edge port and dedicated profile; no alternate listener may be used.')
+
+            verify_exact_endpoint()
             payload = await asyncio.to_thread(edge.get_cdp_version, self.endpoint)
             if payload is not None:
                 edge.validate_endpoint(self.endpoint, payload)
@@ -451,10 +505,15 @@ class BrowserAdapter:
                                                           initial_payload=payload,
                                                           endpoint_validator=(verify_launched_endpoint
                                                                               if self._launched_process is not None else None))
-            except edge.EndpointError:
+            except edge.EndpointError as exc:
+                if exact_endpoint is not None:
+                    raise BrowserUIError('The exact dedicated Edge listener could not be attached; no fallback port or profile was used.') from exc
                 self.browser = await self._connect_running_edge_fallback()
                 if self.browser is None:
                     raise
+            verify_exact_endpoint()
+            if exact_endpoint is not None:
+                await asyncio.to_thread(edge.validate_profile_ownership, self.config.debug_port, profile)
             # Prove the fresh listener belongs to this Popen process; fall back to
             # exact profile inspection if Edge handed off to a different process.
             if __import__('os').name == 'nt':
@@ -475,6 +534,17 @@ class BrowserAdapter:
                         ['clipboard-read', 'clipboard-write'],
                         origin='https://m365.cloud.microsoft'),
                     10)
+            if resume_request_id:
+                self.startup_stage = 'committed_request_lookup'
+                await self._claim_committed_request_page(resume_request_id)
+                self.page.set_default_timeout(5000)
+                if hasattr(self.page, 'bring_to_front'):
+                    await self.page.bring_to_front()
+                self.startup_stage = 'ready'
+                print('[System] Reattached to the exact existing Copilot conversation for session resume; no new chat was opened.')
+                self.tool_context = self.context
+                self.tool_page = None
+                return self
             await self._claim_chat_page()
             # Website tool tabs are created lazily by browser.open. Starting one
             # here leaves an unexplained blank tab beside every Copilot chat.
@@ -744,7 +814,9 @@ class BrowserAdapter:
 
     async def _stop_present(self):
         return bool(await self._evaluate(r"""() => [...document.querySelectorAll('button')].some(n=>
-          (n.offsetWidth||n.offsetHeight)&&/^(stop generating|stop|stop responding)/i.test(n.getAttribute('aria-label')||''))"""))
+          (n.offsetWidth||n.offsetHeight||n.getClientRects().length)>0
+          && /^(?:stop|stop generating|stop responding)$/i.test(
+            (n.getAttribute('aria-label')||n.getAttribute('title')||n.innerText||'').replace(/\s+/g,' ').trim()))"""))
 
     async def _generation_state(self):
         """Observe the live generation control and the restored, enabled Send control."""
@@ -1048,21 +1120,195 @@ class BrowserAdapter:
         self._preloaded_exchange = None
         return prepared['baseline'], prepared['old_users'], button
 
-    async def verify_interaction_ready(self, expected_model: str):
-        """Prove the initialized live chat can accept the next user turn."""
-        deadline = time.monotonic() + min(10, self.config.startup_timeout)
-        while time.monotonic() < deadline:
+    async def verify_interaction_ready(self, expected_model: str, request_id: str | None = None):
+        """Wait for the visible chat to settle, while preserving any unsent draft."""
+        started = time.monotonic()
+        maximum = started + getattr(self.config, 'response_max_duration', self.config.response_timeout)
+        startup_deadline = started + self.config.startup_timeout
+        generation_observed = False
+        progress_seen = set()
+        last_progress = None
+        last_state = {}
+        while time.monotonic() < (maximum if generation_observed else startup_deadline):
+            messages = await self._evaluate(_MESSAGE_SNAPSHOT)
+            if request_id:
+                users = [item for item in messages if item.get('role') == 'user'
+                         and request_id in item.get('text', '')]
+                if len(users) == 1:
+                    interim = public_progress(messages, users[0]['key'], request_id)
+                    signature = tuple((item['key'], item['text']) for item in interim)
+                    if signature != last_progress:
+                        generation_observed = generation_observed or bool(signature)
+                        last_progress = signature
+                    for item in interim:
+                        identity = (item['key'], item['text'])
+                        if identity not in progress_seen:
+                            progress_seen.add(identity)
+                            await self._feedback({'type': 'progress', 'request_id': request_id,
+                                                  'message': item['text'][:1000]})
+            stop_present = await self._stop_present()
+            generation_observed = generation_observed or stop_present
             editor = await self._editor(required=False)
             picker = await self._visible(edge.PICKER_SELECTOR)
-            stopped = not await self._stop_present()
-            empty = editor is not None and not str(await self._editor_text(editor)).strip()
+            editor_text = str(await self._editor_text(editor)) if editor is not None else ''
+            empty = editor is not None and not editor_text.strip()
             attachments = await self._evaluate(_ATTACHMENTS) if editor is not None else {'names': [], 'busy': True}
+            send = await self._visible(edge.SEND_SELECTOR) if editor is not None else None
+            send_ready = bool(send is not None and await send.is_enabled())
+            last_state = {'editor_visible': editor is not None, 'editor_empty': empty,
+                          'model_matches': self.model_label == expected_model,
+                          'picker_visible': picker is not None, 'generation_active': stop_present,
+                          'send_ready': send_ready, 'attachment_count': len(attachments.get('names', [])),
+                          'attachments_busy': bool(attachments.get('busy', False))}
             if (self.model_label == expected_model and editor is not None and picker is not None
-                    and stopped and empty and not attachments.get('names') and not attachments.get('busy', False)):
+                    and not stop_present and empty and not attachments.get('names')
+                    and not attachments.get('busy', False)):
                 return True
+            if editor is not None and not empty and not stop_present and not generation_observed:
+                await self.diagnostics('interaction_readiness_unsent_draft')
+                raise BrowserUIError('Copilot has an unsent draft in its composer. It was left untouched; reconcile or clear that draft before sending another request.')
             await asyncio.sleep(self.config.poll_interval)
+        self.last_interaction_readiness = last_state
         await self.diagnostics('interaction_readiness')
-        raise BrowserUIError('Copilot Chat did not return to a verified ready state after initialization.')
+        raise BrowserUIError('Copilot Chat did not become ready within the response window. Last observed UI state: '
+                             + json.dumps(last_state, ensure_ascii=False, sort_keys=True))
+
+    async def read_reconciled_draft(self, request_id: str, expected_sha256: str) -> str:
+        """Return only a hash-matching, text-only draft already proven not sent."""
+        if (not isinstance(request_id, str) or not request_id
+                or not isinstance(expected_sha256, str)
+                or not re.fullmatch(r'[a-f0-9]{64}', expected_sha256)):
+            raise BrowserUIError('A reconciled request ID and SHA-256 are required to reuse a draft.')
+        if self.page is None or self.page.is_closed():
+            raise BrowserUIError('The Copilot page is unavailable; the unsent draft was left untouched.')
+        if self._delivery_uncertain or await self._stop_present():
+            raise BrowserUIError('Copilot delivery is still uncertain or generating; the draft was not reused.')
+        messages = await self._evaluate(_MESSAGE_SNAPSHOT)
+        matches = [item for item in messages if item['role'] == 'user' and request_id in item.get('text', '')]
+        if matches:
+            raise BrowserUIError('The reconciled request is already visible in the chat; refusing to resend it.')
+        editor = await self._editor(required=False)
+        if editor is None:
+            raise BrowserUIError('The Copilot composer is unavailable; the unsent draft was left untouched.')
+        text = str(await self._editor_text(editor))
+        if hashlib.sha256(text.encode()).hexdigest() != expected_sha256 or request_id not in text:
+            raise BrowserUIError('The composer no longer matches the exact reconciled draft; it was left untouched.')
+        attachments = await self._evaluate(_ATTACHMENTS)
+        if attachments.get('names') or attachments.get('busy'):
+            raise BrowserUIError('The reconciled draft has unverified attachments; it was left untouched.')
+        send = await self._visible(edge.SEND_SELECTOR)
+        if send is None or not await send.is_enabled():
+            raise BrowserUIError('The Copilot Send control is not ready; the draft was left untouched.')
+        return text
+
+    async def _verified_unsent_retry_control(self, text: str, request_id: str,
+                                             old_user_keys: set) -> object | None:
+        """Return a fresh Send control only after stable evidence proves this draft is unsent."""
+        previous = None
+        stable = 0
+        for _ in range(4):
+            messages = await self._evaluate(_MESSAGE_SNAPSHOT)
+            new_users = [item for item in messages
+                         if item.get('role') == 'user' and item.get('key') not in old_user_keys]
+            if new_users or any(request_id in item.get('text', '') for item in messages
+                                if item.get('role') == 'user'):
+                return None
+            if await self._stop_present():
+                return None
+            editor = await self._editor(required=False)
+            if editor is None:
+                return None
+            actual = str(await self._editor_text(editor) or '')
+            if not composer_comparison(text, actual).get('matches'):
+                return None
+            attachments = await self._evaluate(_ATTACHMENTS)
+            if (not isinstance(attachments, dict) or attachments.get('names')
+                    or attachments.get('busy') or attachments.get('error')
+                    or any(upload_alert_is_error(alert) for alert in attachments.get('alerts', []))):
+                return None
+            button = await self._visible(edge.SEND_SELECTOR)
+            if button is None or not await button.is_enabled():
+                return None
+            snapshot = (actual, tuple((item.get('key'), item.get('text')) for item in messages),
+                        tuple(attachments.get('names', [])), bool(attachments.get('busy')))
+            stable = stable + 1 if snapshot == previous else 1
+            if stable >= 2:
+                return button
+            previous = snapshot
+            await asyncio.sleep(min(.1, max(.01, self.config.poll_interval)))
+        return None
+
+    async def capture_committed_response(self, request_id: str) -> str:
+        """Recover one already-submitted response without sending another message."""
+        if not isinstance(request_id, str) or not request_id:
+            raise BrowserUIError('A committed request_id is required for response recovery.')
+        closed = getattr(self.page, 'is_closed', lambda: False)() if self.page is not None else True
+        if self.page is None or closed:
+            raise CaptureTimeoutError('The existing Copilot chat page is unavailable; the committed request was not resent.')
+        if hasattr(self.page, 'bring_to_front'):
+            await self.page.bring_to_front()
+        started = time.monotonic()
+        overall_deadline = started + getattr(self.config, 'response_max_duration', self.config.response_timeout)
+        idle_deadline = min(overall_deadline, started + self.config.response_timeout)
+        previous = ''
+        stable = 0
+        previous_activity = None
+        progress_seen = set()
+        while time.monotonic() < min(overall_deadline, idle_deadline):
+            messages = await self._evaluate(_MESSAGE_SNAPSHOT)
+            matching_users = [item for item in messages if item['role'] == 'user'
+                              and request_id in item.get('text', '')]
+            if len(matching_users) > 1:
+                raise SubmissionAmbiguousError('More than one submitted user turn matches this request_id; recovery stopped without action.')
+            if len(matching_users) == 1:
+                stop_present, send_ready = await self._generation_state()
+                candidate = fresh_assistant(messages, {}, matching_users[0]['key'], request_id)
+                interim = public_progress(messages, matching_users[0]['key'], request_id)
+                for item in interim:
+                    identity = (item['key'], item['text'])
+                    if identity not in progress_seen:
+                        progress_seen.add(identity)
+                        await self._feedback({'type':'progress', 'request_id':request_id,
+                                              'message':item['text'][:1000]})
+                activity = (candidate, tuple((item['key'], item['text']) for item in interim))
+                if stop_present:
+                    # Response recovery must honor the same live-generation
+                    # signal as a newly submitted turn.
+                    idle_deadline = min(overall_deadline, time.monotonic() + self.config.response_timeout)
+                elif activity != previous_activity:
+                    idle_deadline = min(overall_deadline, time.monotonic() + self.config.response_timeout)
+                previous_activity = activity
+                complete = bool(candidate and request_id in candidate
+                                and response_envelope_closed(candidate)
+                                and copied_code_response(candidate, request_id))
+                ended = not stop_present and (send_ready or bool(candidate))
+                stable = stable + 1 if complete and ended and candidate == previous else 1 if complete and ended else 0
+                previous = candidate
+                self.last_capture_observation = {
+                    'request_id': request_id, 'committed_user_key': matching_users[0]['key'],
+                    'candidate_length': len(candidate), 'stop_present': stop_present,
+                    'send_ready': send_ready, 'generation_observed': False,
+                    'generation_ended': ended, 'capture_method': 'existing_chat_text',
+                    'complete_current_text': complete,
+                    'nodes': [{'key': item['key'], 'order': item['order'], 'role': item['role'],
+                               'length': len(item['text']), 'contains_request': request_id in item['text']}
+                              for item in messages[-30:]]}
+                if stable >= max(2, self.config.capture_stable_samples):
+                    assistant_matches = [item for item in messages if item['role'] == 'assistant'
+                                         and item['order'] > matching_users[0]['order']
+                                         and item.get('text') == candidate]
+                    source = {'request_id': request_id, 'user_key': matching_users[0]['key'],
+                              'committed': True}
+                    if len(assistant_matches) == 1:
+                        source['assistant_key'] = assistant_matches[0]['key']
+                    self.last_submission = source
+                    return candidate
+            await asyncio.sleep(self.config.poll_interval)
+        try:
+            await self.diagnostics('committed_response_recovery')
+        except Exception:
+            pass
+        raise CaptureTimeoutError('The existing Copilot response could not be captured as a complete, stable envelope; the committed request was not resent.')
 
     async def exchange(self, text: str, request_id: str, attachments=(), on_submitted=None) -> str:
         async with self._exchange_lock:
@@ -1088,48 +1334,74 @@ class BrowserAdapter:
                 except Exception: pass
                 raise SubmissionNotSentError(message) from exc
             user_key = None
-            try:
-                # Treat even a click timeout as uncertain: the remote action may have fired.
-                await button.click(timeout=5000)
-                self._preloaded_attachment_signatures = ()
-                deadline = time.monotonic() + min(20, self.config.response_timeout)
-                while time.monotonic() < deadline:
-                    messages = await self._evaluate(_MESSAGE_SNAPSHOT)
-                    fresh = [item for item in messages if item['role'] == 'user'
-                             and item['key'] not in old_users and request_id in item['text']]
-                    editor = await self._editor(required=False)
-                    composer = await self._editor_text(editor) if editor else None
-                    if len(fresh) == 1 and composer is not None and not str(composer).strip():
-                        user_key = fresh[0]['key']
-                        self.last_submission = {'request_id': request_id, 'user_key': user_key, 'committed': True}
-                        if on_submitted is not None:
-                            outcome = on_submitted()
-                            if inspect.isawaitable(outcome):
-                                await outcome
-                        break
-                    await asyncio.sleep(self.config.poll_interval)
-                if user_key is None:
-                    raise SubmissionAmbiguousError('Send was attempted, but a fresh correlated user turn and cleared composer were not both observed. Do not resend.')
-            except BaseException as exc:
-                if user_key is None:
-                    self._delivery_uncertain = True
-                    await self.diagnostics('ambiguous_submission')
+            last_error = None
+            for send_attempt in range(1, 3):
+                self.last_submission = {'request_id': request_id, 'committed': False,
+                                        'send_attempted': True, 'send_attempts': send_attempt}
+                try:
+                    # A retry is allowed only after fresh, stable UI evidence proves
+                    # the exact text remains unsent and no attachments were submitted.
+                    await button.click(timeout=5000)
+                    self._preloaded_attachment_signatures = ()
+                    deadline = time.monotonic() + min(20, self.config.response_timeout)
+                    while time.monotonic() < deadline:
+                        messages = await self._evaluate(_MESSAGE_SNAPSHOT)
+                        fresh = [item for item in messages if item['role'] == 'user'
+                                 and item['key'] not in old_users and request_id in item['text']]
+                        editor = await self._editor(required=False)
+                        composer = await self._editor_text(editor) if editor else None
+                        if len(fresh) == 1 and composer is not None and not str(composer).strip():
+                            user_key = fresh[0]['key']
+                            self.last_submission = {'request_id': request_id, 'user_key': user_key,
+                                                    'committed': True, 'send_attempts': send_attempt}
+                            if on_submitted is not None:
+                                outcome = on_submitted()
+                                if inspect.isawaitable(outcome):
+                                    await outcome
+                            break
+                        await asyncio.sleep(self.config.poll_interval)
+                except BaseException as exc:
+                    last_error = exc
+                    if user_key is not None:
+                        self._delivery_uncertain = True
+                        raise SubmissionAmbiguousError('Message was delivered, but its local submission callback failed. Reconcile the counter before continuing.') from exc
                     if isinstance(exc, (KeyboardInterrupt, asyncio.CancelledError)):
+                        self._delivery_uncertain = True
+                        await self.diagnostics('ambiguous_submission')
                         raise
-                    raise SubmissionAmbiguousError('Delivery could not be committed safely after the Send attempt. Reconciliation is required; no resend was attempted.') from exc
-                # Callback failure after proven send is still not a retryable delivery.
+                if user_key is not None:
+                    break
+                if send_attempt == 1:
+                    try:
+                        retry_button = await self._verified_unsent_retry_control(text, request_id, old_users)
+                    except Exception as exc:
+                        last_error = last_error or exc
+                        retry_button = None
+                    if retry_button is not None:
+                        self.last_submission = {'request_id': request_id, 'committed': False,
+                                                'send_attempted': True, 'send_attempts': 1,
+                                                'verified_not_sent': True}
+                        await self._feedback({'type': 'progress', 'request_id': request_id,
+                                              'message': 'Copilot kept the exact request unsent. The page confirms it is still in the composer, so I am retrying Send once.'})
+                        button = retry_button
+                        continue
                 self._delivery_uncertain = True
-                raise SubmissionAmbiguousError('Message was delivered, but its local submission callback failed. Reconcile the counter before continuing.') from exc
-            deadline = time.monotonic() + self.config.response_timeout
+                await self.diagnostics('ambiguous_submission')
+                raise SubmissionAmbiguousError('Delivery could not be committed safely after the Send attempt. Reconciliation is required; no resend was attempted.') from last_error
+            started = time.monotonic()
+            overall_deadline = started + getattr(self.config, 'response_max_duration', self.config.response_timeout)
+            idle_deadline = min(overall_deadline, started + self.config.response_timeout)
             previous = ''
             stable = 0
+            previous_activity = None
+            progress_seen = set()
             await self._feedback({'type':'generation', 'request_id':request_id, 'message':'Waiting for Copilot to render its reply.'})
             streamed_candidate = ''
             generation_observed = False
             invalid_stable = 0
             scrolled_for_tail = False
             try:
-                while time.monotonic() < deadline:
+                while time.monotonic() < min(overall_deadline, idle_deadline):
                     if any(host in self.page.url for host in ('login.microsoftonline.com', 'login.live.com')):
                         raise CaptureTimeoutError('Authentication interrupted a committed request; do not resend automatically.')
                     messages = await self._evaluate(_MESSAGE_SNAPSHOT)
@@ -1142,11 +1414,27 @@ class BrowserAdapter:
                     if stop_present and not generation_observed:
                         generation_observed = True
                         await self._feedback({'type':'generation','request_id':request_id,'message':'Copilot is generating a response.'})
+                    interim = public_progress(messages, user_key, request_id)
+                    for item in interim:
+                        identity = (item['key'], item['text'])
+                        if identity not in progress_seen:
+                            progress_seen.add(identity)
+                            await self._feedback({'type':'progress', 'request_id':request_id,
+                                                  'message':item['text'][:1000]})
                     if candidate and candidate != streamed_candidate:
                         streamed_candidate = candidate
                         await self._feedback({'type':'candidate','request_id':request_id,'raw':candidate,
-                                              'generation_ended':not stop_present and (generation_observed or send_ready)})
-                    generation_ended = not stop_present and (generation_observed or send_ready)
+                                              'generation_ended':generation_observed and not stop_present})
+                    generation_ended = generation_observed and not stop_present
+                    activity = (candidate, tuple((item['key'], item['text']) for item in interim))
+                    if stop_present:
+                        # Copilot can spend several minutes reasoning without
+                        # changing rendered text. Its visible loading/stop state
+                        # is active progress, so wait for the overall deadline.
+                        idle_deadline = min(overall_deadline, time.monotonic() + self.config.response_timeout)
+                    elif activity != previous_activity:
+                        idle_deadline = min(overall_deadline, time.monotonic() + self.config.response_timeout)
+                    previous_activity = activity
                     if candidate and len(candidate) > self.config.max_capture_chars:
                         raise CaptureTimeoutError('The rendered response exceeded max_capture_chars; no partial response was accepted.')
                     # Never invent markers around chat text. A finished malformed reply
@@ -1184,8 +1472,10 @@ class BrowserAdapter:
                     if invalid_stable >= max(4, self.config.capture_stable_samples + 2):
                         return candidate
                     await asyncio.sleep(self.config.poll_interval)
+                reason = ('the overall response time limit was reached' if time.monotonic() >= overall_deadline
+                          else 'visible response progress stopped for the inactivity limit')
                 raise CaptureTimeoutError(
-                    'Copilot did not provide a current-turn chat response before the capture limit. '
+                    'Copilot did not provide a current-turn chat response because ' + reason + '. '
                     'No local action ran for this reply; the committed message was not resent.')
             except Exception as exc:
                 await self.diagnostics('capture')

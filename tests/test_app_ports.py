@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from copilot_agent.app import choose_browser_endpoint
 from copilot_agent.reused_browser import EndpointError
@@ -134,6 +134,44 @@ class BrowserEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(9666, config.debug_port)
         get_version.assert_called_once_with('http://127.0.0.1:9666')
         self.assertEqual(9666, settings['debug_ports']['vdi-synthetic'])
+
+    async def test_explicit_port_uses_discovered_profile_for_safe_live_edge_attachment(self):
+        profile = Path('actual-live-edge-profile')
+        payload = {'Browser': 'Edg/synthetic',
+                   'webSocketDebuggerUrl': 'ws://127.0.0.1:9460/devtools/browser/test'}
+        config, sockets, get_version, endpoint, owner = await self.exercise(
+            self.config(9460), {}, explicit_port=9460, busy=[9460],
+            payload=lambda url: payload if url.endswith(':9460') else None,
+            discovered=[{'port': 9460, 'profile': profile}])
+        self.assertTrue(config.attach_existing)
+        self.assertTrue(config._discovered_edge_endpoint)
+        self.assertEqual(profile, config.profile_dir)
+        self.assertEqual(9460, config.debug_port)
+        endpoint.assert_called_once_with('http://127.0.0.1:9460', payload)
+        owner.assert_not_called()
+
+    async def test_explicit_port_can_prove_edge_owner_when_process_enumeration_is_unavailable(self):
+        profile = Path('native-owner-profile')
+        payload = {'Browser': 'Edg/synthetic',
+                   'webSocketDebuggerUrl': 'ws://127.0.0.1:9460/devtools/browser/test'}
+        sockets = FakeSockets([9460])
+        config = self.config(9460)
+        with patch('copilot_agent.app.machine_key', return_value='vdi-synthetic'), \
+             patch('copilot_agent.app.system'), \
+             patch('copilot_agent.app.socket', SimpleNamespace(socket=sockets.socket)), \
+             patch('copilot_agent.app.edge.discover_edge_debugging_endpoints', return_value=[]), \
+             patch('copilot_agent.app.edge.get_cdp_version', return_value=payload), \
+             patch('copilot_agent.app.edge.validate_endpoint') as validate_endpoint, \
+             patch('copilot_agent.app.edge.validate_edge_listener', side_effect=[profile, profile]) as listener, \
+             patch('copilot_agent.app.edge.validate_profile_ownership') as validate_owner:
+            result = await choose_browser_endpoint(config, SimpleNamespace(port=9460), {})
+        self.assertTrue(result.attach_existing)
+        self.assertTrue(result._discovered_edge_endpoint)
+        self.assertEqual(profile, result.profile_dir)
+        self.assertEqual(9460, result.debug_port)
+        self.assertEqual([call(9460), call(9460, profile)], listener.call_args_list)
+        validate_endpoint.assert_called_once_with('http://127.0.0.1:9460', payload)
+        validate_owner.assert_not_called()
 
     async def test_invalid_remembered_port_is_ignored(self):
         for value in (True, '9555', -1, 70000):

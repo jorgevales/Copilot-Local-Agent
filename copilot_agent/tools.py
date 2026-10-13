@@ -159,7 +159,7 @@ SPECS = {
     "ocr.image": (obj(PATH), "user_approval", "Check a local image; OCR requires an explicitly available integrated image capability."),
     "created.snapshot": (obj({}), "read_only", "When explicitly enabled, record a baseline of files in the user-configured Created directory. Otherwise report disabled without filesystem access."),
     "created.wait": (obj({"baseline_id":S,"pattern":S,"expected_names":{"type":"array","items":S,"maxItems":100}},[]), "read_only", "When explicitly enabled, wait for stable readable new or changed files in the configured Created directory. Report disabled without filesystem access otherwise."),
-    "copilot.download": (obj({"expected_name":S,"link_text":S,"expected_sha256":S},["expected_name"]), "user_approval", "Download one real file link in this exact Copilot response. Inspect Edge download settings first; save and verify an exclusive local artifact. Plaintext and sandbox links are not delivery."),
+    "copilot.download": (obj({"expected_name":S,"link_text":S,"expected_sha256":S},["expected_name","link_text"]), "user_approval", "Download one real clickable artifact link in this exact Copilot response. Set link_text to its exact visible label and expected_name to a plain basename. Set expected_sha256 only when independently known. Inspect Edge settings without changing them; use the approved staging path or verified browser download event. Plaintext and sandbox links are not delivery."),
     "archives.inspect": (obj(PATH), "read_only", "Inspect a bounded ZIP manifest, archive SHA-256 and native Office container type without extracting."),
     "archives.extract": (obj({"path":S,"destination":S,"expected_files":{"type":"array","items":S,"maxItems":1000},"expected_sha256":S},["path","destination","expected_sha256"]), "user_approval", "Extract a reviewed SHA-256-bound ZIP exclusively inside allowed roots; preflight paths and verify all files without executing code. Preserve original and partial outputs."),
     "automation.inspect": (obj({"path":S,"expected_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}},["path"]), "read_only", "Validate a complete automation package ZIP, its manifest, file hashes, tool versions, stage graph, declared capabilities and resource limits. Does not execute or extract package code."),
@@ -201,8 +201,27 @@ def configured_path_policy(config, session_dir):
 
 def tool_path_policy(name, context):
     policy = context.get('policy') or configured_path_policy(context.get('config', {}), context['session_dir'])
+    config = context.get('config', {})
+    proof_workspace = config_value(config, '_proof_file_workspace')
+    if (config_value(config, '_automation_test_mode', False) and proof_workspace
+            and (name.startswith('files.') or name == 'system.disk')):
+        # The live package proof keeps downloaded ZIPs and evidence outside the
+        # per-run workspace. Ordinary file tools may operate only in this run.
+        profile = config_value(config, 'profile_dir')
+        return PathPolicy([proof_workspace], excluded_roots=[profile] if profile else [])
     grant = context.get('local_navigation_grant')
     if (name.startswith('files.') or name == 'system.disk') and isinstance(grant, SessionNavigationGrant):
+        config = context.get('config', {})
+        isolated_scoped = (config_value(config, '_automation_test_mode', False)
+                           and name in {'files.list', 'files.exists', 'files.metadata',
+                                        'files.read', 'files.hash', 'system.disk',
+                                        'files.create', 'files.append', 'files.copy',
+                                        'files.mkdir', 'files.transfer_to_copilot'})
+        if isolated_scoped:
+            # The proof harness binds PathPolicy to its exact isolated
+            # workspace. Keep every file operation there without granting
+            # broad navigation; state-changing tools retain their approvals.
+            return policy
         return SessionPathPolicy(policy, grant)
     return policy
 
@@ -210,9 +229,14 @@ def tool_path_policy(name, context):
 def _write_target(name, args, policy, context):
     key = 'destination' if name == 'files.copy' else 'path'
     value = args[key]
-    # All agent-owned file mutations are restricted to the current S: mapping,
-    # including when the one-session navigation grant is active.
+    # Outside the one-shot isolated proof mode, agent-owned file mutations
+    # remain restricted to the current S: mapping.
     profile = config_value(context.get('config', {}), 'profile_dir')
+    if config_value(context.get('config', {}), '_automation_test_mode', False):
+        # The isolated proof config binds PathPolicy to its single workspace.
+        # Keep normal approval and exclusive-create checks while allowing the
+        # proof run to produce local files without a general navigation grant.
+        return policy.resolve(value), False
     if isinstance(policy, SessionPathPolicy):
         checked = policy.resolve(value)  # Retain the run's one-time navigation grant.
         target = resolve_s_drive_output(str(checked), excluded_roots=[profile] if profile else [])
@@ -250,7 +274,7 @@ class ToolRegistry:
         if name == "operation.reconcile": examples = [{"arguments":{"call_id":"prior-knowledge-save-id"}}]
         if name == 'permissions.grant':
             examples = []  # A synthetic schema example cannot represent reviewed customer identity evidence.
-        if name == "copilot.download": examples = [{"arguments":{"expected_name":"package.zip"}}]
+        if name == "copilot.download": examples = [{"arguments":{"expected_name":"package.zip","link_text":"Download package.zip"}}]
         if name == "archives.extract": examples = [{"arguments":{"path":"package.zip","destination":"delivered-project","expected_sha256":"0"*64,"expected_files":["README.md"]}}]
         if name in KNOWLEDGE_EXAMPLES: examples = [{'arguments': KNOWLEDGE_EXAMPLES[name]}]
         if name in DOCUMENT_EXAMPLES: examples = [{'arguments': DOCUMENT_EXAMPLES[name]}]
@@ -406,6 +430,54 @@ class ToolRegistry:
             errors=validate_schema(value,self.definition(value["tool"])["output_schema"])
             if errors: raise ValueError("Tool result violates output schema: " + "; ".join(errors[:3]))
         limit=min(12000,max(1000,config_value(context.get("config",{}),"max_output_chars",12000)))
+        if value.get("tool") == "automation.inspect":
+            # Package review is the user's decision record. Keep every checked
+            # item and every failure together; the general private-result
+            # projection below would otherwise discard all but three entries.
+            source = value.get("result", {})
+            review = source.get("review", {}) if isinstance(source, dict) else {}
+            if isinstance(review, dict):
+                checks = []
+                for item in review.get("checks", []):
+                    if not isinstance(item, dict):
+                        continue
+                    checks.append({"item": str(item.get("item", "Package check"))[:120],
+                                   "status": item.get("status", "not_checked")})
+                failures = []
+                for item in review.get("failures", []):
+                    if not isinstance(item, dict):
+                        continue
+                    failures.append({"item": str(item.get("item", "Package check"))[:120],
+                                     "detail": str(item.get("detail", "The check did not pass."))[:400],
+                                     "next_step": str(item.get("next_step", "Correct this issue and deliver a new ZIP."))[:260]})
+                compact_review = {"status": review.get("status", "failed"),
+                                  "summary": str(review.get("summary", "Package review finished."))[:500],
+                                  "archive_sha256": review.get("archive_sha256"),
+                                  "checks": checks, "failures": failures,
+                                  "not_checked_count": review.get("not_checked_count", 0),
+                                  "future_review_options": [str(item)[:400] for item in review.get("future_review_options", [])[:4]]}
+                compact_result = {key: source[key] for key in (
+                    "status", "archive", "archive_sha256", "archive_bytes", "file_count",
+                    "manifest_sha256") if key in source}
+                capabilities = source.get("capabilities")
+                if isinstance(capabilities, dict):
+                    compact_result["capability_counts"] = {
+                        key: len(items) if isinstance(items, list) else bool(items)
+                        for key, items in capabilities.items()}
+                outputs = source.get("expected_outputs")
+                if isinstance(outputs, list):
+                    compact_result["expected_output_count"] = len(outputs)
+                compact_result["review"] = compact_review
+                stages = source.get("stages", [])
+                if isinstance(stages, list):
+                    compact_result["stage_count"] = len(stages)
+                    compact_result["stage_ids"] = [str(item.get("id", ""))[:100]
+                                                   for item in stages if isinstance(item, dict)][:100]
+                bounded = {"ok": value.get("ok", False), "tool": "automation.inspect",
+                           "result": compact_result}
+                if value.get("error"):
+                    bounded["error"] = value["error"]
+                return bounded
         encoded=json.dumps(value,ensure_ascii=False,default=str)
         if len(encoded)<=limit: return value
         if value.get('tool') in DISCOVERY_SPECS or value.get('tool') in DISCOVERY_KNOWLEDGE_SPECS:
@@ -464,9 +536,11 @@ class ToolRegistry:
             context['discovery_effects_started'] = False
         try:
             definition=self.definition(name)
-            self.validate_call(name,args,context)
+            preflight_result = self.validate_call(name,args,context)
             if definition["approval_policy"]!="read_only" and context.get("approved") is not True:
                 raise PolicyError("Explicit local approval is required")
+            if name == "automation.inspect":
+                return self._limit({"ok": True, "tool": name, "result": preflight_result}, context)
             config=context.get("config",{})
             roots=config_value(config,"allowed_roots",[context["session_dir"]])
             policy=tool_path_policy(name, context)
@@ -528,6 +602,12 @@ class ToolRegistry:
             return redact({'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {'status':'not_started','side_effects_uncertain':False} if certain_preflight else {},'error':{'code':'policy_denied','message':str(error)}})
         except ReconciliationRequired as error: return {"ok":False,"tool":name,"result":{"status":"uncertain" if error.side_effects_uncertain else "not_started","side_effects_uncertain":error.side_effects_uncertain},"error":{"code":"reconciliation_conflict","message":str(error)}}
         except (ValueError,TypeError) as error:
+            review = getattr(error, "report", None)
+            if name == "automation.inspect" and isinstance(review, dict):
+                return self._limit({"ok": False, "tool": name, "result": {"review": review,
+                                    "status": review.get("status", "failed")},
+                                    "error": {"code": "package_review_failed",
+                                              "message": review.get("summary", str(error))}}, context)
             return redact({'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {},'error':{'code':'invalid_arguments','message':str(error)}})
         except asyncio.TimeoutError:
             if name in {'files.create','files.mkdir','files.append','files.copy'} and not context.get('filesystem_effect_started'):

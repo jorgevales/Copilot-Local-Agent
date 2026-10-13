@@ -158,6 +158,8 @@ def delivery_instruction(user_text: str) -> str:
         packaging = 'Generate the requested non-Office file as an actual downloadable UI artifact. If only plaintext, a code block or a sandbox reference is available, provide a downloadable ZIP containing that same file instead.'
     return (packaging + names + ' Keep one strict JSON response envelope. Put one actual clickable Markdown artifact download link AFTER '
             '<<<COPILOT_AGENT_V1_END>>>, outside the JSON object; a URL inside user_response is not a clickable anchor. '
+            'In the same response, request copilot.download with expected_name and link_text equal to the exact visible text of that link. '
+            'Include expected_sha256 only when you computed or independently verified it. '
             'Use only an actual available artifact link; do not invent a URL/hash or claim a sandbox path is delivery. '
             'Local download, inspection and extraction remain policy-controlled; do not execute delivered code. '
             'If artifact creation is unavailable, report it honestly without expanding the task.')

@@ -28,6 +28,37 @@ def operation_domains(name: str) -> frozenset[str]:
     return frozenset({'global'})
 
 
+def latest_committed_request_id(state) -> str | None:
+    """Return the most recent outbound request confirmed in the session ledger."""
+    outbound = [message for message in state.data.get('messages', [])
+                if message.get('role') == 'copilot_outbound' and message.get('request_id')]
+    committed_count = state.data.get('message_count', 0)
+    if type(committed_count) is not int or committed_count < 1:
+        return None
+    committed = outbound[:committed_count]
+    return committed[-1]['request_id'] if committed else None
+
+
+def recoverable_capture_request_id(state) -> str | None:
+    """Return a confirmed, unanswered request that can be recaptured without resending."""
+    if state.data.get('status') not in {'capture_failed', 'closed', 'running', 'submitting'} or state.data.get('pending_submission'):
+        return None
+    outbound = [message for message in state.data.get('messages', [])
+                if message.get('role') == 'copilot_outbound' and message.get('request_id')]
+    committed_count = state.data.get('message_count')
+    if type(committed_count) is not int or committed_count < 1 or len(outbound) != committed_count:
+        return None
+    request_id = outbound[-1]['request_id']
+    if any(message.get('role') == 'copilot' and message.get('request_id') == request_id
+           for message in state.data.get('messages', [])):
+        return None
+    # A raw reply may already be saved without its validated response after a
+    # crash. Recapture that committed turn; raw evidence is recorded idempotently.
+    # The outbound record and count are saved in one atomic session snapshot.
+    # The event log is secondary evidence and may lag that snapshot after a crash.
+    return request_id
+
+
 class SessionState:
     def __init__(self, directory: Path, resume: bool = False):
         self.directory = Path(directory)
@@ -71,6 +102,12 @@ class SessionState:
         if data.get('website_private'):
             from .web_privacy import private_session_snapshot
             data = private_session_snapshot(data)
+            pending = data.get('pending_submission')
+            if isinstance(pending, dict):
+                # Customer content can exceed credential patterns; a private
+                # session retains only send identity and hashes on disk.
+                data['pending_submission'] = {key: value for key, value in pending.items()
+                                              if key != 'text'}
         write_json(self.path, redact(data))
 
     def event(self, event_type: str, **details):
@@ -91,26 +128,64 @@ class SessionState:
     def begin_submission(self, request_id: str, text: str):
         if self.data['pending_submission']:
             raise RuntimeError('Previous submission has uncertain delivery; reconcile first')
-        self.data['pending_submission'] = {'request_id': request_id, 'ordinal': self.message_count + 1, 'text_hash': hashlib.sha256(text.encode()).hexdigest()}
+        last_unsent = self.data.get('last_reconciled_unsent')
+        if last_unsent and last_unsent.get('request_id') != request_id:
+            self.data['last_reconciled_unsent'] = None
+        safe_text = redact(text)
+        self.data['pending_submission'] = {'request_id': request_id, 'ordinal': self.message_count + 1,
+                                           'text_hash': hashlib.sha256(text.encode()).hexdigest(),
+                                           'redacted_text_hash': hashlib.sha256(safe_text.encode()).hexdigest(),
+                                           'text_bytes': len(text.encode()), 'text': safe_text}
         self.save()
 
-    def confirm_submission(self, request_id: str):
+    def confirm_submission(self, request_id: str, *, attachments=(), findings_path=None):
         pending = self.data['pending_submission']
         if not pending or pending['request_id'] != request_id:
             raise RuntimeError('Submission identity does not match persisted intent')
-        self.data['message_count'] = pending['ordinal']
+        ordinal = pending['ordinal']
+        outbound = [message for message in self.data['messages']
+                    if message.get('role') == 'copilot_outbound' and message.get('request_id') == request_id]
+        if len(outbound) > 1:
+            raise RuntimeError('Submission has duplicate outbound records')
+        if not outbound:
+            text = pending.get('text')
+            if isinstance(text, str):
+                expected = pending.get('redacted_text_hash', pending['text_hash'])
+                if hashlib.sha256(text.encode()).hexdigest() != expected:
+                    raise RuntimeError('Confirmed submission has no matching saved text')
+            elif self.data.get('website_private') and isinstance(pending.get('text_bytes'), int):
+                text = {'content_sha256': pending['text_hash'],
+                        'content_bytes': pending['text_bytes'], 'website_content_omitted': True}
+            else:
+                raise RuntimeError('Confirmed submission has no matching saved text')
+            self.data['messages'].append(redact({'role': 'copilot_outbound', 'content': text,
+                                                  'timestamp': now(), 'request_id': request_id,
+                                                  'ordinal': ordinal}))
+        for entry in attachments:
+            record = dict(entry, ordinal=ordinal)
+            self.data['attachments'].append(record)
+            if findings_path is not None and entry.get('path') == str(findings_path):
+                self.data['findings_sync'].append(record)
+        self.data['message_count'] = ordinal
         self.data['pending_submission'] = None
-        self.event('message_submitted', request_id=request_id, ordinal=self.message_count)
+        self.data['last_reconciled_unsent'] = None
         self.save()
+        self.event('message_submitted', request_id=request_id, ordinal=ordinal)
 
     def reconcile_submission(self, submitted: bool):
         pending = self.data['pending_submission']
         if not pending:
             return
         if submitted:
+            # Persist the recapture state in the same snapshot as the newly
+            # confirmed outbound record. A crash cannot strand it as ready.
+            self.data['status'] = 'capture_failed'
             self.confirm_submission(pending['request_id'])
         else:
-            self.event('submission_reconciled_not_sent', request_id=pending['request_id'])
+            receipt = {'request_id': pending['request_id'], 'ordinal': pending['ordinal'],
+                       'text_hash': pending['text_hash']}
+            self.data['last_reconciled_unsent'] = receipt
+            self.event('submission_reconciled_not_sent', **receipt)
             self.data['pending_submission'] = None
             self.save()
 

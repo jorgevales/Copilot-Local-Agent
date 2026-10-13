@@ -2933,8 +2933,8 @@
     {
       "name": "copilot.download",
       "version": "1.0",
-      "description": "Download one real file link in this exact Copilot response. Inspect Edge download settings first; save and verify an exclusive local artifact. Plaintext and sandbox links are not delivery.",
-      "intended_use": "Download one real file link in this exact Copilot response. Inspect Edge download settings first; save and verify an exclusive local artifact. Plaintext and sandbox links are not delivery.",
+      "description": "Download one real clickable artifact link in this exact Copilot response. Set link_text to its exact visible label and expected_name to a plain basename. Set expected_sha256 only when independently known. Inspect Edge settings without changing them; use the approved staging path or verified browser download event. Plaintext and sandbox links are not delivery.",
+      "intended_use": "Download one real clickable artifact link in this exact Copilot response. Set link_text to its exact visible label and expected_name to a plain basename. Set expected_sha256 only when independently known. Inspect Edge settings without changing them; use the approved staging path or verified browser download event. Plaintext and sandbox links are not delivery.",
       "preconditions": [
         "Current validated tool call",
         "Configured filesystem/domain boundaries",
@@ -2967,7 +2967,8 @@
           }
         },
         "required": [
-          "expected_name"
+          "expected_name",
+          "link_text"
         ],
         "additionalProperties": false
       },

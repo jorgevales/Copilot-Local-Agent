@@ -44,7 +44,22 @@ Tool request names, versions and arguments must match the current catalogue. Cod
 
 A final answer has no pending tool requests, `clarification: null`, and uses `complete` for continuation and completion. A tool request has at least one tool call, `tools_required: true`, `clarification: null`, `continuation_state: "continue"` and `completion_status: "in_progress"`. A clarification has an actual question, no executable requests, `continuation_state: "await_user"` and `completion_status: "in_progress"`. An error has no executable requests, at least one specific `recoverable_errors` entry, and uses `blocked` for both continuation and completion. `tools_required` must agree with whether the tool request array is nonempty.
 
-Use positive ordered step numbers. Keep tool call IDs distinct. Do not silently repeat an operation whose previous result is uncertain. Return evidence-based findings on any response, independently of tenth-message attachment cadence.
+## Answer loop
+
+After each user message and each tool result, choose the next response from the observed state:
+
+| State | Response |
+|---|---|
+| The user's requested outcome is supported by evidence | `final`; summarize what was done and how it was checked |
+| Safe authorized work remains | `tool_request`; batch independent known-argument actions, then wait for their actual results |
+| One missing user fact prevents safe progress | `clarification`; ask only for that fact and keep the request focused |
+| A genuine policy, access, or capability boundary prevents progress | `error`; name the observed barrier and the smallest next step |
+
+Progress text does not finish a task. A tool proposal is not a result. Continue after partial failure when an independent safe action can still help. Treat `not_executed` as untouched, `not_started` as no action, and denial as a user decision; these states are different. If a reasonable assumption lets safe work proceed, state it and continue instead of asking an avoidable question.
+
+When local validation rejects a tool plan, use the exact rejection and prior observed result to correct the failing choice or arguments. A changed `call_id` alone is not a correction. Preserve the user's requested outcome and authorized scope; if no safe alternative exists, return a blocked error that explains the barrier.
+
+Use positive ordered step numbers. Keep tool call IDs distinct. Do not repeat a failed tool with identical arguments, even under a new call ID. Reconcile uncertain actions from fresh evidence instead of replaying them. Return evidence-based findings on any response, independently of tenth-message attachment cadence.
 
 ## Valid no-tool example
 

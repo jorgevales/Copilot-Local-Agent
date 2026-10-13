@@ -35,6 +35,7 @@ class Config:
     visible: bool = True
     startup_timeout: float = 120
     response_timeout: float = 180
+    response_max_duration: float = 900
     poll_interval: float = .5
     capture_stable_samples: int = 3
     max_capture_chars: int = 100000
@@ -154,9 +155,11 @@ class Config:
             raise ValueError('operation_reuse requires persistent_graph')
         if (self.persistent_graph or self.bounded_parallelism or self.local_recovery) and not self.manifest_path:
             raise ValueError('persistent_graph/bounded_parallelism/local_recovery require manifest_path')
-        for key in ('startup_timeout', 'response_timeout', 'poll_interval', 'tool_timeout', 'sync_timeout', 'sync_poll_interval', 'download_timeout'):
+        for key in ('startup_timeout', 'response_timeout', 'response_max_duration', 'poll_interval', 'tool_timeout', 'sync_timeout', 'sync_poll_interval', 'download_timeout'):
             if type(getattr(self, key)) not in (int, float) or not 0 < getattr(self, key) <= 3600:
                 raise ValueError(key + ' must be positive and at most 3600')
+        if self.response_max_duration < self.response_timeout:
+            raise ValueError('response_max_duration must be at least response_timeout')
         for key in ('capture_stable_samples', 'max_capture_chars', 'max_context_chars', 'max_output_chars', 'max_attachment_bytes', 'max_download_bytes'):
             if type(getattr(self, key)) is not int or getattr(self, key) < 1:
                 raise ValueError(key + ' must be a positive integer')

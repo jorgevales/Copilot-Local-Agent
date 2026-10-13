@@ -13,7 +13,7 @@ from copilot_agent.config import Config, PROJECT_ROOT
 from copilot_agent.findings import Findings
 from copilot_agent.prompts import PromptBuilder
 from copilot_agent.protocol import BEGIN, END, ProtocolError, parse_response, validate_schema
-from copilot_agent.state import SessionState, canonical_hash
+from copilot_agent.state import SessionState, canonical_hash, recoverable_capture_request_id
 
 
 def retained_root(prefix):
@@ -173,13 +173,100 @@ class StateAndPromptTests(unittest.TestCase):
             state.begin_submission('two', 'Do not duplicate uncertain send')
         with self.assertRaises(RuntimeError):
             state.confirm_submission('wrong')
+        pending = dict(state.data['pending_submission'])
         state.reconcile_submission(False)
         self.assertEqual(0, state.message_count)
+        self.assertEqual({'request_id': 'one', 'ordinal': 1, 'text_hash': pending['text_hash']},
+                         state.data['last_reconciled_unsent'])
         state.begin_submission('two', 'Verified submission')
+        self.assertIsNone(state.data['last_reconciled_unsent'])
         state.confirm_submission('two')
         self.assertEqual(1, state.message_count)
         with self.assertRaises(RuntimeError):
             state.confirm_submission('two')
+
+    def test_interrupted_committed_turn_is_recoverable_until_reply_is_validated(self):
+        state = SessionState(retained_root('capture-recovery-'))
+        state.begin_submission('committed-request', 'Synthetic request')
+        state.message('copilot_outbound', {'content_sha256': 'a' * 64, 'content_bytes': 16},
+                      request_id='committed-request')
+        state.confirm_submission('committed-request')
+        state.data['status'] = 'submitting'
+        state.save()
+
+        self.assertEqual('committed-request', recoverable_capture_request_id(state))
+
+        state.message('copilot_raw', {'content_sha256': 'b' * 64, 'content_bytes': 18},
+                      request_id='committed-request')
+        self.assertEqual('committed-request', recoverable_capture_request_id(state))
+        state.message('copilot', {'response_type': 'final'}, request_id='committed-request')
+        self.assertIsNone(recoverable_capture_request_id(state))
+
+    def test_confirmed_send_survives_crash_before_event_without_duplicate_outbound(self):
+        state = SessionState(retained_root('confirmed-crash-'))
+        state.begin_submission('confirmed-once', 'Synthetic repair request')
+        state.data['status'] = 'submitting'
+        state.save()
+        original_event = state.event
+        def crash_after_snapshot(*args, **kwargs):
+            raise RuntimeError('synthetic crash after atomic session save')
+        state.event = crash_after_snapshot
+        with self.assertRaisesRegex(RuntimeError, 'synthetic crash'):
+            state.confirm_submission('confirmed-once')
+        state.event = original_event
+
+        resumed = SessionState(state.directory, resume=True)
+        self.assertEqual(1, resumed.message_count)
+        self.assertIsNone(resumed.data['pending_submission'])
+        outbound = [item for item in resumed.data['messages']
+                    if item['role'] == 'copilot_outbound']
+        self.assertEqual(1, len(outbound))
+        self.assertEqual('Synthetic repair request', outbound[0]['content'])
+        self.assertEqual('confirmed-once', recoverable_capture_request_id(resumed))
+        with self.assertRaises(RuntimeError):
+            resumed.confirm_submission('confirmed-once')
+        self.assertEqual(1, len([item for item in resumed.data['messages']
+                                 if item['role'] == 'copilot_outbound']))
+
+    def test_pending_submission_never_persists_unredacted_credential(self):
+        state = SessionState(retained_root('pending-privacy-'))
+        secret = 'password=synthetic-private-value'
+        state.begin_submission('sensitive-request', 'Synthetic request ' + secret)
+
+        persisted = state.path.read_text(encoding='utf-8')
+        self.assertNotIn(secret, persisted)
+        self.assertIn('[REDACTED]', persisted)
+        state.confirm_submission('sensitive-request')
+        outbound = [message for message in state.data['messages']
+                    if message['role'] == 'copilot_outbound'][-1]
+        self.assertNotIn(secret, outbound['content'])
+        self.assertIn('[REDACTED]', outbound['content'])
+
+    def test_private_pending_confirmation_after_restart_keeps_only_audit_evidence(self):
+        state = SessionState(retained_root('pending-private-'))
+        state.data['website_private'] = True
+        state.begin_submission('private-request', 'Synthetic confidential customer detail')
+        self.assertNotIn('confidential customer detail', state.path.read_text(encoding='utf-8'))
+
+        resumed = SessionState(state.directory, resume=True)
+        self.assertNotIn('text', resumed.data['pending_submission'])
+        resumed.reconcile_submission(True)
+
+        self.assertEqual('capture_failed', resumed.data['status'])
+        self.assertEqual('private-request', recoverable_capture_request_id(resumed))
+        self.assertEqual(1, resumed.message_count)
+        outbound = [message for message in resumed.data['messages']
+                    if message['role'] == 'copilot_outbound'][-1]
+        self.assertTrue(outbound['content']['website_content_omitted'])
+        self.assertNotIn('confidential customer detail', resumed.path.read_text(encoding='utf-8'))
+
+    def test_unconfirmed_interrupted_submission_is_not_recoverable(self):
+        state = SessionState(retained_root('capture-recovery-pending-'))
+        state.begin_submission('pending-request', 'Synthetic request')
+        state.message('copilot_outbound', {'content_sha256': 'a' * 64, 'content_bytes': 16},
+                      request_id='pending-request')
+
+        self.assertIsNone(recoverable_capture_request_id(state))
 
     def test_resume_records_uncertainty_and_clears_grants(self):
         root = retained_root('resume-')
@@ -225,6 +312,26 @@ class StateAndPromptTests(unittest.TestCase):
         self.assertIn('Keep prior verified outcome.', reference)
         self.assertIn('Which synthetic variant?', reference)
         self.assertIn('Never delete files', reference)
+
+    def test_prompt_guides_completion_and_package_review_recovery(self):
+        root, config, state, registry = make_fixture('answering-guidance-')
+        builder = PromptBuilder(config, registry, state, Findings(state.directory))
+        text, _ = builder.build('user_turn', 'Deliver and validate a package.', 'answering-request')
+        message = json.loads(text)
+        self.assertIn('Choose response_type by outcome', message['response_instruction'])
+        self.assertIn('Ask one concise question only when a missing fact blocks safe progress',
+                      message['execution_strategy']['answering'])
+        package_guidance = message['execution_strategy']['automation_packages']
+        self.assertIn('local orchestrator automatically runs automation.inspect', package_guidance)
+        self.assertIn('Do not use local files tools, Code Runner or archives.extract', package_guidance)
+        self.assertIn('deliver a fresh ZIP', package_guidance)
+        self.assertIn("tests in Copilot's own cloud sandbox", package_guidance)
+        self.assertIn('No live environment test is expected', package_guidance)
+        self.assertIn('automatically runs automation.inspect', package_guidance)
+        self.assertIn('do not request a second review', package_guidance)
+        self.assertIn('passes inspection and receives local approval', package_guidance)
+        self.assertIn('local tools only download, review and run it under approval',
+                      message['execution_strategy']['delivery'])
 
     def test_reference_snapshot_retains_approval_and_pending_safety_state(self):
         root, config, state, registry = make_fixture('safety-context-')
@@ -321,8 +428,14 @@ class StateAndPromptTests(unittest.TestCase):
 
     def test_initial_guidance_catalogue_and_schema_fit_observed_attachment_capacity(self):
         root, config, state, registry = make_fixture('initial-attachments-')
+        config._automation_test_mode = True
         builder = PromptBuilder(config, registry, state, Findings(state.directory))
         text, attachments = builder.build('initialize', 'Synthetic initialization.', 'initial-request')
+        initialization = json.loads(text)
+        self.assertEqual({'purpose', 'folder_name', 'project_root', 'filesystem_path', 'policy'},
+                         set(initialization['agent_storage']))
+        self.assertEqual(str(root), initialization['agent_storage']['filesystem_path'])
+        self.assertNotIn('VDI', text)
         names = [path.name for path in attachments]
         self.assertEqual(8, len(names))
         self.assertEqual([path.name for path in builder.guidance[:6]], names[:6])
@@ -343,6 +456,23 @@ class StateAndPromptTests(unittest.TestCase):
         self.assertIn(builder.findings.attachment, attachments)
         self.assertIn(builder.context_file, attachments)
         self.assertLessEqual(len(attachments), 20)
+
+    def test_production_prompt_shares_configured_s_and_unc_storage_paths_without_vdi_steps(self):
+        root, config, state, registry = make_fixture('production-storage-prompt-')
+        config._s_storage_verified = True
+        s_path = r'S:\Projects\Discoveries knowledge'
+        unc_path = r'\\fileserver\teams\Projects\Discoveries knowledge'
+        with patch('copilot_agent.storage.discoveries_storage_paths',
+                   return_value={'s_path': s_path, 'unc_path': unc_path}):
+            builder = PromptBuilder(config, registry, state, Findings(state.directory))
+            text, _ = builder.build('initialize', 'Synthetic initialization.', 'storage-path-request')
+        message = json.loads(text)
+        self.assertEqual(s_path, message['agent_storage']['mapped_s_path'])
+        self.assertEqual(unc_path, message['agent_storage']['resolved_filesystem_path'])
+        constraints = '\n'.join(message['context']['constraints'])
+        self.assertIn(s_path, constraints)
+        self.assertIn(unc_path, constraints)
+        self.assertNotIn('VDI', text)
 
     def test_catalogue_advertises_effective_code_runner_timeout_limit(self):
         root, config, state, registry = make_fixture('runner-timeout-catalogue-')

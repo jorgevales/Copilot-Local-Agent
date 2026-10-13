@@ -9,17 +9,17 @@ import socket
 import sys
 from pathlib import Path
 import uuid
-from .browser import BrowserAdapter, CaptureTimeoutError, model_rank
+from .browser import (BrowserAdapter, BrowserUIError, CaptureTimeoutError,
+                      SubmissionAmbiguousError, SubmissionNotSentError, model_rank)
 from .config import Config
 from .knowledge_health import check_knowledge_health
 from .orchestrator import Orchestrator
-from .state import SessionState
+from .state import SessionState, latest_committed_request_id, recoverable_capture_request_id
 from .tools import ToolRegistry
 from .feedback import Feedback
 from .file_picker import select_files
 from .attachments import MAX_USER_FILES
 from .diagnostics import DiagnosticReports
-from .browser import BrowserUIError
 from .protocol import ProtocolError
 from .policy import PolicyError, mapped_s_drive_root
 from .storage import default_local_storage, machine_key, read_user_settings, save_user_settings, validate_user_storage_directory
@@ -147,7 +147,9 @@ async def choose_browser_endpoint(config, args, settings):
     key = machine_key()
     remembered = debug_ports.get(key)
     candidates = []
-    discovered = [] if getattr(args, 'port', None) else await asyncio.to_thread(edge.discover_edge_debugging_endpoints)
+    # Discover ownership even for an operator-specified port. Skipping process
+    # discovery there loses the real Edge profile and makes safe attachment fail.
+    discovered = await asyncio.to_thread(edge.discover_edge_debugging_endpoints)
     discovered_by_port = {item['port']: item for item in discovered}
     explicit_port = getattr(args, 'port', None)
     if not explicit_port:
@@ -172,6 +174,12 @@ async def choose_browser_endpoint(config, args, settings):
             try:
                 edge.validate_endpoint(endpoint, payload)
                 discovered_item = discovered_by_port.get(port)
+                if discovered_item is None and explicit_port == port:
+                    # WMI/CIM process enumeration can be unavailable to a
+                    # standard user. For the exact port they supplied, prove
+                    # the listener directly from its owning Windows process.
+                    profile = await asyncio.to_thread(edge.validate_edge_listener, port)
+                    discovered_item = {'port': port, 'profile': profile}
                 if discovered_item is not None:
                     await asyncio.to_thread(edge.validate_edge_listener, port, discovered_item['profile'])
                 else:
@@ -218,8 +226,11 @@ async def start_new_session(config, previous, model_label, registry=None):
     owned_process = getattr(previous.browser, '_launched_process', None)
     await previous.close(preserve_browser_process=True)
     fresh_config = replace(config, attach_existing=True, model=model_label)
-    if hasattr(config, '_ui_upload_root'):
-        fresh_config._ui_upload_root = config._ui_upload_root
+    for name in ('_ui_upload_root', '_automation_test_mode', '_s_storage_verified',
+                 '_profile_explicit', '_configured_profile_dir', '_auto_s_drive_root',
+                 '_auto_local_drive_root'):
+        if hasattr(config, name):
+            setattr(fresh_config, name, getattr(config, name))
     fresh_config._local_navigation_confirmed = bool(getattr(config, '_local_navigation_confirmed', False))
     directory = config.runtime_dir / 'sessions' / uuid.uuid4().hex
     state = SessionState(directory)
@@ -227,7 +238,12 @@ async def start_new_session(config, previous, model_label, registry=None):
     browser._launched_process = owned_process
     engine = None
     try:
-        fresh_config._knowledge_capability = await asyncio.to_thread(check_knowledge_health, {'config': fresh_config})
+        if getattr(fresh_config, '_automation_test_mode', False):
+            fresh_config._knowledge_capability = {
+                'available': False,
+                'statement': 'Persistent knowledge is disabled in isolated proof mode; package execution uses its own exact review.'}
+        else:
+            fresh_config._knowledge_capability = await asyncio.to_thread(check_knowledge_health, {'config': fresh_config})
         state.data['knowledge_capability'] = fresh_config._knowledge_capability
         state.data['visible'] = True
         state.save()
@@ -271,7 +287,7 @@ def persist_runtime_settings(config, settings):
     return save_user_settings(config.storage_dir, settings)
 
 
-def configure_isolated_test_workspace(config, requested_path):
+def configure_isolated_test_workspace(config, requested_path, *, resume_session=None):
     """Enable the one-shot C: proof harness without weakening production S: policy."""
     proof_parent = (Path(config.root) / 'runtime' / 'proof-runs').resolve()
     target = Path(requested_path).expanduser().resolve()
@@ -279,7 +295,11 @@ def configure_isolated_test_workspace(config, requested_path):
             or target == proof_parent):
         raise ValueError('Isolated proof storage must be a new C: child of this project runtime/proof-runs folder.')
     if target.exists() and any(target.iterdir()):
-        raise ValueError('Isolated proof storage must be new or empty.')
+        resume_path = Path(resume_session).expanduser().resolve() if resume_session is not None else None
+        sessions_root = (target / 'runtime' / 'sessions').resolve()
+        if (resume_path is None or not resume_path.is_relative_to(sessions_root)
+                or not (resume_path / 'session.json').is_file()):
+            raise ValueError('Existing isolated proof storage can only be used to resume a session inside that workspace.')
     config.select_storage(target)
     config.knowledge_directory = target
     config._automation_test_mode = True
@@ -294,7 +314,7 @@ async def run(args):
     test_workspace = getattr(args, 'isolated_test_workspace', None)
     config = Config.load(args.config, storage_override=test_workspace)
     if test_workspace is not None:
-        test_workspace = configure_isolated_test_workspace(config, test_workspace)
+        test_workspace = configure_isolated_test_workspace(config, test_workspace, resume_session=args.resume)
         system('Isolated local proof mode: all agent storage and file roots are confined to ' + str(test_workspace))
     else:
         from .storage import discoveries_storage
@@ -324,7 +344,7 @@ async def run(args):
     settings = read_runtime_settings(config)
     if args.config is None and isinstance(settings.get('config'), dict):
         personal = settings['config']
-        allowed_keys = {'allowed_domains', 'allowed_roots', 'model', 'response_timeout', 'max_corrections', 'sync_timeout', 'max_delivery_retries', 'download_timeout', 'copilot_download_hosts'}
+        allowed_keys = {'allowed_domains', 'allowed_roots', 'model', 'response_timeout', 'response_max_duration', 'max_corrections', 'sync_timeout', 'max_delivery_retries', 'download_timeout', 'copilot_download_hosts'}
         for key in allowed_keys & personal.keys():
             setattr(config, key, personal[key])
         # Migrate the former two-attempt personal default to the production
@@ -361,7 +381,7 @@ async def run(args):
     await choose_edge(config, settings, ask, system, force=getattr(args, 'setup_only', False))
     settings['python_executable'] = sys.executable
     settings['config'] = {key: value for key, value in config.as_dict().items() if key in {
-        'allowed_domains', 'allowed_roots', 'model', 'response_timeout', 'max_corrections',
+        'allowed_domains', 'allowed_roots', 'model', 'response_timeout', 'response_max_duration', 'max_corrections',
         'sync_timeout', 'max_delivery_retries', 'download_timeout', 'copilot_download_hosts'}}
     settings['config']['allowed_roots'] = [str(Path(path).relative_to(config.storage_dir))
                                           if Path(path).is_relative_to(config.storage_dir) else path
@@ -428,7 +448,14 @@ async def run(args):
             if answer not in {'sent', 'not-sent'}:
                 return
             state.reconcile_submission(answer == 'sent')
-        await browser.start()
+        resume_existing = bool(args.resume and state.message_count > 0)
+        recovery_request_id = recoverable_capture_request_id(state) if resume_existing else None
+        resume_capture = bool(recovery_request_id)
+        if resume_capture and state.data.get('status') != 'capture_failed':
+            state.data['status'] = 'capture_failed'
+            state.save()
+        resume_request_id = latest_committed_request_id(state) if resume_existing else None
+        await browser.start(resume_request_id=resume_request_id)
         if _UI_ASK is None:
             from .terminal_input import TerminalInputBroker
             terminal_input = TerminalInputBroker()
@@ -440,6 +467,7 @@ async def run(args):
                                     event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT,
                                     steering_poll=_UI_STEERING_POLL,
                                     steering_complete=_UI_STEERING_COMPLETE)
+        orchestrator.initialized = resume_existing
         orchestrator.feedback.color=_TERMINAL.color
         globals()['_UI_PERMISSION_CONTEXT']=orchestrator.base_context
         # Use the single owned Copilot tab throughout startup. Opening and then
@@ -481,15 +509,55 @@ async def run(args):
                 raise ValueError('Model selection exhausted five attempts')
         if chosen['label'] != preferred['label']:
             await browser.select_model(chosen['label'])
-        await orchestrator.prepare_initialization()
+        if not resume_existing:
+            await orchestrator.prepare_initialization()
         settings['config']['model'] = chosen['label']
         persist_runtime_settings(config, settings)
         state.event('model_selected', label=chosen['label'], visible=True)
         if _UI_EVENT_SINK is not None:
             _UI_EVENT_SINK('model', {'name': chosen['label'], 'verified': True})
             _UI_EVENT_SINK('session', {'title': 'Copilot session ' + state.session_id[:8]})
-        await orchestrator.initialize()
-        await browser.verify_interaction_ready(chosen['label'])
+        if not resume_existing:
+            await orchestrator.initialize()
+        else:
+            system('Resuming the existing Copilot conversation; startup will not send another initialization message.')
+        if resume_capture:
+            system('Recovering the last committed response from the visible chat without resending its request.')
+            await orchestrator.recover_capture_failed_turn()
+        reconciled_unsent = state.data.get('last_reconciled_unsent') if resume_existing else None
+        if isinstance(reconciled_unsent, dict):
+            request_id = reconciled_unsent.get('request_id')
+            if reconciled_unsent.get('ordinal') != state.message_count + 1:
+                raise BrowserUIError('The reconciled unsent request is no longer the next conversation turn; no draft was sent.')
+            draft = await browser.read_reconciled_draft(request_id, reconciled_unsent.get('text_hash'))
+            system('Resuming the exact draft previously confirmed as not sent; its hash and chat state match.')
+            state.begin_submission(request_id, draft)
+            state.data['status'] = 'submitting'
+            state.save()
+            def committed_reconciled_draft():
+                state.confirm_submission(request_id)
+            try:
+                raw = await browser.exchange(draft, request_id, on_submitted=committed_reconciled_draft)
+            except SubmissionNotSentError:
+                state.reconcile_submission(False)
+                state.data['status'] = 'blocked'
+                state.save()
+                raise
+            except SubmissionAmbiguousError:
+                state.data['status'] = 'submission_uncertain'
+                state.event('submission_uncertain', request_id=request_id)
+                state.save()
+                raise
+            except CaptureTimeoutError:
+                state.data['status'] = 'capture_failed'
+                state.event('capture_failed', request_id=request_id)
+                state.save()
+                raise
+            await orchestrator.turn(
+                'Continue from the captured reply to the exact request already confirmed as not sent. Do not resend it.',
+                recovered_response=(raw, request_id))
+            resume_request_id = request_id
+        await browser.verify_interaction_ready(chosen['label'], request_id=resume_request_id)
         system('Type your request and press Enter. For files, type :attach to open Choose files, then type your request.')
         system('Commands: :new [first message], :attach, :files, :remove <number>, :clear, :status, :exit. While the agent is running, type steering normally or use :steer <text>; :attach opens the local picker and :attach "path with spaces" adds a file (up to 20).')
         pending_files = orchestrator.attachment_queue()

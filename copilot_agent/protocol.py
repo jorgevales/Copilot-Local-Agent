@@ -165,6 +165,42 @@ def parse_response(raw: str, session_id: str, request_id: str, registry=None, se
 
 
 def correction_message(exc: ProtocolError) -> str:
+    if exc.code == 'local_action_rejected':
+        instruction = (
+            'Your proposed local action failed a preflight check; no tool from that response ran. '
+            'Keep the user’s requested outcome and authorized scope. Use the specific rejection and prior tool result below '
+            'to change the rejected tool choice or arguments materially; changing only its call_id does not count. '
+            'Batch independent safe checks together. If no safe next action exists, return a blocked error naming the observed '
+            'barrier and the smallest next decision needed. Do not call this a JSON-format problem. '
+        )
+    elif exc.code == 'invalid_json':
+        instruction = (
+            'The response envelope JSON did not parse, so no local action ran. Use the reported line/character location '
+            'to check the nearby punctuation, then reissue the entire envelope with valid JSON. Keep script text as ordinary '
+            'string content. Escape embedded double quotes, backslashes and line breaks according to JSON rules; represent a line break '
+            'inside a string as the two-character backslash+n sequence. '
+            'Close every object and array and separate fields with commas. Preserve the intended action and scope; do not '
+            'encode the script to work around JSON quoting. '
+        )
+    elif any('link_text' in error for error in exc.errors):
+        instruction = (
+            'The copilot.download request is missing required link_text. Use the exact visible label of the real clickable '
+            'artifact link in this same assistant response, and keep expected_name as its plain filename. Put that link after '
+            'the END marker. Do not guess the label or use a prior-turn/local link. No download ran. '
+        )
+    else:
+        instruction = (
+            'Correct only the response-contract problems listed below while preserving the intended outcome and scope. '
+            'No local action from the rejected response ran. '
+        )
+    instruction += (
+        'Use the CURRENT session_id and request_id, exactly one complete envelope, the attached response schema, and one marker pair. '
+        'Put valid JSON as plain chat text BETWEEN the markers, without a Markdown code fence. '
+        'For a tool request, set response_type="tool_request", tools_required=true, continuation_state="continue", '
+        'completion_status="in_progress", clarification=null, and include the exact catalogue arguments. '
+        'For a finished answer, set response_type="final", leave tool_requests empty, and set both completion and continuation to "complete". '
+        'Escape backslashes in Windows paths or use forward slashes. Preserve script quotes. Findings may be proposed on any turn.'
+    )
     return json.dumps({'kind': 'protocol_correction', 'failure': exc.code, 'validation_errors': exc.errors,
-                       'instruction': 'Reissue the same decision for the CURRENT request_id, without executing or changing scope. Use the attached exact response schema, required fields and one marker pair. Put valid JSON as plain chat text BETWEEN the markers, without a Markdown code fence; escape backslashes in Windows paths or use forward slashes. Preserve script quotes and exact arguments. Findings may be proposed on any turn.',
+                       'instruction': instruction,
                        'required_fields': SCHEMA['required'], 'markers': [BEGIN, END]}, ensure_ascii=False)

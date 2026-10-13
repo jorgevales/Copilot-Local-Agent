@@ -236,6 +236,23 @@ class LocalPythonRunnerTests(unittest.TestCase):
         self.assertEqual(result["proposal_hash"], audit["prepared"]["proposal_hash"])
         self.assertEqual(sys.executable, result["interpreter"])
 
+    @unittest.skipUnless(os.name == "nt", "Windows CreateProcess working-directory limit")
+    def test_worker_starts_before_changing_into_long_approved_directory(self):
+        long_working = self.root.joinpath(*(f"segment_{index}_" + "x" * 42 for index in range(5)))
+        long_working.mkdir(parents=True)
+        self.assertGreater(len(str(long_working)), 260)
+        plan = self.plan(
+            "from pathlib import Path\nPath('result.txt').write_text('long-path-ok', encoding='utf-8')\n",
+            working_directory=str(long_working), create_paths=["result.txt"],
+            expected_outputs=["result.txt"], permissions=["create_files"],
+            imports=["pathlib"],
+            expected_effects=["Create result.txt inside the approved long working directory"])
+
+        result = self.run_plan(plan)
+
+        self.assertEqual("completed", result["status"], result)
+        self.assertEqual("long-path-ok", (long_working / "result.txt").read_text(encoding="utf-8"))
+
     def test_undeclared_import_file_scope_network_and_shell_fail_closed(self):
         with self.assertRaisesRegex(PolicyError, "undeclared import"):
             self.runner.prepare(self.plan("import os\n", imports=[]))
@@ -254,6 +271,23 @@ class LocalPythonRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(PolicyError, "preflight failed before approval"):
             self.runner.prepare(self.plan("import unavailable_synthetic_dependency\n",
                                           imports=["unavailable_synthetic_dependency"]))
+
+    def test_worker_rejects_undeclared_directory_and_link_mutations(self):
+        outside = self.root.parent / (self.root.name + "_outside")
+        target = self.root / "result.txt"
+        for operation in (
+                f"Path({str(outside)!r}).mkdir()",
+                f"Path({str(outside)!r}).symlink_to(Path({str(target)!r}))",
+                f"os.link({str(target)!r}, {str(outside)!r})"):
+            with self.subTest(operation=operation):
+                script = "import os\nfrom pathlib import Path\n" + operation + "\n"
+                plan = self.plan(script, imports=["os", "pathlib"], permissions=["create_files"],
+                                 expected_effects=["Reject mutation outside approved output root"])
+                result = self.run_plan(plan)
+                self.assertEqual("failed", result["status"], result)
+                expected_error = "unavailable" if "link" in operation else "outside the approved"
+                self.assertIn(expected_error, result["stderr"])
+                self.assertFalse(outside.exists())
 
     def test_registry_preflight_uses_the_active_timeout_limit(self):
         plan = self.plan("print('validated only')\n", timeout_seconds=20)

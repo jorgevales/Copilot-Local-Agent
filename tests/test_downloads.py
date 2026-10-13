@@ -1,12 +1,14 @@
 """Offline event/approval contracts; retained fixtures, no cleanup or live UI."""
 import copy
 import asyncio
+import base64
 import hashlib
 import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 import uuid
 
 from copilot_agent.downloads import DownloadError, DownloadService, _wait_for_completed_file, validate_download_args
@@ -95,6 +97,11 @@ class FakePage:
     async def evaluate(self, script, args=None):
         if self.error:
             return {'error':self.error}
+        if 'fetch(params.url)' in script:
+            if len(self.item.data) > args['max_bytes']:
+                return {'error':'artifact_size_invalid','size':len(self.item.data)}
+            return {'size':len(self.item.data),'mime_type':'application/zip',
+                    'base64':base64.b64encode(self.item.data).decode('ascii')}
         return {'user_key':1,'assistant_key':2,'links':copy.deepcopy(self.links)}
     def locator(self, selector):
         return FakeLocator(self)
@@ -201,6 +208,129 @@ class DownloadTests(unittest.IsolatedAsyncioTestCase):
                            dict(key=4,index=1,href=self.item.url,raw_href=self.item.url,label='B')]
         with self.assertRaises(DownloadError):
             await self.service.prepare({'expected_name':'report.zip'},'req-current')
+
+    async def test_download_link_gets_a_brief_settle_window_after_response(self):
+        evaluate = self.page.evaluate
+        attempts = 0
+        feedback = []
+
+        async def delayed_link(script, args=None):
+            nonlocal attempts
+            attempts += 1
+            if attempts < 3:
+                return {'error': 'assistant_anchor_unavailable'}
+            return await evaluate(script, args)
+
+        self.page.evaluate = delayed_link
+        self.service.feedback = feedback.append
+
+        binding = await self.service.prepare({'expected_name':'report.zip'}, 'req-current')
+
+        self.assertTrue(Path(binding['destination']).parent.is_relative_to(self.storage))
+        self.assertEqual(attempts, 3)
+        self.assertTrue(any('Waiting briefly' in message for message in feedback))
+
+    async def test_zip_prepare_waits_for_visible_stop_to_disappear_before_reading_link(self):
+        stop_states = iter((True, True, False))
+        probes = 0
+        link_reads = 0
+        original_evaluate = self.page.evaluate
+
+        async def stop_present():
+            nonlocal probes
+            probes += 1
+            return next(stop_states)
+
+        async def observe_link(script, args=None):
+            nonlocal link_reads
+            link_reads += 1
+            self.assertEqual(probes, 3)
+            return await original_evaluate(script, args)
+
+        self.browser._stop_present = stop_present
+        self.page.evaluate = observe_link
+
+        binding = await self.service.prepare({'expected_name':'report.zip'}, 'req-current')
+
+        self.assertEqual(probes, 3)
+        self.assertEqual(link_reads, 1)
+        self.assertEqual(binding['expected_name'], 'report.zip')
+
+    async def test_zip_link_present_immediately_after_stop_disappears(self):
+        stop_probes = 0
+        link_reads = 0
+        original_evaluate = self.page.evaluate
+
+        async def stop_absent():
+            nonlocal stop_probes
+            stop_probes += 1
+            return False
+
+        async def observe_link(script, args=None):
+            nonlocal link_reads
+            link_reads += 1
+            return await original_evaluate(script, args)
+
+        self.browser._stop_present = stop_absent
+        self.page.evaluate = observe_link
+
+        binding = await self.service.prepare({'expected_name':'report.zip'}, 'req-current')
+
+        self.assertEqual(stop_probes, 1)
+        self.assertEqual(link_reads, 1)
+        self.assertEqual(binding['expected_name'], 'report.zip')
+
+    async def test_zip_link_appears_during_bounded_follow_up_after_stop_disappears(self):
+        stop_states = iter((True, False))
+        probes = 0
+        link_reads = 0
+        original_evaluate = self.page.evaluate
+
+        async def stop_present():
+            nonlocal probes
+            probes += 1
+            return next(stop_states)
+
+        async def delayed_link(script, args=None):
+            nonlocal link_reads
+            link_reads += 1
+            self.assertEqual(probes, 2)
+            if link_reads < 3:
+                return {'user_key':1,'assistant_key':2,'links':[]}
+            return await original_evaluate(script, args)
+
+        self.browser._stop_present = stop_present
+        self.page.evaluate = delayed_link
+
+        binding = await self.service.prepare({'expected_name':'report.zip'}, 'req-current')
+
+        self.assertEqual(link_reads, 3)
+        self.assertEqual(binding['expected_name'], 'report.zip')
+
+    async def test_zip_without_link_after_stop_disappears_reports_recoverable_failure(self):
+        self.page.links = []
+        self.browser._stop_present = lambda: asyncio.sleep(0, result=False)
+
+        with patch('copilot_agent.downloads._ZIP_LINK_SETTLE_SECONDS', .04):
+            with self.assertRaises(DownloadError) as caught:
+                await self.service.prepare({'expected_name':'report.zip'}, 'req-current')
+
+        self.assertEqual(caught.exception.code, 'link_unavailable')
+        self.assertIn('no matching visible ZIP download link', str(caught.exception))
+        self.assertIn('fresh reply', str(caught.exception))
+        self.assertEqual(self.page.anchor.clicks, 0)
+
+    async def test_zip_link_follow_up_bounds_a_stalled_dom_read(self):
+        self.browser._stop_present = lambda: asyncio.sleep(0, result=False)
+        self.page.evaluate = lambda *args: asyncio.sleep(1)
+        started = asyncio.get_running_loop().time()
+
+        with patch('copilot_agent.downloads._ZIP_LINK_SETTLE_SECONDS', .04):
+            with self.assertRaises(DownloadError) as caught:
+                await self.service.prepare({'expected_name':'report.zip'}, 'req-current')
+
+        self.assertEqual(caught.exception.code, 'link_unavailable')
+        self.assertLess(asyncio.get_running_loop().time() - started, .5)
 
     async def test_prompt_setting_honored_then_completed_native_artifact_copied(self):
         self.context.prompt = True
@@ -343,17 +473,32 @@ class DownloadTests(unittest.IsolatedAsyncioTestCase):
         self.item.url = href or 'blob:https://m365.cloud.microsoft/523e6188-332c-4563-82db-544e3beaddc7'
         self.page.links[0].update(href=self.item.url,raw_href=self.item.url,download=download)
 
-    async def test_observed_same_origin_native_blob_event_verified(self):
+    async def test_observed_same_origin_native_blob_is_verified_without_edge_prompt(self):
         self.native_blob()
+        self.context.prompt = True
         args = {'expected_name':'report.zip'}
         binding = await self.service.prepare(args,'req-current')
         self.assertEqual(binding['source_scheme'],'blob')
         self.assertEqual(binding['source_host'],'m365.cloud.microsoft')
         self.assertNotIn('blob:',json.dumps(binding))
         report = await self.service.download(args,binding)
-        self.assertTrue(report['download_event_observed'])
-        self.assertEqual(self.page.anchor.clicks,1)
+        self.assertFalse(report['download_event_observed'])
+        self.assertTrue(report['same_origin_ui_blob_read'])
+        self.assertEqual(report['settings']['ask_before_download'],True)
+        self.assertEqual(self.page.anchor.clicks,0)
         self.assertTrue(Path(report['path']).is_file())
+        self.assertEqual(Path(report['path']).read_bytes(),self.item.data)
+
+    async def test_same_origin_blob_read_enforces_size_and_expected_hash_before_write(self):
+        self.native_blob()
+        self.config.max_download_bytes = 4
+        binding = await self.service.prepare({'expected_name':'report.zip'},'req-current')
+        with self.assertRaises(DownloadError) as caught:
+            await self.service.download({'expected_name':'report.zip'},binding)
+        self.assertEqual(caught.exception.code,'size_exceeded')
+        self.assertFalse(caught.exception.side_effects_uncertain)
+        self.assertFalse(Path(binding['destination']).exists())
+        self.assertEqual(self.page.anchor.clicks,0)
 
     async def test_native_blob_origin_uuid_and_download_name_are_mandatory(self):
         for href, name in (
@@ -381,16 +526,18 @@ class DownloadTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(caught.exception.side_effects_uncertain)
         self.assertEqual(self.page.anchor.clicks,0)
 
-    async def test_native_blob_event_must_match_exact_approved_artifact(self):
+    async def test_native_blob_href_must_match_exact_approved_artifact(self):
         self.native_blob()
         args = {'expected_name':'report.zip'}
         binding = await self.service.prepare(args,'req-current')
-        self.item.url='blob:https://m365.cloud.microsoft/623e6188-332c-4563-82db-544e3beaddc7'
+        self.page.links[0].update(href='blob:https://m365.cloud.microsoft/623e6188-332c-4563-82db-544e3beaddc7',
+                                  raw_href='blob:https://m365.cloud.microsoft/623e6188-332c-4563-82db-544e3beaddc7')
         with self.assertRaises(DownloadError) as caught:
             await self.service.download(args,binding)
-        self.assertEqual(caught.exception.code,'event_source_mismatch')
-        self.assertTrue(caught.exception.side_effects_uncertain)
+        self.assertEqual(caught.exception.code,'link_changed')
+        self.assertFalse(caught.exception.side_effects_uncertain)
         self.assertFalse(Path(binding['destination']).exists())
+        self.assertEqual(self.page.anchor.clicks,0)
 
 
 if __name__=='__main__':

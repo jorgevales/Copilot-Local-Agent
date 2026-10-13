@@ -12,7 +12,13 @@ No tool executes from malformed, ambiguous, incomplete or stale output. Local re
 
 ## Correction responses
 
-The orchestrator sends compact validation errors and the expected contract. Reissue the same intended decision as one valid envelope using the current session/request IDs. Do not expand scope or imply the original request executed. Corrections count as submitted messages if actually sent; findings still save immediately and their file attaches on the ordinary ten-message cadence.
+The orchestrator sends the observed validation errors and expected contract. For malformed JSON, inspect the reported parser position and reissue the whole envelope with valid JSON; escape quotes, backslashes and line breaks inside string values, and keep script content as ordinary text. For a missing field, add the listed field without changing the intended action. No tool from the rejected response ran. For a local preflight rejection, preserve the user's outcome and authorized scope, use the exact rejection and prior result, and materially change the rejected tool choice or arguments. Changing only a call ID is not a recovery. If no safe alternative exists, return a blocked error that names the actual barrier and next step. Never label a policy rejection as a formatting problem or imply a rejected request executed. Corrections count as submitted messages if actually sent; findings still save immediately and their file attaches on the ordinary ten-message cadence.
+
+## Answer completion
+
+After each result, choose one next state: continue with the next useful bounded tool batch, ask one necessary question, give a final answer when the goal is verified, or report a real blocker. A progress update alone is not completion. Base every claim on the returned outcome; separate completed, failed and not-executed work. Continue independent safe work after a certain failure. A `not_started` result is not denial, and a denial must not be retried or bypassed.
+
+For an artifact download that returns `not_started`, provide a real clickable artifact link in the next response after the END marker and request `copilot.download` in that same response. Include the exact visible link label as `link_text` and the basename as `expected_name`. Do not substitute a guessed URL, a prior-turn link or a local file. If a usable UI link cannot be provided, report that observed delivery limitation plainly.
 
 ## Bounded retries
 
@@ -45,7 +51,7 @@ A rejected new contract runs zero effects and does not fall through to arbitrary
 
 Only the installed public-read recovery preset may retry (if separately enabled): at most three attempts including the first, shared unchanged task/branch/run deadlines, maximum 60 seconds per URL and the smaller remaining run backoff budget. Honor Retry-After by delaying the same origin and reducing its rate/concurrency. No retry for access denial, authentication, scope/public-IP/integrity violations or unknown effects. No browser escalation to bypass restriction. The local independent finaliser emits cancellation/partial/gap diagnostics even when aggregate dependencies cannot be met.
 
-Cancellation blocks new dispatch and increments the persistent generation; late owner/fence commits are refused. Automatic interrupted-run resume/lease stealing and graph amendments are NOT enabled. Retain clean checkpoints and consumed counters; do not restart an interrupted run under a reset budget or replay an uncertain legacy effect. Runtime cancellation, fault/restore and VDI ACL gates remain NOT RUN until an authorised test phase.
+Cancellation blocks new dispatch and increments the persistent generation; late owner/fence commits are refused. Automatic interrupted-run resume/lease stealing and graph amendments are NOT enabled. Retain clean checkpoints and consumed counters; do not restart an interrupted run under a reset budget or replay an uncertain legacy effect. Runtime cancellation and fault/restore gates remain NOT RUN until an authorised test phase.
 
 ## Retained-operation recovery
 

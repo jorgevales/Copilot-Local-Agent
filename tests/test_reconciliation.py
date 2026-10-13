@@ -261,7 +261,13 @@ class RecoveryOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(state.data['calls']['recover']['result']['ok'])
         self.assertTrue(state.data['calls']['save']['result']['ok'])
         self.assertEqual(2, len(approvals))
-        self.assertTrue(list((root / 'site-knowledge').glob('*.json')))
+        from copilot_agent.discovery_store import Store
+        namespace = state.data['calls']['save']['result']['result']['namespace_id']
+        store = Store(app.base_context, persistent=True, readonly=True)
+        try:
+            self.assertIsNotNone(store.site_knowledge(namespace))
+        finally:
+            store.close()
 
     async def test_closed_tab_fresh_open_navigation_grant_and_visible_exchange(self):
         from tests.test_protocol_state import make_fixture

@@ -107,7 +107,8 @@ class ContractTests(unittest.TestCase):
         from tests.discovery_fixtures import workspace
         with workspace() as (root, _):
             path = root / 'testing-config.json'
-            path.write_text(json.dumps({'root': str(root / 'remembered-live-root')}))
+            path.write_text(json.dumps({'root': str(root / 'remembered-live-root'),
+                                        'storage_dir': str(root / 'testing-storage')}))
             with patch.dict('os.environ', {'COPILOT_AGENT_EXECUTION_MODE': 'testing', 'COPILOT_AGENT_DISCOVERY_FLAGS': 'manifest_path'}):
                 cfg = Config.load(path)
             self.assertEqual(cfg.root, PROJECT_ROOT.resolve())

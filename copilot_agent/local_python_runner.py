@@ -268,7 +268,12 @@ async def execute_local_python(plan: dict, prepared: dict, session_dir: Path,
         for path in plan["create_paths"]:
             if Path(path).exists():
                 raise PolicyError("Approved create target already exists; execution requires a fresh plan: " + path)
-        process = await asyncio.create_subprocess_exec(*command, cwd=plan["working_directory"],
+        # Keep CreateProcess' initial directory short. On Windows, CreateProcess
+        # can reject a valid long package working directory with WinError 267.
+        # The isolated worker validates the approved path and changes into it
+        # after it has started.
+        launch_directory = prepared["runtime_binding"]["application_root"]
+        process = await asyncio.create_subprocess_exec(*command, cwd=launch_directory,
             env=_safe_environment(Path(plan["working_directory"])), stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             creationflags=flags, start_new_session=os.name != "nt")

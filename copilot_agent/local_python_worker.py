@@ -97,6 +97,17 @@ def main() -> int:
                 raise PermissionError("File read is outside the approved scope: " + str(candidate))
             if event in {"os.remove", "os.rmdir", "os.rename", "os.replace", "shutil.rmtree"}:
                 raise PermissionError("Deletion and rename operations are unavailable in approved local Python")
+            if event == "os.mkdir":
+                candidate = Path(os.fsdecode(args[0]))
+                candidate = (working / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
+                # Package stages receive precreated parents for each declared
+                # output. An exist_ok call on one of those parents is harmless;
+                # creating any other directory would escape the file grant.
+                if candidate.is_dir() and any(candidate in scope.parents for scope in create_scopes):
+                    return
+                raise PermissionError("Directory creation is outside the approved create scope: " + str(candidate))
+            if event in {"os.symlink", "os.link", "os.chmod", "os.chown", "os.utime", "os.truncate"}:
+                raise PermissionError("Link and file metadata mutations are unavailable in approved local Python")
             if event in {"os.listdir", "os.scandir"}:
                 candidate = Path(args[0] if args and args[0] is not None else working)
                 candidate = (working / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()

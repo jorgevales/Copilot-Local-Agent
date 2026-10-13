@@ -186,6 +186,13 @@ class ToolTests(unittest.TestCase):
             for key in ["intended_use","preconditions","risk_level","timeout","output_size_limit","error_codes","output_schema"]:
                 self.assertIn(key,definition)
 
+    def test_copilot_download_requires_the_current_visible_link_label(self):
+        schema = self.registry.definition('copilot.download')['input_schema']
+        self.assertEqual(schema['required'], ['expected_name', 'link_text'])
+        validate({'expected_name': 'package.zip', 'link_text': 'Download package.zip'}, schema)
+        with self.assertRaises(ValueError):
+            validate({'expected_name': 'package.zip'}, schema)
+
     def test_urls(self):
         policy=URLPolicy(["example.com"])
         self.assertEqual(policy.resolve("https://example.com/x"),"https://example.com/x")
@@ -208,6 +215,26 @@ class ToolTests(unittest.TestCase):
         self.assertNotIn("abc123",json.dumps(result))
         retained=Path(result["result"]["retained_result"]).read_text(encoding="utf-8")
         self.assertNotIn("abc123",retained)
+
+    def test_package_review_projection_keeps_every_check_and_failure(self):
+        review = {
+            'status': 'failed', 'summary': 'Several package checks need attention.',
+            'archive_sha256': 'a' * 64, 'not_checked_count': 0,
+            'checks': [{'item': f'Check {index}', 'status': 'failed',
+                        'detail': f'Plain explanation {index}.'} for index in range(8)],
+            'failures': [{'item': f'Check {index}', 'detail': f'Plain explanation {index}.',
+                          'next_step': f'Fix issue {index}.'} for index in range(8)],
+            'future_review_options': ['Only optional format preferences can be relaxed later.']}
+        result = self.registry._limit(
+            {'ok': False, 'tool': 'automation.inspect',
+             'result': {'status': 'failed', 'review': review},
+             'error': {'code': 'package_review_failed', 'message': review['summary']}},
+            self.context)
+        compact = result['result']['review']
+        self.assertEqual(8, len(compact['checks']))
+        self.assertEqual(8, len(compact['failures']))
+        self.assertEqual('Fix issue 7.', compact['failures'][-1]['next_step'])
+        self.assertEqual('failed', compact['checks'][0]['status'])
 
     def test_created_baseline_and_image_queue(self):
         self.context["config"]["created_dir"]=str(self.root)

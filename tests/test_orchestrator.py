@@ -2,6 +2,7 @@
 import copy
 import asyncio
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -9,13 +10,16 @@ import sys
 import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+import zipfile
 
 from copilot_agent.browser import CaptureTimeoutError, SubmissionAmbiguousError
 from copilot_agent.orchestrator import Orchestrator
 from copilot_agent.policy import PolicyError
-from copilot_agent.protocol import BEGIN, END, ProtocolError
+from copilot_agent.protocol import BEGIN, END, ProtocolError, correction_message
+from copilot_agent.state import SessionState, recoverable_capture_request_id
 from copilot_agent.tools import ToolRegistry
+from copilot_agent.web_privacy import private_session_snapshot
 from tests.test_protocol_state import encoded, envelope, make_fixture
 
 
@@ -71,6 +75,345 @@ def tool_response(message, call_id='read-one', name='synthetic.read', arguments=
 
 
 class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_s_path_display_helper_is_available_to_tool_preflight(self):
+        root, config, state, registry, browser, app = self.fixture([final_response])
+        mapped_share = root / 'mapped-share'
+        mapped_share.mkdir()
+        with patch('copilot_agent.policy.mapped_s_drive_root', return_value=mapped_share):
+            display = app._display_s_path(mapped_share / 'proof-output')
+            fallback = app._display_s_path(root / 'workspace' / 'proof-output')
+        self.assertEqual('S:/proof-output', display.replace('\\', '/'))
+        self.assertEqual(app.prompts.storage_paths['s_path'], fallback)
+
+    async def test_visible_public_progress_is_printed_after_redaction(self):
+        output = []
+        root, config, state, registry, browser, app = self.fixture([final_response])
+        app.feedback.sink = output.append
+        app._live_feedback({'type': 'progress', 'request_id': 'progress-test',
+                            'message': 'Building files. password=synthetic-value'})
+        self.assertIn('Building files.', output[0])
+        self.assertIn('[REDACTED]', output[0])
+        self.assertNotIn('synthetic-value', output[0])
+
+    async def test_package_review_prints_checked_items_failures_and_future_options(self):
+        output = []
+        _, _, _, _, _, app = self.fixture([final_response])
+        app.feedback.sink = output.append
+        review = {"status": "failed", "summary": "Two issues need attention; ZIP was reviewed but not run.",
+                  "checks": [{"item": "File list matches", "status": "passed"},
+                             {"item": "Workflow outputs", "status": "failed",
+                              "detail": "The report files sit inside an allowed output folder."}],
+                  "failures": [{"item": "Workflow outputs",
+                                "detail": "The report files sit inside an allowed output folder.",
+                                "next_step": "Allow output files inside declared folders."}],
+                  "future_review_options": ["A later update can make a nonessential format preference a warning."]}
+
+        app._emit_tool_result("automation.inspect", {"ok": False,
+                                 "tool": "automation.inspect",
+                                 "result": {"status": "failed", "review": review},
+                                 "error": {"message": review["summary"]}})
+
+        rendered = "\n".join(output)
+        self.assertIn("What was checked", rendered)
+        self.assertIn("What failed", rendered)
+        self.assertIn("File list matches", rendered)
+        self.assertIn("Workflow outputs", rendered)
+        self.assertIn("Future review setting", rendered)
+        self.assertIn("nonessential format preference", rendered)
+
+    async def test_package_run_failure_is_shown_and_automatically_actionable(self):
+        output = []
+        root, _, state, _, _, app = self.fixture([final_response])
+        app.feedback.sink = output.append
+        state_path = root / 'workspace' / 'package-run' / 'state.json'
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text(json.dumps({
+            'stages': {'generate_data': {'status': 'failed', 'result': {
+                'error': 'Dunder reflection is unavailable', 'side_effects_uncertain': False}}},
+            'status': 'failed', 'run_id': 'run-local-package', 'archive_sha256': 'a' * 64,
+            'validation': {'ok': False, 'errors': ['Missing expected output: reports/route_day.csv']}
+        }), encoding='utf-8')
+        state.data['package_run_failure_call_id'] = 'run-local-package'
+        state.data['package_run_failure_state_path'] = str(state_path)
+        state.data['package_run_failure_archive_sha256'] = 'a' * 64
+        failed_run = {'call_id': 'run-local-package', 'tool': 'automation.run', 'ok': True,
+                      'result': {'status': 'failed', 'state_path': str(state_path),
+                                 'summary': 'Package run failed: no package steps completed. Failed step(s): generate_data. 1 expected output check did not pass.',
+                                 'failed_stages': ['generate_data'],
+                                 'validation': {'ok': False,
+                                                'errors': ['Missing expected output: reports/route_day.csv']}}}
+
+        repair = app._package_run_repair_instruction([failed_run])
+        app._emit_tool_result('automation.run', failed_run)
+
+        self.assertIn('Failed step generate_data', repair)
+        self.assertIn('Dunder reflection is unavailable', repair)
+        self.assertIn('fresh clickable ZIP', repair)
+        self.assertIn('local orchestrator', repair)
+        self.assertIn('do not ask the user to inspect', repair.lower())
+        restored = Orchestrator._latest_failed_package_run({
+            'run-local-package': {'request': {'name': 'automation.run'}, 'result': failed_run}
+        })
+        self.assertEqual('run-local-package', restored['call_id'])
+        self.assertIn('Dunder reflection is unavailable',
+                      app._package_run_repair_instruction([restored]))
+        checkpoint_failure = app._recovered_package_run_failure()
+        self.assertEqual('failed', checkpoint_failure['result']['status'])
+        self.assertIn('Dunder reflection is unavailable',
+                      app._package_run_repair_instruction([checkpoint_failure]))
+        self.assertIsNone(Orchestrator._latest_failed_package_run({
+            'run-local-package': {'request': {'name': 'automation.run'}, 'result': failed_run},
+            'later-denial': {'request': {'name': 'automation.run'},
+                             'result': {'ok': False, 'error': {'code': 'approval_denied'}}},
+        }))
+        rendered = '\n'.join(output)
+        self.assertIn('Steps that failed', rendered)
+        self.assertIn('Run summary', rendered)
+        self.assertIn('no package steps completed', rendered)
+        self.assertIn('Generate data', rendered)
+        self.assertIn('Dunder reflection is unavailable', rendered)
+        self.assertIn('Expected files still missing or unchecked', rendered)
+
+    async def test_wrong_package_path_feedback_names_attempt_and_approved_folder(self):
+        _, _, _, _, _, app = self.fixture([final_response])
+        attempted = 'C:/proof/workspace/packages/hash/outputs/reports/route_day.csv'
+        approved = 'C:/proof/workspace/runs/fresh/outputs'
+        run = {'tool': 'automation.run', 'ok': True, 'result': {
+            'status': 'failed', 'output_root': approved, 'failed_stages': ['generate_data'],
+            'stage_results': [{'stage_id': 'generate_data', 'status': 'failed',
+                               'error': 'File write is outside the approved create/modify scope: ' + attempted,
+                               'side_effects_uncertain': False}],
+            'validation': {'ok': False, 'errors': ['Missing expected output: reports/route_day.csv']}}}
+
+        feedback = app._package_run_repair_instruction([run])
+
+        self.assertIn(attempted, feedback)
+        self.assertIn(approved, feedback)
+        self.assertIn('final stage argument (`sys.argv[-1]`)', feedback)
+        self.assertIn('Do not infer the output path from the working directory', feedback)
+        self.assertIn('Do not', feedback)
+
+    async def test_restarted_package_repair_recovers_approved_output_root(self):
+        root, _, state, _, _, app = self.fixture([final_response])
+        run_dir = root / 'workspace' / 'runs' / 'saved-run'
+        run_dir.mkdir(parents=True)
+        state_path = run_dir / 'state.json'
+        attempted = str(root / 'workspace' / 'packages' / 'wrong' / 'outputs' / 'report.csv')
+        state_path.write_text(json.dumps({
+            'status': 'failed', 'run_id': 'saved-run', 'archive_sha256': 'a' * 64,
+            'stages': {'generate': {'status': 'failed', 'result': {
+                'error': 'File write is outside the approved create/modify scope: ' + attempted,
+                'side_effects_uncertain': False}}},
+            'validation': {'ok': False, 'errors': ['Missing report.csv']}}), encoding='utf-8')
+        state.data['package_run_failure_state_path'] = str(state_path)
+        state.data['package_run_failure_archive_sha256'] = 'a' * 64
+
+        restored = app._recovered_package_run_failure()
+        repair = app._package_run_repair_instruction([restored])
+
+        self.assertEqual(str(run_dir / 'outputs'), restored['result']['output_root'])
+        self.assertIn(attempted, repair)
+        self.assertIn(str(run_dir / 'outputs'), repair)
+
+    async def test_cancellation_never_becomes_package_repair(self):
+        root, _, state, _, _, app = self.fixture([final_response])
+        cancelled = {'tool': 'automation.run', 'ok': True,
+                     'result': {'status': 'cancelled', 'run_id': 'retained-checkpoint',
+                                'failed_stages': [], 'summary': 'Cancelled at a retained checkpoint.'}}
+        self.assertIsNone(app._package_run_repair_instruction([cancelled]))
+        self.assertIsNone(Orchestrator._latest_failed_package_run({
+            'cancelled': {'request': {'name': 'automation.run'}, 'result': cancelled}}))
+        checkpoint = root / 'workspace' / 'cancelled-run.json'
+        checkpoint.write_text(json.dumps({'status': 'cancelled', 'run_id': 'retained-checkpoint',
+                                          'archive_sha256': 'a' * 64}), encoding='utf-8')
+        state.data['package_run_failure_state_path'] = str(checkpoint)
+        state.data['package_run_failure_archive_sha256'] = 'a' * 64
+        state.save()
+        self.assertIsNone(app._recovered_package_run_failure())
+        self.assertEqual('retained-checkpoint', json.loads(checkpoint.read_text(encoding='utf-8'))['run_id'])
+        for status, detail in (('failed', 'stage execution failed'),
+                               ('partial', 'output validation failed'),
+                               ('failed', 'hash verification failed'),
+                               ('partial', 'quality check failed')):
+            with self.subTest(detail=detail):
+                failure = {'tool': 'automation.run', 'ok': True, 'result': {
+                    'status': status, 'failed_stages': ['stage-one'],
+                    'stage_results': [{'stage_id': 'stage-one', 'status': 'failed', 'error': detail}],
+                    'validation': {'ok': False, 'errors': [detail]}}}
+                self.assertIn(detail, app._package_run_repair_instruction([failure]))
+
+    async def test_recovered_package_turn_keeps_package_delivery_guard(self):
+        root, _, state, _, _, app = self.fixture([final_response])
+        state.data['task_routing'] = {'route': 'direct', 'score': 3.25}
+        state.data['package_run_failure_call_id'] = 'failed-package-run'
+
+        recovered = app._route_for_turn({'route': 'direct', 'score': 1.0}, ('response', 'request-id'))
+        self.assertEqual('package', recovered['route'])
+        self.assertTrue(recovered['recovered_package_workflow'])
+
+        fresh = app._route_for_turn({'route': 'direct', 'score': 1.0}, None)
+        self.assertEqual('direct', fresh['route'])
+        self.assertNotIn('package_run_failure_call_id', state.data)
+
+    async def test_not_started_download_sends_a_specific_delivery_repair(self):
+        instruction = Orchestrator._download_recovery_instruction([
+            {'ok': False, 'tool': 'copilot.download', 'result': {'status': 'not_started'},
+             'error': {'code': 'link_unavailable', 'message': 'No unique current link was found.'}}
+        ])
+        self.assertIn('not a user denial', instruction)
+        self.assertIn('same response', instruction)
+        self.assertIn('exact visible link label', instruction)
+        self.assertIn('automation.inspect', instruction)
+        self.assertIsNone(Orchestrator._download_recovery_instruction([
+            {'ok': True, 'tool': 'copilot.download', 'result': {'status': 'downloaded'}}
+        ]))
+
+    async def test_missing_download_label_correction_uses_the_real_current_anchor(self):
+        correction = json.loads(correction_message(ProtocolError(
+            'unsafe_tool_arguments', ['$.tool_requests[0].arguments.link_text: required property missing'])))
+        self.assertIn('exact visible label', correction['instruction'])
+        self.assertIn('same assistant response', correction['instruction'])
+        self.assertIn('No download ran', correction['instruction'])
+
+    async def test_json_syntax_correction_explains_string_escaping(self):
+        correction = json.loads(correction_message(ProtocolError(
+            'invalid_json', ["Expecting ',' delimiter: line 1 column 42 (char 41)"])))
+        self.assertIn('reported line/character location', correction['instruction'])
+        self.assertIn('ordinary string content', correction['instruction'])
+        self.assertIn('backslashes', correction['instruction'])
+        self.assertIn('no local action ran', correction['instruction'])
+
+    async def test_failed_package_review_is_sent_to_copilot_as_one_repair_request(self):
+        def inspect_request(message):
+            response = tool_response(message, name='automation.inspect',
+                                     arguments={'path': str(Path.cwd() / 'synthetic.zip')})
+            response['approval_required'] = False
+            return response
+
+        root, config, state, _ = make_fixture('package-repair-feedback-')
+        registry = ToolRegistry()
+        browser = MockBrowser([final_response, inspect_request, *([final_response] * 5)])
+        app = Orchestrator(config, browser, registry, state, display=lambda text: None)
+        review = {"status": "failed", "summary": "Two issues need attention; the ZIP was reviewed but not run.",
+                  "failures": [
+                      {"item": "Python script syntax", "detail": "scripts/build.py line 18 has an unfinished string.",
+                       "next_step": "Fix the broken quoted text on line 18 and compile the script."},
+                      {"item": "Declared output files", "detail": "Two stages claim the same report file.",
+                       "next_step": "Give each stage a distinct output file."}]}
+        failed = {"ok": False, "tool": "automation.inspect",
+                  "result": {"status": "failed", "review": review},
+                  "error": {"code": "package_review_failed", "message": review["summary"]}}
+        with patch.object(registry, 'execute', new=AsyncMock(return_value=failed)):
+            await app.initialize()
+            await app.turn('Build the synthetic application package and review it locally.')
+
+        followups = [item['message'] for item in browser.sent if item['message']['kind'] == 'tool_results']
+        self.assertTrue(followups, [item['message']['kind'] for item in browser.sent])
+        followup = followups[0]
+        instruction = followup['content']['instruction']
+        self.assertIn('fix every finding below together', instruction)
+        self.assertIn('scripts/build.py line 18', instruction)
+        self.assertIn('Give each stage a distinct output file.', instruction)
+        self.assertIn('Do not ask the user to inspect files', instruction)
+        self.assertIn('No local package stages have run.', instruction)
+        self.assertIn("Copilot's cloud sandbox", instruction)
+        self.assertIn('No live environment test is expected', instruction)
+
+    async def test_first_copilot_zip_is_reviewed_immediately_and_all_failures_return_for_one_repair(self):
+        from tests.test_automation_packages import package_bytes
+
+        root, config, state, _ = make_fixture('automatic-package-review-')
+        workspace = root / 'workspace'
+        first = workspace / 'package.zip'
+        revision_dir = workspace / 'revision-2'
+        revision_dir.mkdir()
+        second = revision_dir / 'package.zip'
+
+        with zipfile.ZipFile(io.BytesIO(package_bytes())) as source:
+            payloads = {name: source.read(name) for name in source.namelist()}
+        payloads['main.py'] = b"print('unfinished\n"
+        with zipfile.ZipFile(first, 'w', zipfile.ZIP_DEFLATED) as archive:
+            for name, payload in payloads.items():
+                archive.writestr(name, payload)
+        second.write_bytes(package_bytes())
+
+        def download_request(message, label):
+            return tool_response(message, call_id='download-' + label,
+                                 name='copilot.download',
+                                 arguments={'expected_name': 'package.zip',
+                                            'link_text': 'Download package.zip ' + label})
+
+        def repair_after_first_review(message):
+            self.assertEqual('tool_results', message['kind'])
+            inspections = [item for item in message['content']['results']
+                           if item.get('tool') == 'automation.inspect']
+            self.assertEqual(1, len(inspections), message['content']['results'])
+            review = inspections[0]['result']['review']
+            self.assertEqual('failed', review['status'])
+            self.assertEqual(2, len(review['failures']))
+            self.assertIn('File list and contents match',
+                          {item['item'] for item in review['failures']})
+            self.assertIn('Python step files can be read',
+                          {item['item'] for item in review['failures']})
+            instruction = message['content']['instruction']
+            self.assertIn('fix every finding below together', instruction)
+            self.assertIn("Copilot's cloud sandbox", instruction)
+            self.assertIn('No live environment test is expected', instruction)
+            self.assertIn('rebuilt ZIP download link', instruction)
+            return download_request(message, 'revision-2')
+
+        def finish_after_second_review(message):
+            self.assertEqual('tool_results', message['kind'])
+            inspections = [item for item in message['content']['results']
+                           if item.get('tool') == 'automation.inspect']
+            self.assertEqual(1, len(inspections), message['content']['results'])
+            self.assertTrue(inspections[0]['ok'])
+            self.assertEqual('passed', inspections[0]['result']['review']['status'])
+            return final_response(message, user_response='The revised package passed the local review.')
+
+        browser = MockBrowser([
+            final_response,
+            lambda message: download_request(message, 'revision-1'),
+            repair_after_first_review,
+            finish_after_second_review,
+        ])
+        registry = ToolRegistry()
+        approvals = []
+        app = Orchestrator(config, browser, registry, state,
+                           approval_decider=lambda preview: approvals.append(preview) or 'once',
+                           display=lambda text: None)
+
+        class DownloadStub:
+            async def prepare(self, arguments, request_id):
+                return {'expected_name': arguments['expected_name'], 'request_id': request_id}
+
+        app.download_service = DownloadStub()
+        original_execute = registry.execute
+        download_paths = [first, second]
+
+        async def execute(name, arguments, context):
+            if name == 'copilot.download':
+                path = download_paths.pop(0)
+                return {'ok': True, 'tool': name,
+                        'result': {'status': 'downloaded', 'path': str(path),
+                                   'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+                                   'size': path.stat().st_size}}
+            return await original_execute(name, arguments, context)
+
+        with patch.object(registry, 'execute', new=AsyncMock(side_effect=execute)):
+            await app.initialize()
+            result = await app.turn(
+                'Build a multi-file software project with tests, dependencies, checkpoints, recovery and validation. '
+                'Deliver the complete package.zip.')
+
+        self.assertEqual('final', result['response_type'])
+        reviews = [call for call in state.data['calls'].values()
+                   if call.get('request', {}).get('name') == 'automation.inspect']
+        self.assertEqual(2, len(reviews))
+        self.assertEqual(2, len(approvals))
+        self.assertTrue(all(preview['complete_pending_plan']['tool_requests'][0]['name'] == 'copilot.download'
+                            for preview in approvals))
+
     async def test_independent_readonly_file_checks_run_in_parallel_and_record_method(self):
         root, config, state, _ = make_fixture('parallel-readonly-')
         gate = threading.Lock()
@@ -460,6 +803,8 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('read-one', state.data['calls'])
         self.assertEqual('correction', browser.sent[-1]['message']['kind'])
         self.assertIn('must not be replayed', state.data['retry_records'][0]['errors'][0])
+        self.assertEqual('local_action_rejected', state.data['retry_records'][0]['reason'])
+        self.assertIn('failed a preflight check', browser.sent[-1]['message']['content']['instruction'])
 
     async def test_denied_code_runner_never_executes_or_creates_output(self):
         previews = []
@@ -511,7 +856,7 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([record['message']['kind'] for record in browser.sent],
                          ['initialize','user_turn','tool_results'])
         self.assertEqual(state.message_count,3)
-        self.assertEqual(len(registry.calls),1)
+        self.assertEqual(len(registry.calls),1, state.data.get('task_routing'))
         self.assertEqual(registry.calls[0][0],'code_runner')
         self.assertEqual(registry.calls[0][1],arguments)
         self.assertTrue(registry.calls[0][2]['approved'])
@@ -521,6 +866,128 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Path(prepared['source_path']),source)
         self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(),original_hash)
         self.assertEqual(state.data['retry_records'],[])
+
+    async def test_package_route_rejects_local_build_before_approval(self):
+        approvals = []
+        root, config, state, _, browser, _ = self.fixture(
+            [final_response,
+             lambda message: tool_response(message, 'mkdir-package', 'files.mkdir',
+                                           {'path': 'workspace/copilot-build'}),
+             final_response])
+        registry = ToolRegistry()
+        app = Orchestrator(config, browser, registry, state,
+                           approval_decider=lambda preview: approvals.append(preview) or 'once',
+                           display=lambda text: None)
+        await app.initialize()
+        await app.turn('Create a workflow that takes 30 minutes with dependencies, checkpoints, retries, recovery and validation.')
+        self.assertEqual([], approvals)
+        self.assertFalse((root / 'workspace' / 'copilot-build').exists())
+        tool_messages = [item['message'] for item in browser.sent
+                         if item['message']['kind'] == 'tool_results']
+        self.assertTrue(tool_messages, browser.sent[-1]['message'].get('content'))
+        tool_result_message = tool_messages[-1]
+        result = tool_result_message['content']['results'][0]
+        self.assertEqual('package_delivery_required', result['error']['code'])
+        self.assertIn('Create the ZIP in Copilot Chat', tool_result_message['content']['instruction'])
+
+    async def test_package_route_rejects_script_batch_before_code_preflight(self):
+        invalid_script = "for item in values:\n"
+        arguments = {'script': invalid_script, 'purpose': 'Build the requested package locally',
+                     'language': 'local_python', 'working_directory': str(Path.cwd()),
+                     'read_paths': [], 'create_paths': [], 'modify_paths': [], 'expected_outputs': [],
+                     'commands': [], 'subprocesses': [], 'network_destinations': [], 'permissions': [],
+                     'risk_summary': 'Local package build', 'recovery_notes': 'No effects',
+                     'interpreter': sys.executable, 'arguments': [], 'imports': [],
+                     'timeout_seconds': 3, 'max_output_chars': 1000,
+                     'expected_effects': ['Build a ZIP'], 'viewer_windows': []}
+        calls = [{'call_id': f'local-build-{index}', 'name': 'code_runner', 'version': '1.0',
+                  'arguments': arguments, 'expected_result': 'Build local files'} for index in range(2)]
+        root, config, state, _, browser, app = self.fixture([
+            final_response,
+            lambda message: final_response(message, response_type='tool_request', tools_required=True,
+                                           tool_requests=calls, continuation_state='continue',
+                                           completion_status='in_progress'),
+            final_response])
+        with patch.object(app, '_code_runner', side_effect=AssertionError('Code Runner preflight must be skipped')):
+            await app.initialize()
+            await app.turn('Create a workflow that takes 30 minutes with dependencies, checkpoints, retries, recovery and validation.')
+
+        tool_messages = [item['message'] for item in browser.sent
+                         if item['message']['kind'] == 'tool_results']
+        self.assertEqual('package_delivery_required', tool_messages[-1]['content']['results'][0]['error']['code'])
+        self.assertIn('Create the ZIP in Copilot Chat', tool_messages[-1]['content']['instruction'])
+
+    async def test_automation_run_requires_passing_review_before_approval(self):
+        approvals = []
+        args = {'archive_path': str(Path.cwd() / 'not-reviewed.zip'),
+                'expected_sha256': 'a' * 64,
+                'workspace': str(Path.cwd() / 'workspace' / 'package-run')}
+        root, config, state, _, browser, _ = self.fixture(
+            [final_response,
+             lambda message: tool_response(message, 'run-unreviewed', 'automation.run', args),
+             final_response, RuntimeError('stop after observing the blocked run')])
+        registry = ToolRegistry()
+        app = Orchestrator(config, browser, registry, state,
+                           approval_decider=lambda preview: approvals.append(preview) or 'once',
+                           display=lambda text: None)
+        await app.initialize()
+        with self.assertRaisesRegex(RuntimeError, 'stop after observing'):
+            await app.turn('Create a workflow that takes 30 minutes with dependencies, checkpoints, retries, recovery and validation.')
+        self.assertEqual([], approvals)
+        self.assertFalse(any(record.get('request', {}).get('name') == 'automation.run'
+                             and record.get('result', {}).get('ok')
+                             for record in state.data['calls'].values()))
+        tool_messages = [item['message'] for item in browser.sent
+                         if item['message']['kind'] == 'tool_results']
+        self.assertTrue(tool_messages, browser.sent[-1]['message'].get('content'))
+        tool_result_message = tool_messages[-1]
+        result = tool_result_message['content']['results'][0]
+        self.assertEqual('package_review_failed', result['error']['code'])
+        self.assertEqual('not_started', result['result']['status'])
+        self.assertEqual('failed', result['result']['review']['status'])
+
+    async def test_private_session_rechecks_exact_package_after_review_evidence_is_redacted(self):
+        root, _, state, registry, _, app = self.fixture([])
+        archive = root / 'workspace' / 'reviewed.zip'
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        archive.write_bytes(b'synthetic archive bytes')
+        digest = 'a' * 64
+        passing_review = {'ok': True, 'tool': 'automation.inspect',
+                          'result': {'status': 'validated', 'archive_sha256': digest,
+                                     'review': {'status': 'passed', 'archive_sha256': digest,
+                                                'checks': [{'item': 'ZIP can be opened safely',
+                                                            'status': 'passed'}],
+                                                'failures': [], 'not_checked_count': 0}}}
+        state.data['website_private'] = True
+        state.data['calls']['previous-review'] = {
+            'request': {'name': 'automation.inspect', 'version': '1.0', 'call_id': 'previous-review',
+                        'arguments': {'path': str(archive), 'expected_sha256': digest}},
+            'status': 'completed', 'result': passing_review}
+        state.data = private_session_snapshot(state.data)
+        self.assertIsNone(app._prior_package_review(digest))
+
+        registry.definition = lambda name: {'timeout': 1}
+        registry.execute = AsyncMock(return_value=passing_review)
+        context = {'source_request_id': 'resume-request'}
+        with patch.object(app, '_local_archive_sha256', return_value=(archive, digest)):
+            restored = await app._ensure_package_review(
+                {'archive_path': str(archive), 'expected_sha256': digest}, context)
+
+        self.assertTrue(app._review_passed(restored))
+        registry.execute.assert_awaited_once_with(
+            'automation.inspect', {'path': str(archive), 'expected_sha256': digest},
+            {'source_request_id': 'resume-request'})
+        fresh = [record for record in state.data['calls'].values()
+                 if record.get('request', {}).get('call_id', '').startswith('auto-package-run-review-')]
+        self.assertEqual(1, len(fresh))
+        self.assertTrue(app._review_passed(fresh[0]['result']))
+
+    async def test_task_estimate_ignores_a_serialized_tool_arguments_block(self):
+        request = ('Run one exact existing script and report the observed result. Arguments:\n' +
+                   json.dumps({'script': "print('synthetic')\\n", 'permissions': ['read_files'],
+                               'expected_outputs': ['report.txt'], 'network_destinations': []}))
+        self.assertEqual('Run one exact existing script and report the observed result.',
+                         Orchestrator._routing_description(request))
 
     async def test_denial_stops_dependent_remaining_calls(self):
         def two_calls(message):
@@ -642,6 +1109,29 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual('Verified answer.', result['user_response'])
         self.assertEqual(['first.txt', 'second.txt'], [item[1]['path'] for item in registry.calls])
         self.assertEqual('completed', state.data['calls']['failed-first']['status'])
+
+    async def test_identical_failed_action_rejection_includes_observed_result(self):
+        root, config, state, registry, browser, app = self.fixture(
+            [final_response,
+             lambda msg: tool_response(msg, 'failed-first', 'synthetic.write', {'path': 'same.txt'}),
+             lambda msg: tool_response(msg, 'failed-again-new-id', 'synthetic.write', {'path': 'same.txt'}),
+             final_response], lambda preview: 'once')
+
+        async def execute(name, arguments, context):
+            registry.calls.append((name, copy.deepcopy(arguments), dict(context)))
+            return {'ok': False, 'result': {'status': 'failed', 'side_effects_uncertain': False},
+                    'error': {'code': 'operation_failed', 'message': 'Verified no declared effect.'}}
+
+        registry.execute = execute
+        await app.initialize()
+        await app.turn('Recover using the observed failure result.')
+
+        self.assertEqual(1, len(registry.calls))
+        self.assertEqual('local_action_rejected', state.data['retry_records'][0]['reason'])
+        self.assertIn('Verified no declared effect.', state.data['retry_records'][0]['errors'][0])
+        correction = browser.sent[-1]['message']['content']
+        self.assertIn('failed a preflight check', correction['instruction'])
+        self.assertIn('changing only its call_id does not count', correction['instruction'])
 
     async def test_alias_write_blocked_while_read_only_inspection_remains_available(self):
         root, config, state, registry, browser, app = self.fixture(
@@ -770,6 +1260,69 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], registry.calls)
         self.assertEqual([], state.data['retry_records'])
         self.assertEqual(['initialize', 'user_turn'], [item['message']['kind'] for item in browser.sent])
+
+    async def test_recover_capture_failed_turn_uses_saved_request_without_resending_user_message(self):
+        def interrupted(message):
+            raise CaptureTimeoutError('Visible response arrived beyond the initial capture window.')
+        root, config, state, registry, browser, app = self.fixture([final_response, interrupted])
+        await app.initialize()
+        with self.assertRaises(CaptureTimeoutError):
+            await app.turn('Resume this already committed request.')
+        request_id = [item for item in state.data['messages'] if item['role'] == 'copilot_outbound'][-1]['request_id']
+
+        async def recover(committed_request_id):
+            self.assertEqual(request_id, committed_request_id)
+            return encoded(final_response(browser.sent[-1]['message']))
+        browser.capture_committed_response = recover
+
+        result = await app.recover_capture_failed_turn()
+
+        self.assertEqual('final', result['response_type'])
+        self.assertEqual(2, len(browser.sent))  # initialization plus the original request
+        self.assertEqual(2, state.message_count)
+        self.assertEqual(1, len([item for item in state.data['messages']
+                                if item['role'] == 'user']))
+        self.assertEqual('ready', state.data['status'])
+
+    async def test_restart_recovers_committed_reply_after_file_or_raw_ledger_save(self):
+        for raw_ledger_saved in (False, True):
+            with self.subTest(raw_ledger_saved=raw_ledger_saved):
+                def interrupted(message):
+                    raise CaptureTimeoutError('Synthetic interruption after committed send.')
+                root, config, state, registry, browser, app = self.fixture([final_response, interrupted])
+                await app.initialize()
+                with self.assertRaises(CaptureTimeoutError):
+                    await app.turn('Complete the already committed request after restart.')
+                sent = browser.sent[-1]['message']
+                request_id = sent['request_id']
+                raw = encoded(final_response(sent))
+                app._record_raw_response(raw, request_id)
+                if not raw_ledger_saved:
+                    # Simulate interruption after the response artifact write
+                    # but before the matching atomic session snapshot.
+                    state.data['messages'] = [message for message in state.data['messages']
+                                              if not (message['role'] == 'copilot_raw'
+                                                      and message.get('request_id') == request_id)]
+                    state.save()
+                resumed = SessionState(state.directory, resume=True)
+                self.assertEqual(request_id, recoverable_capture_request_id(resumed))
+                restarted = Orchestrator(config, browser, registry, resumed, display=lambda text: None)
+                restarted.initialized = True
+
+                async def capture(committed_request_id):
+                    self.assertEqual(request_id, committed_request_id)
+                    return raw
+                browser.capture_committed_response = capture
+                response = await restarted.recover_capture_failed_turn()
+
+                self.assertEqual('final', response['response_type'])
+                self.assertEqual(2, len(browser.sent))
+                self.assertEqual(2, resumed.message_count)
+                self.assertEqual(1, len([item for item in resumed.data['messages']
+                                        if item['role'] == 'copilot_raw' and item.get('request_id') == request_id]))
+                self.assertEqual(1, len([item for item in resumed.data['messages']
+                                        if item['role'] == 'copilot' and item.get('request_id') == request_id]))
+                self.assertIsNone(recoverable_capture_request_id(resumed))
 
     async def test_completed_malformed_reply_uses_plain_error_and_correction(self):
         root, config, state, registry, browser, app = self.fixture(

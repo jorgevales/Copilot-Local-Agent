@@ -70,9 +70,15 @@ class ResourceSetupTests(unittest.IsolatedAsyncioTestCase):
         from copilot_agent.app import run
         config=Config(root=self.root)
         config.select_storage(self.root/'explicit-user-storage')
+        simulated_share=self.root/'simulated-s-share'
+        simulated_share.mkdir()
+        canonical_storage=simulated_share/'Discoveries knowledge'
         args=SimpleNamespace(config=None,attach_existing=False,port=None,profile=None,
                              model=None,setup_only=True,resume=None,yes_setup=True)
         with patch('copilot_agent.app.Config.load',return_value=config), \
+             patch('copilot_agent.storage.discoveries_storage',return_value=canonical_storage), \
+             patch('copilot_agent.app.mapped_s_drive_root',return_value=simulated_share), \
+             patch('copilot_agent.config.mapped_s_drive_root',return_value=simulated_share), \
              patch('copilot_agent.app.ask',AsyncMock(side_effect=['2',str(self.executable)])), \
              patch('copilot_agent.app.BrowserAdapter') as browser, \
              patch('copilot_agent.app.system',self.messages.append):

@@ -1,11 +1,14 @@
-"""Approved, event-backed downloads from the current Copilot assistant reply.
+"""Approved downloads from real links in the current Copilot assistant reply.
 
 Signed URLs and element handles live only in opaque in-memory tickets. Preparing
-a preview reads UI/settings only. No settings are changed and no files deleted.
+a preview reads UI/settings only. Same-origin native Copilot blobs are read from
+their exact owning page; HTTPS downloads remain browser-event-backed. No settings
+are changed and no files are deleted.
 """
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
 from dataclasses import dataclass
 import hashlib
@@ -20,6 +23,9 @@ from urllib.parse import urlsplit
 
 from .archives import ArchiveError, verify_file
 from .policy import is_s_drive_path
+
+
+_ZIP_LINK_SETTLE_SECONDS = 3
 
 
 class DownloadError(RuntimeError):
@@ -137,6 +143,21 @@ _ANCHORS = r"""params => {
   return {user_key:id(user),assistant_key:id(assistant),links};
 }"""
 
+_BLOB_CONTENT = r"""async params => {
+  const matches=[...document.querySelectorAll('a[href]')].filter(a=>(a.offsetWidth||a.offsetHeight||a.getClientRects().length)
+    && a.href===params.url && a.getAttribute('download')===params.expected_name);
+  if(matches.length!==1)return {error:'exact_artifact_anchor_unavailable'};
+  const response=await fetch(params.url);
+  if(!response.ok)return {error:'artifact_read_failed'};
+  const blob=await response.blob();
+  if(blob.size<=0||blob.size>params.max_bytes)return {error:'artifact_size_invalid',size:blob.size};
+  const bytes=new Uint8Array(await blob.arrayBuffer());
+  let binary='';
+  for(let offset=0;offset<bytes.length;offset+=0x8000)
+    binary+=String.fromCharCode(...bytes.subarray(offset,Math.min(offset+0x8000,bytes.length)));
+  return {size:bytes.length,mime_type:blob.type,base64:btoa(binary)};
+}"""
+
 
 @dataclass
 class _Ticket:
@@ -209,9 +230,9 @@ class DownloadService:
         if inspect.isawaitable(result):
             await result
 
-    async def _links(self, source):
+    async def _links(self, source, timeout=5):
         try:
-            result = await asyncio.wait_for(self.browser.page.evaluate(_ANCHORS, source), 5)
+            result = await asyncio.wait_for(self.browser.page.evaluate(_ANCHORS, source), timeout)
         except Exception as exc:
             raise DownloadError('link_unavailable', 'Could not inspect the current assistant download link safely.') from exc
         if result.get('error'):
@@ -258,10 +279,58 @@ class DownloadService:
         settings = await self._settings()
         await self._notify('Observed Edge download location: '+settings['configured_directory']+'. Preferences remain unchanged. Approved permanent delivery will be retained in the configured user storage.', source_request_id)
         source = self._source(source_request_id)
-        observed = await self._links(source)
-        links = [item for item in observed['links'] if item.get('enabled', True)]
-        if 'link_text' in args:
-            links = [item for item in links if item['label'] == args['link_text']]
+        stop_control = getattr(self.browser, '_stop_present', None)
+        if callable(stop_control) and args['expected_name'].casefold().endswith('.zip'):
+            generation_deadline = time.monotonic() + min(
+                float(self._config('response_max_duration', 120)), 900)
+            while await stop_control():
+                if time.monotonic() >= generation_deadline:
+                    raise DownloadError('generation_timeout',
+                                        'Copilot still shows the visible Stop control; ZIP generation did not finish within the bounded response window.')
+                await asyncio.sleep(.1)
+        # Copilot can hydrate the anchor shortly after its visible Stop control
+        # disappears. This follow-up is bounded and stays on the same assistant turn.
+        deadline = time.monotonic() + _ZIP_LINK_SETTLE_SECONDS
+        observed = None
+        links = []
+        settle_notice_sent = False
+        while True:
+            try:
+                remaining = deadline - time.monotonic()
+                observed = await self._links(source, timeout=min(5, max(.001, remaining)))
+            except DownloadError as error:
+                if error.code != 'link_unavailable':
+                    raise
+                last_link_error = error
+            else:
+                links = [item for item in observed['links'] if item.get('enabled', True)]
+                if 'link_text' in args:
+                    links = [item for item in links if item['label'] == args['link_text']]
+                if len(links) == 1:
+                    break
+                last_link_error = None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                if args['expected_name'].casefold().endswith('.zip'):
+                    if len(links) > 1:
+                        explanation = ('Several visible download links remain on the current assistant turn; '
+                                       'supply the exact link_text for the intended ZIP link.')
+                    elif observed is not None and not links:
+                        explanation = ('Copilot finished generating, but no matching visible ZIP download link appeared '
+                                       'on the current assistant turn. Produce a real clickable ZIP link in a fresh reply.')
+                    else:
+                        explanation = ('Copilot finished generating, but its current assistant reply or ZIP link '
+                                       'could not be uniquely identified after the bounded follow-up. '
+                                       'Produce a fresh reply with one real clickable ZIP link.')
+                    raise DownloadError('link_unavailable',
+                                        explanation)
+                if last_link_error is not None:
+                    raise last_link_error
+                raise DownloadError('link_unavailable', 'A unique real assistant download anchor is required. Supply an exact link_text when several links exist.')
+            if not settle_notice_sent:
+                await self._notify('Waiting briefly for Copilot to finish rendering the download link.', source_request_id)
+                settle_notice_sent = True
+            await asyncio.sleep(min(.05, remaining))
         if len(links) != 1:
             raise DownloadError('link_unavailable', 'A unique real assistant download anchor is required. Supply an exact link_text when several links exist.')
         link = links[0]
@@ -286,13 +355,82 @@ class DownloadService:
                    'expected_name':args['expected_name'], 'expected_sha256':args.get('expected_sha256'),
                    'settings':settings, 'destination':str(destination),
                    'configured_default_destination':str(Path(settings['configured_directory']) / args['expected_name']),
-                   'save_method':'Exclusive copy of completed browser artifact; event save_as only when native prompting is proven disabled and original path is unavailable',
+                   'transfer_method':'same_origin_blob_bytes' if urlsplit(link['href']).scheme == 'blob' else 'browser_download_event',
+                   'save_method':('Read exact same-origin Copilot blob bytes and create the reviewed local artifact exclusively; Edge settings remain unchanged'
+                                  if urlsplit(link['href']).scheme == 'blob' else
+                                  'Exclusive copy of completed browser artifact; event save_as only when native prompting is proven disabled and original path is unavailable'),
                    'default_directory_save_proven':False,
                    'max_bytes':int(self._config('max_download_bytes',20*1024*1024)),
                    'timeout_seconds':float(self._config('download_timeout',90))}
         bound_source = {**source, 'assistant_key':observed['assistant_key'], 'user_key':observed['user_key'], 'link_key':link['key']}
         self._tickets[ticket_id] = _Ticket(copy.deepcopy(args), copy.deepcopy(preview), link['href'], handle, self.browser.page, bound_source)
         return copy.deepcopy(preview)
+
+    async def _download_same_origin_blob(self, args, ticket, settings):
+        """Read a native Copilot blob from its owning page into the reviewed local path.
+
+        Edge's native download prompt is not a useful transfer mechanism for a
+        same-origin Copilot blob. The exact response, anchor, filename, hash,
+        size cap and approved destination remain bound to the single-use ticket.
+        """
+        destination = self.policy.resolve(ticket.preview['destination'])
+        if str(destination) != ticket.preview['destination'] or destination.exists() or destination.parent.exists():
+            raise DownloadError('destination_changed', 'The reviewed unique staging destination already exists or changed; no overwrite is permitted.')
+        ticket.used = True
+        file_creation_started = False
+        try:
+            content = await asyncio.wait_for(ticket.page.evaluate(_BLOB_CONTENT, {
+                'url':ticket.raw_url, 'expected_name':args['expected_name'],
+                'max_bytes':ticket.preview['max_bytes']}), ticket.preview['timeout_seconds'])
+        except Exception as exc:
+            raise DownloadError('blob_unavailable', 'The exact current Copilot blob could not be read in its owning page; no file was created.', False) from exc
+        if isinstance(content, dict) and content.get('error') == 'artifact_size_invalid':
+            raise DownloadError('size_exceeded', 'The current Copilot artifact exceeds the reviewed byte limit; no file was created.', False)
+        if not isinstance(content, dict) or content.get('error'):
+            raise DownloadError('blob_unavailable', 'The exact current Copilot blob link did not return readable artifact bytes; no file was created.', False)
+        try:
+            payload = base64.b64decode(content.get('base64', ''), validate=True)
+        except (ValueError, TypeError) as exc:
+            raise DownloadError('blob_invalid', 'The current Copilot artifact returned invalid byte encoding; no file was created.', False) from exc
+        if (not payload or len(payload) > ticket.preview['max_bytes']
+                or content.get('size') != len(payload)):
+            raise DownloadError('size_invalid', 'The current Copilot artifact size is empty, inconsistent or exceeds the reviewed byte limit; no file was created.', False)
+        actual = hashlib.sha256(payload).hexdigest()
+        if args.get('expected_sha256') and args['expected_sha256'] != actual:
+            raise DownloadError('hash_mismatch', 'The current Copilot artifact SHA-256 differs from the approved expected hash; no file was created.', False)
+        header = payload[:4]
+        if args['expected_name'].lower().endswith('.zip') and header not in (b'PK\x03\x04',b'PK\x05\x06',b'PK\x07\x08'):
+            raise DownloadError('archive_invalid', 'The current Copilot ZIP artifact lacks a ZIP signature; no file was created.', False)
+        try:
+            destination.parent.parent.mkdir(parents=True, exist_ok=True)
+            destination.parent.mkdir(exist_ok=False)
+            if destination.exists() or self.policy.resolve(destination) != destination:
+                raise DownloadError('destination_changed', 'The reviewed staging destination changed before the exclusive artifact write.', False)
+            file_creation_started = True
+            with destination.open('xb') as output:
+                output.write(payload)
+            self.policy.resolve(destination, must_exist=True)
+            validation = verify_file(destination, {'max_file_bytes':min(ticket.preview['max_bytes'],20*1024*1024)})
+        except DownloadError as exc:
+            if file_creation_started:
+                exc.side_effects_uncertain = True
+            raise
+        except (ArchiveError, OSError, ValueError) as exc:
+            raise DownloadError('artifact_invalid', 'The saved Copilot artifact failed bounded static format/readability validation. It was preserved; no code was executed.', file_creation_started) from exc
+        if validation['sha256'] != actual or validation['size'] != len(payload):
+            raise DownloadError('artifact_changed', 'The delivered artifact changed during verification; it was preserved.', True)
+        return {'status':'verified' if args.get('expected_sha256') else 'downloaded',
+                'path':str(destination), 'size':len(payload), 'sha256':actual,
+                'download_event_observed':False, 'same_origin_ui_blob_read':True,
+                'source_request_id':ticket.source['request_id'], 'href_sha256':ticket.preview['href_sha256'],
+                'suggested_filename':args['expected_name'], 'settings':settings,
+                'save_method':'read exact same-origin Copilot blob bytes and create the approved staging artifact exclusively',
+                'default_directory_save_proven':False,
+                'original_browser_artifact':{'path':None,'retained':False},
+                'archive_signature_verified':args['expected_name'].lower().endswith('.zip'),
+                'artifact_validation':validation,
+                'expected_hash_verified':bool(args.get('expected_sha256')),
+                'side_effects_uncertain':False}
 
     async def download(self, args, binding):
         args = validate_download_args(args)
@@ -316,6 +454,11 @@ class DownloadService:
         settings = await self._settings()
         if _canonical(settings) != _canonical(ticket.preview['settings']):
             raise DownloadError('settings_changed', 'Edge download settings changed after the preview; prepare and approve again.')
+        transfer_method = ticket.preview.get('transfer_method', 'browser_download_event')
+        if transfer_method == 'same_origin_blob_bytes':
+            return await self._download_same_origin_blob(args, ticket, settings)
+        if transfer_method != 'browser_download_event':
+            raise DownloadError('binding_invalid', 'The reviewed download transfer method is unavailable.')
         if settings['ask_before_download'] is not False:
             message = ('Edge may ask you to choose Save or complete its native Save As window. Complete that browser UI yourself; download settings will not be changed. The approved staging destination is: '+ticket.preview['destination'])
             await self._notify(message, ticket.source['request_id'])
