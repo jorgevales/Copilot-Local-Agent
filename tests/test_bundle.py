@@ -141,6 +141,28 @@ class BundleTests(unittest.TestCase):
         self.assertEqual({'response-v1.schema.json', 'tool-catalogue.json'},
                          set(read_bundle_components(result['group_records'][1]['path'], result['group_records'][1])))
 
+    def test_startup_protocol_attachment_includes_current_and_compat_package_schemas(self):
+        extra = []
+        for name, payload in [('automation-package-v1.schema.json', {'schema_version': {'const': '1.0'}}),
+                              ('automation-package-v1.1.schema.json', {'schema_version': {'const': '1.1'}})]:
+            path = self.root / name
+            path.write_text(json.dumps(payload), encoding='utf-8')
+            extra.append(path)
+        paths = self.paths + extra
+        manifest = [{'name': path.name, 'version': '1.0',
+                     'sha256': hashlib.sha256(path.read_bytes()).hexdigest()} for path in paths]
+        result = build_startup_attachments(paths, manifest, self.root / 'startup-current-schema')
+        self.assertEqual(8, len(result['paths']))
+        recovered = {}
+        for group in result['group_records']:
+            recovered.update(read_bundle_components(group['path'], group))
+        self.assertEqual({'response-v1.schema.json', 'tool-catalogue.json',
+                          'automation-package-v1.schema.json', 'automation-package-v1.1.schema.json'},
+                         set(recovered) - {path.name for path in self.paths[:8]})
+        protocol = Path(result['group_records'][1]['path']).read_text(encoding='utf-8')
+        self.assertIn('automation-package-v1.1.schema.json is the current authoring schema', protocol)
+        self.assertIn('automation-package-v1.schema.json is retained for compatibility', protocol)
+
     def test_startup_order_is_stable_when_source_order_changes(self):
         result = build_startup_attachments(list(reversed(self.paths)), list(reversed(self.manifest)), self.root / 'startup')
         self.assertEqual([str(path) for path in self.paths[:6]], result['paths'][:6])

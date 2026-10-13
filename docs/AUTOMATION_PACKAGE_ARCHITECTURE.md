@@ -1,88 +1,37 @@
-# Automation package architecture map
+# Automation package architecture
 
-Discovery completed before implementation. The map combines the checked-in
-`Copilot handoff/full-discovery/` with source inspection at `c5cb076`; Graphify
-is navigation evidence and was generated from `a42e4e1`, so source wins where
-the checkout has moved on.
+This document describes the current package runtime and its approval boundaries.
 
-## Current system
+## Runtime flow
 
 ```text
-Launcher.ps1 -> app.py -> copilot_agent.app -> Orchestrator
-  -> PromptBuilder / BrowserAdapter / response-v1 protocol
-  -> ToolRegistry -> approvals, local tools, SessionState and EventLog
-  -> BrowserAdapter -> visible authenticated Copilot Chat
+Copilot Chat creates ZIP
+  -> copilot.download verifies the delivered artifact
+  -> automation.inspect validates the exact ZIP and registered tool versions
+  -> automation.run repeats inspection and binds approval to hashes and scope
+  -> bounded stage scheduler executes Python and registered-tool stages
+  -> outputs, hashes, validation and checkpoints are retained in the package workspace
 ```
 
-- `copilot_agent/orchestrator.py` owns each request/response loop, protocol
-  validation, tool dispatch, cancellation, retries and recovery.
-- `copilot_agent/prompts.py`, `bundle.py`, `schemas/response-v1.schema.json`,
-  and `schemas/tool-catalogue-v1.json` define the agent contract and the
-  capabilities exposed to Copilot. `ToolRegistry` definitions are generated
-  from `copilot_agent/tools.py`.
-- `ApprovalManager` binds a decision to the immutable pending call or complete
-  prepared plan. `SessionState` persists evidence, but clears approvals on
-  resume. The terminal and `agent_ui` approval surfaces both return explicit
-  decisions; the backend remains authoritative.
-- `CodeRunner` validates the reviewed source and scope. `local_python_runner`
-  starts its fixed worker with exact interpreter, source, permissions, process,
-  path, timeout and output bindings. Its worker adds defense in depth; it is
-  not an operating-system sandbox.
-- `copilot.download` binds a real artifact link in the current Copilot response.
-  `ArchiveService` validates ZIP paths, aliases, sizes and hashes, then extracts
-  create-only into configured allowed roots. The current contract explicitly
-  stops before executing delivered code.
-- `discovery_engine.py` and `discovery_store.py` already provide a bounded,
-  resumable dependency graph with concurrency, retries, checkpoints and
-  persistent evidence for public-site discovery. This is a domain-specific
-  workflow and does not accept arbitrary package stages.
+`ToolRegistry` and the fixed local Python worker remain the only execution entry points. ZIP extraction is hash-checked and never executes code by itself. Every run is freshly inspected, even after a session package grant. The run approval display contains the ZIP and manifest hashes, stages and tool arguments, declared paths, outputs and resource ceilings.
 
-## Proposed extension points
+## Package contracts
 
-1. Add a measurable local task router and configurable thresholds. Record its
-   factors, score and decision in the run event/state, and pass the decision to
-   `PromptBuilder` so the model follows the same route.
-2. Add a versioned automation-package contract and runtime beside the existing
-   delivery/archive code. Reuse `ArchiveService`, `PathPolicy`, `ToolRegistry`,
-   and the fixed local-Python worker; do not make raw ZIP extraction itself an
-   execution permission.
-3. Add a package-run tool. Preflight the complete manifest, payload hashes,
-   tool references, dependency availability, stage DAG, declared capabilities,
-   outputs and configured budgets before requesting approval.
-4. Extend approvals with bounded, explicit package/task scopes tied to the
-   reviewed package revision, tool and capability set, paths, network hosts,
-   resource limits and expiry. A changed revision or enlarged scope requires a
-   new decision. Preserve the existing once/plan choices for current tools.
-5. Implement stage-level fingerprints, durable checkpoints, bounded retry and
-   cancellation, dependency-aware invalidation, patch decisions and structured
-   results within the package runtime. Keep package output and run evidence in
-   the configured test workspace for the proof.
-6. Update the Copilot instructions/catalogue and approval presentation without
-   weakening response-schema validation, exact source hashes, effect checks,
-   uncertainty quarantine, redaction or existing direct execution.
+- Schema 1.0 remains supported for existing packages.
+- Schema 1.1 adds typed `result_bindings` on tool stages. Downstream tool arguments can use only exact `{ "$binding": "stage.name" }` nodes. The source must be an earlier declared dependency, and the runtime validates the fully resolved arguments against the registered tool schema.
+- Tool results remain in memory for one package execution. Durable stage checkpoints keep result hashes and byte counts rather than raw website content. A resumed run cannot reuse private result values from an earlier session.
+- Stages may call registered `read_only` and ordinary `user_approval` tools under exact package approval. A session grant covers registered tool stages in freshly inspected packages, including bounded file edits inside already allowed roots or session-approved path extensions. Package Python source receives complete source-and-hash review and fresh one-run approval; a session or plan grant cannot authorize executable package code. Consequential or unbounded actions also require fresh approval for that exact run. Package stages cannot call `files.grant_path`; requested new locations still require their separate exact path approval. Recursive automation, immutable-plan code execution, customer authorization, external delivery, archive extraction and uncertain-operation recovery stay on their separate review paths.
+- Independent `browser.recon` and `browser.route` stages may run concurrently only when each resolves to a distinct owned tab ID on the same origin. Same-tab calls serialize. The scheduler honors the package and configured concurrency ceilings. Effectful and otherwise ineligible tool stages do not run concurrently.
+- Browser tabs are owned by the current Edge session, same-origin, task-bound and capped at six. They are not restored as authority after restart.
+- Python stages receive declared inputs and exact final outputs beneath the per-run output root. Their final argument remains the exact output root. The fixed worker also provides `COPILOT_PACKAGE_STAGE_SCRATCH`, a fresh per-attempt directory beneath that run's outputs for intermediate files; only that stage may read or write its scratch tree. Scratch is bounded to 100 files and 50 MiB, verified and removed after each attempt. Native file stores and raw file APIs that bypass the worker's path and quota checks are disabled for package stages.
+- Independent Python stages may overlap only when they have no network permission or destinations, have disjoint exact outputs, and use separate scratch directories. Python stages with network destinations, effectful tool stages, and mixed waves remain serialized; dependency constraints gate which stages are ready. On failure or cancellation, only declared output files that were absent before launch and remain regular single-link files are removed; no unverified partial output is recorded as completed.
 
-## Files to change after this map
+## Approval and file access
 
-- New: package schema and focused `copilot_agent` router/package runtime modules.
-- Existing runtime: `copilot_agent/tools.py`, `orchestrator.py`, `prompts.py`,
-  `approvals.py`, `state.py`, `code_runner.py` or its fixed worker as inspection
-  indicates, and `config.py`/`config.example.json` for bounded thresholds.
-- Agent contract: relevant `guidance/` files and generated machine tool
-  catalogue through `ToolRegistry`.
-- Approval UI, only as needed for the scoped grant: `agent_ui/workspace.py`,
-  `agent_ui/runtime.py`, and `agent_ui/web/app.js`.
-- Validation: focused deterministic `tests/test_*.py` modules and a dedicated
-  C:-based integration workspace. Existing production session data and the S:
-  drive are outside that proof workspace.
+One in-memory grant on `ApprovalManager` can cover registered tool stages in later freshly inspected package runs, including bounded file edits inside already allowed roots or session-approved path extensions. It also covers public HTTPS hosts statically declared by package `browser.open` and `browser.tabs.open` stages after each ZIP passes fresh hash-bound inspection; direct browser tools retain their approved-navigation host scope. Result-bound destinations require fresh one-run approval and must resolve within inspected public package hosts. Private, reserved, and ambiguous numeric result-bound hosts are rejected. Every package Python stage shows its full source and SHA-256 and requires fresh one-run approval; session or reusable plan grants cannot authorize that code. Packages with consequential or unbounded stages also require fresh one-run approval and cannot use a session or reusable plan grant. Package stages cannot call `files.grant_path`; requested new locations need its separate exact approval. Grants do not skip automatic inspection, path checks, tool preflight or platform-required handoffs. The session grant is cleared on close, a new agent session, or process restart; it is not written to `SessionState`.
 
-## Constraints found
+Normal durable agent-owned storage stays anchored to mapped S: in VDI. A local live proof may use only the explicitly selected C: test store. A standalone `files.replace` call requires separate normal tool approval and an expected SHA-256. A package may call it only when declared in the freshly inspected ZIP and covered by that exact package's individual or session-scoped approval; the expected hash and path checks still apply. Replacement stages a same-directory temporary file, rechecks target identity and content, atomically replaces, and reads back the approved content. `files.grant_path` separately adds one reachable existing file or directory for the current session after user approval. A file grant is exact-file only; a directory grant covers that directory and descendants. Protected profile, credential, device and redirected paths remain denied.
 
-- The worktree was clean on `main` at `c5cb076` during discovery.
-- Python tests use `unittest`; the handoff's `133 passed, 1 skipped` is a prior
-  local result, not a baseline run for this change.
-- Normal app startup anchors persistent knowledge/runtime storage to the live
-  S: mapping. A proof that must avoid S: needs an explicit isolated test-mode
-  storage path; production storage behavior must remain unchanged.
-- Copilot output and package contents are untrusted. Existing approval controls,
-  create-only behavior, finite limits, manual authentication and truthful
-  completion evidence remain required.
+## Validation status
+
+Offline tests cover package inspection, hash-bound execution, result binding, private checkpoint projection, distinct-tab scheduling, session-grant lifetime, atomic file replacement and path-extension containment. The final local GOV.UK proof passed on exact Edge port 63741: a fresh 14-stage ZIP opened five tabs, ran reconnaissance with four overlapping stages, and saved then read back five navigation routes in the explicit C: test store. Stage checkpoints retain start/end timestamps for direct timing verification. See [the dated acceptance report](LIVE_GOVUK_PACKAGE_ACCEPTANCE_20261013.md) for hashes, measurements, test results and scope.

@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import ipaddress
 import importlib.util
 import json
 import os
 import re
 import shutil
+import stat
 import sys
 import time
 import uuid
@@ -21,7 +23,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 from .state import canonical_hash
-from .policy import PathPolicy, PolicyError
+from .policy import PathPolicy, PolicyError, URLPolicy
 from .archives import ArchiveError, ArchiveService, inspect_zip
 
 
@@ -38,7 +40,108 @@ DEFAULT_THRESHOLDS = {
 _PATH_TOKEN = re.compile(r"(?<![\w.-])[\w.-]+\.(?:py|pyw|js|jsx|ts|tsx|html|css|json|ya?ml|toml|md|csv|xlsx?|docx|pptx)(?![\w.-])", re.I)
 _LIST_ITEM = re.compile(r"(?m)^\s*(?:\d{1,2}[.)]|[-*])\s+")
 _SEQUENCE = re.compile(r"\b(?:then|after(?:wards)?|next|once|before|finally|resume|retry|validate|verify)\b", re.I)
+_SCRATCH_DIRNAME = ".stage-scratch"
+_MAX_STAGE_SCRATCH_BYTES = 50 * 1024 * 1024
+_MAX_STAGE_SCRATCH_FILES = 100
 _MULTI_TOOL = re.compile(r"\b(?:browser|web|research|download|filesystem|file|desktop|Copilot|local tool)\b", re.I)
+
+# A session grant may cover reviewed discovery/navigation and bounded file or
+# knowledge writes within already allowed roots. Operations that can submit
+# data, download/extract artifacts, inspect customer data, or execute a
+# semantic action plan require fresh confirmation for that exact package run.
+# Package file-edit tools still use their normal PathPolicy, preflight and
+# expected-hash checks; path extensions retain their separate approval flow.
+_PACKAGE_FRESH_CONFIRMATION_TOOLS = {
+    "archives.extract", "browser.back", "browser.click", "browser.customer_summary",
+    "browser.download_batch", "browser.fill", "browser.forward", "browser.plan",
+    "browser.press", "browser.recover_uncertain", "browser.screenshot", "browser.select",
+    "browser.tabs.reset", "copilot.download",
+    "files.transfer_to_copilot", "knowledge.note", "operation.learn", "ocr.image",
+    "site_knowledge.invalidate", "discovery.knowledge_invalidate",
+    "permissions.grant", "permissions.edit", "permissions.renew",
+}
+
+
+def _package_requires_fresh_confirmation(manifest: dict) -> bool:
+    """True when this package exceeds the session grant's reviewed risk class."""
+    for stage in manifest.get("stages", []):
+        # Package Python is executable source. It needs complete-code review
+        # and one-run approval even though its worker and outputs are bounded.
+        if stage.get("kind") == "python":
+            return True
+        if stage.get("kind") != "tool":
+            continue
+        tool_id = stage.get("tool_id")
+        if tool_id in _PACKAGE_FRESH_CONFIRMATION_TOOLS:
+            return True
+        if tool_id == "browser.open":
+            arguments = stage.get("arguments", {})
+            destination = arguments.get("url")
+            hosts = list(arguments.get("allowed_domains", []))
+            if isinstance(destination, str):
+                try:
+                    hosts.append(URLPolicy.website_domain(destination))
+                except (PolicyError, ValueError):
+                    return True
+            try:
+                for host in hosts:
+                    _require_public_browser_host(host)
+            except (PolicyError, ValueError):
+                # Static internal/reserved hosts are still usable after the
+                # exact URL and effects are shown in a fresh run review.
+                return True
+            if _find_binding_references(arguments.get("url")) or _find_binding_references(arguments.get("allowed_domains", [])):
+                # The final destination is data-dependent, so show and approve
+                # this exact package run after its complete static scope review.
+                return True
+        # browser.tabs is safe for opening/listing owned tabs, but closing or
+        # resetting a tab changes established local browser state. Unknown or
+        # result-bound operations fail closed because their effect is not known
+        # until execution.
+        if tool_id == "browser.tabs":
+            arguments = stage.get("arguments", {})
+            operation = arguments.get("operation")
+            if operation == "open":
+                url = arguments.get("url")
+                if _find_binding_references(url):
+                    return True
+                if isinstance(url, str):
+                    try:
+                        _require_public_browser_host(URLPolicy.website_domain(url))
+                    except (PolicyError, ValueError):
+                        return True
+            if not isinstance(operation, str) or operation not in {"open", "list"}:
+                return True
+    return False
+
+
+def _reject_ambiguous_numeric_host(hostname: str) -> None:
+    """Reject WHATWG-style numeric hosts that Python does not parse canonically."""
+    host = hostname.lower().rstrip(".")
+    last_label = host.rsplit(".", 1)[-1]
+    if not (last_label.isdecimal() or re.fullmatch(r"0x[0-9a-f]*", last_label)):
+        return
+    try:
+        ipaddress.ip_address(host)
+    except ValueError as error:
+        raise PolicyError("Ambiguous numeric browser hosts are not allowed in automation packages") from error
+
+
+def _require_public_browser_host(hostname: str) -> None:
+    """Reject internal and reserved destinations for data-bound package URLs."""
+    host = hostname.lower().rstrip(".")
+    _reject_ambiguous_numeric_host(host)
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        reserved_suffixes = ("localhost", "local", "internal", "lan", "home.arpa",
+                             "test", "example", "invalid")
+        if "." not in host or any(host == suffix or host.endswith("." + suffix)
+                                   for suffix in reserved_suffixes):
+            raise PolicyError("Result-bound browser destinations must use a public hostname")
+        return
+    if not address.is_global:
+        raise PolicyError("Result-bound browser destinations cannot use private or reserved IP addresses")
 _CODE_TASK = re.compile(r"\b(?:implement|build|create|modify|full application|full app|codebase|design system|multi-file)\b", re.I)
 _OUTPUT = re.compile(r"\b(?:report|application|app|dashboard|documentation|tests?|workbook|presentation|package|artifact|deliverable)\b", re.I)
 _RECOVERY = re.compile(r"\b(?:checkpoint|resume|resumable|retry|recover|incremental|patch|cache|idempotent)\b", re.I)
@@ -75,12 +178,12 @@ def _package_review_report(checks, archive=None, digest=None):
     skipped = sum(item.get("status") == "not_checked" for item in checks)
     status = "failed" if failures else "passed"
     summary = (f"{len(failures)} issue(s) need attention; the ZIP was reviewed but not run."
-               if failures else "All package checks passed; the ZIP remains unrun pending user approval.")
+               if failures else "All package checks passed; execution is pending run authorization, either individual approval or an active agent-session grant for this exact package scope.")
     return {"status": status, "summary": summary, "archive": str(archive) if archive else None,
             "archive_sha256": digest, "checks": checks, "failures": failures,
             "not_checked_count": skipped,
             "future_review_options": [
-                "A later update can make a nonessential format preference a warning if it blocks a useful package. Keep checks for changed files, safe locations, declared outputs, resource limits and separate local run approval in place."
+                "A later update can make a nonessential format preference a warning if it blocks a useful package. Keep checks for changed files, safe locations, declared outputs and resource limits, with explicit individual or agent-session authorization bound to the exact package scope."
             ]}
 
 
@@ -289,6 +392,14 @@ def _relative(value, name="package path"):
     # PurePosixPath normalizes empty and dot segments, hiding malformed paths.
     if any(part in {"", ".", ".."} or ":" in part for part in value.split("/")):
         raise PackageError(f"Unsafe {name}")
+    windows_devices = {"con", "prn", "aux", "nul",
+                       *(f"com{digit}" for digit in range(1, 10)),
+                       *(f"lpt{digit}" for digit in range(1, 10)),
+                       *(f"com{digit}" for digit in ("\u00b9", "\u00b2", "\u00b3")),
+                       *(f"lpt{digit}" for digit in ("\u00b9", "\u00b2", "\u00b3"))}
+    for part in value.split("/"):
+        if part.endswith((".", " ")) or part.split(".", 1)[0].casefold() in windows_devices:
+            raise PackageError(f"Unsafe Windows path segment in {name}")
     path = PurePosixPath(value)
     if path.is_absolute():
         raise PackageError(f"Unsafe {name}")
@@ -302,6 +413,66 @@ def _approved_output_path(output_root: Path, relative_path: str) -> Path:
     if not candidate.is_relative_to(root):
         raise PackageError(f"Output path {candidate} escapes approved output folder {root}")
     return candidate
+
+
+def _verify_stage_scratch(scratch_root: Path, output_root: Path) -> dict:
+    """Verify a worker's ephemeral files are regular, bounded, and run-local."""
+    root = output_root.resolve()
+    scratch = scratch_root.resolve()
+    if not scratch.is_relative_to(root) or scratch == root or scratch_root.is_symlink() or not scratch.is_dir():
+        raise PackageError("Python stage scratch must remain a real directory beneath this run's output root")
+    count = total = 0
+    for current, directories, files in os.walk(scratch, topdown=True, followlinks=False):
+        directory_path = Path(current)
+        for name in list(directories):
+            item = directory_path / name
+            info = item.lstat()
+            if not item.resolve().is_relative_to(root) or not item.is_dir() or item.is_symlink():
+                raise PackageError("Python stage scratch contains a linked or out-of-root directory")
+        for name in files:
+            item = directory_path / name
+            info = item.lstat()
+            if (not item.resolve().is_relative_to(root) or not item.is_file() or item.is_symlink()
+                    or not stat.S_ISREG(info.st_mode) or info.st_nlink != 1):
+                raise PackageError("Python stage scratch contains a linked or non-regular file")
+            count += 1
+            total += info.st_size
+            if count > _MAX_STAGE_SCRATCH_FILES or total > _MAX_STAGE_SCRATCH_BYTES:
+                raise PackageError("Python stage scratch exceeded its file or byte limit")
+    return {"files": count, "bytes": total}
+
+
+def _cleanup_stage_scratch(scratch_root: Path, output_root: Path) -> None:
+    root = output_root.resolve()
+    if not scratch_root.exists() and not scratch_root.is_symlink():
+        return
+    if scratch_root.is_symlink() or not scratch_root.resolve().is_relative_to(root) or scratch_root.resolve() == root:
+        raise PackageError("Refusing to clean Python stage scratch outside the run output root")
+    shutil.rmtree(scratch_root)
+    parent = scratch_root.parent
+    while parent != root and parent.is_relative_to(root):
+        try:
+            parent.rmdir()
+        except OSError:
+            break
+        parent = parent.parent
+
+
+def _remove_unverified_stage_outputs(paths, output_root: Path, absent_before) -> list[str]:
+    """Remove only regular, single-link declared creates that were absent at launch."""
+    root = output_root.resolve()
+    removed = []
+    for raw in paths:
+        target = Path(raw)
+        if str(target) not in absent_before or target.is_symlink() or not target.exists():
+            continue
+        resolved = target.resolve()
+        if (resolved == root or not resolved.is_relative_to(root) or not resolved.is_file()
+                or resolved.lstat().st_nlink != 1):
+            continue
+        resolved.unlink()
+        removed.append(str(resolved))
+    return removed
 
 
 def _within_declared_path(value: str, declarations) -> bool:
@@ -391,6 +562,173 @@ def _topological(stages):
     return order
 
 
+def _find_binding_references(value, path="$", found=None):
+    found = found if found is not None else []
+    if isinstance(value, dict):
+        if "$binding" in value:
+            if set(value) != {"$binding"} or not isinstance(value["$binding"], str):
+                raise PackageError("A stage result reference must be an exact {\"$binding\": \"stage.name\"} object")
+            found.append((path, value["$binding"]))
+            return found
+        for key, child in value.items():
+            _find_binding_references(child, path + "." + key, found)
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _find_binding_references(child, path + "[" + str(index) + "]", found)
+    return found
+
+
+def _binding_placeholder(value, binding_map):
+    if isinstance(value, dict):
+        if "$binding" in value:
+            binding = binding_map.get(value["$binding"])
+            if binding is None:
+                raise PackageError("Stage argument references an undeclared result binding: " + str(value["$binding"]))
+            return {"string": "example", "integer": 1, "number": 1.0, "boolean": True,
+                    "object": {}, "array": []}[binding["type"]]
+        return {key: _binding_placeholder(child, binding_map) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_binding_placeholder(child, binding_map) for child in value]
+    return value
+
+
+def _schema_example(schema):
+    if "const" in schema:
+        return schema["const"]
+    if "enum" in schema:
+        return schema["enum"][0]
+    kind = schema.get("type")
+    if isinstance(kind, list):
+        kind = next((item for item in kind if item != "null"), "string")
+    if kind == "object":
+        return {key: _schema_example(schema.get("properties", {}).get(key, {}))
+                for key in schema.get("required", [])}
+    if kind == "array":
+        return [_schema_example(schema.get("items", {}))
+                for _ in range(schema.get("minItems", 0))]
+    if kind == "integer": return schema.get("minimum", 0)
+    if kind == "number": return schema.get("minimum", 0)
+    if kind == "boolean": return False
+    if kind == "string":
+        if "64" in schema.get("pattern", ""): return "0" * 64
+        return "example"
+    return None
+
+
+def _binding_schema_placeholders(value, schema, binding_map):
+    if isinstance(value, dict):
+        if "$binding" in value:
+            key = value["$binding"]
+            binding = binding_map[key]
+            expected_type = schema.get("type")
+            accepted = set(expected_type) if isinstance(expected_type, list) else {expected_type}
+            if binding["type"] == "integer" and "number" in accepted:
+                compatible = True
+            else:
+                compatible = binding["type"] in accepted
+            if not compatible:
+                raise PackageError("Result binding type does not match the registered tool argument schema")
+            return _schema_example(schema)
+        properties = schema.get("properties", {})
+        return {key: _binding_schema_placeholders(child, properties.get(key, {}), binding_map)
+                for key, child in value.items()}
+    if isinstance(value, list):
+        item_schema = schema.get("items", {})
+        return [_binding_schema_placeholders(child, item_schema, binding_map) for child in value]
+    return value
+
+
+def _resolve_result_bindings(value, tool_results, binding_map):
+    if isinstance(value, dict):
+        if "$binding" in value:
+            key = value["$binding"]
+            binding = binding_map[key]
+            # Binding names are stage-local, but stage IDs may themselves
+            # contain dots. The validated declaration is the authoritative
+            # source of the producer ID.
+            stage_id = binding["stage_id"]
+            current = tool_results.get(stage_id)
+            if not isinstance(current, dict):
+                raise PackageError("Required in-memory result binding is unavailable; the source stage must run again")
+            pointer = binding["json_pointer"]
+            selected = current
+            for encoded in pointer.lstrip("/").split("/"):
+                part = encoded.replace("~1", "/").replace("~0", "~")
+                if isinstance(selected, dict) and part in selected:
+                    selected = selected[part]
+                elif isinstance(selected, list) and part.isdigit() and int(part) < len(selected):
+                    selected = selected[int(part)]
+                else:
+                    raise PackageError("Verified tool result did not contain a declared binding value")
+            expected = binding["type"]
+            type_matches = ((expected == "string" and isinstance(selected, str))
+                            or (expected == "integer" and type(selected) is int)
+                            or (expected == "number" and type(selected) in {int, float})
+                            or (expected == "boolean" and type(selected) is bool)
+                            or (expected == "object" and isinstance(selected, dict))
+                            or (expected == "array" and isinstance(selected, list)))
+            if not type_matches:
+                raise PackageError("Verified tool result binding has the wrong declared type")
+            encoded = json.dumps(selected, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+            if len(encoded) > binding["max_bytes"]:
+                raise PackageError("Verified tool result binding exceeds its declared size limit")
+            return selected
+        return {key: _resolve_result_bindings(child, tool_results, binding_map)
+                for key, child in value.items()}
+    if isinstance(value, list):
+        return [_resolve_result_bindings(child, tool_results, binding_map) for child in value]
+    return value
+
+
+def _parallel_read_tab_ids(wave, tool_results, binding_declarations, registry, context,
+                           package_approved_domains, source_request_id):
+    """Return resolved tab IDs only when a read wave is safe to overlap.
+
+    Result bindings must be resolved before scheduling: literal manifest values
+    cannot establish that result-bound tabs are distinct. Any failed binding,
+    ownership preflight, or origin check makes the caller serialize the wave;
+    run_stage will then report the underlying validation error normally.
+    """
+    if len(wave) < 2:
+        return None
+    tab_ids = []
+    page_ids = []
+    origins = []
+    try:
+        from .web_navigation import _origin, get_navigation_page
+
+        for stage in wave:
+            if (stage["kind"] != "tool" or stage["tool_id"] not in {"browser.recon", "browser.route"}
+                    or not stage.get("tool_id")
+                    or not registry.definition(stage["tool_id"]).get("version")
+                    or registry.definition(stage["tool_id"]).get("approval_policy") != "read_only"):
+                return None
+            arguments = _resolve_result_bindings(stage.get("arguments", {}), tool_results, binding_declarations)
+            tab_id = arguments.get("tab_id")
+            if not isinstance(tab_id, str) or not tab_id.strip():
+                return None
+            subcontext = dict(context)
+            subcontext.update(approved=True, approved_hash=context["package_plan_hash"],
+                              package_stage=True, source_request_id=source_request_id,
+                              approved_domains=list(package_approved_domains))
+            registry.validate_call(stage["tool_id"], arguments, subcontext)
+            page = get_navigation_page(subcontext, tab_id, arguments.get("task_id"),
+                                       arguments.get("customer_key"))
+            origin = _origin(getattr(page, "url", ""))
+            if not origin[0] or not origin[1]:
+                return None
+            tab_ids.append(tab_id)
+            page_ids.append(id(page))
+            origins.append(origin)
+    except Exception:
+        # Eligibility is an optimization. Uncertainty always falls back to
+        # serialized stage execution, which retains normal error reporting.
+        return None
+    if len(set(tab_ids)) != len(wave) or len(set(page_ids)) != len(wave) or len(set(origins)) != 1:
+        return None
+    return tab_ids
+
+
 def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=None,
                       *, limits=None, python_version=None) -> dict:
     limits = {**DEFAULT_THRESHOLDS, **(limits or {})}
@@ -401,7 +739,7 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
                 "entrypoint", "files", "dependencies", "tools", "capabilities", "stages", "validation",
                 "expected_outputs", "result_contract"}
     _check_object(manifest, top, required, "Manifest")
-    if manifest["schema_version"] != "1.0":
+    if manifest["schema_version"] not in {"1.0", "1.1"}:
         raise PackageError("Unsupported package manifest version")
     for field in ("package_id", "task_id", "correlation_id", "description", "entrypoint"):
         if not isinstance(manifest[field], str) or not manifest[field] or len(manifest[field]) > 4000:
@@ -470,6 +808,8 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
     caps["read_paths"] = [_relative(item, "read path") for item in caps["read_paths"]]
     caps["create_paths"] = [_relative(item, "create path") for item in caps["create_paths"]]
     caps["modify_paths"] = [_relative(item, "modify path") for item in caps["modify_paths"]]
+    if any(item.split("/", 1)[0].casefold() == _SCRATCH_DIRNAME.casefold() for item in caps["create_paths"]):
+        raise PackageError("Package outputs may not use the reserved per-stage scratch directory")
     if caps["modify_paths"]:
         raise PackageError("Package v1 supports create-only stage outputs; modifying existing files is not supported")
     if not set(caps["permissions"]) <= _PERMISSIONS:
@@ -498,11 +838,21 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
             raise PackageError("Package references an unavailable tool: " + ref["id"]) from error
         if definition["version"] != ref["version"]:
             raise PackageError("Package tool version is incompatible: " + ref["id"])
-        if definition.get("approval_policy") != "read_only":
-            raise PackageError("Package stages may use only registered read-only tools; local output writes belong to declared Python stage outputs")
+        if definition.get("approval_policy") not in {"read_only", "user_approval"}:
+            raise PackageError("Package stages may use only registered tools covered by package approval; immutable-plan tools need their own review")
+        # Keep lifecycle, delivery, customer authorization, and uncertainty
+        # recovery controls on their dedicated orchestrator handoff paths.
+        protected_tools = {"automation.run", "automation.inspect", "automation.compare",
+                           "code_runner", "copilot.download", "files.transfer_to_copilot",
+                           "archives.extract", "permissions.grant", "permissions.edit",
+                           "permissions.renew", "research.perform", "operation.quarantine",
+                           "operation.reconcile", "browser.reconcile", "browser.recover_uncertain"}
+        protected_tools.add("files.grant_path")
+        if ref["id"] in protected_tools or ref["id"].startswith("permissions."):
+            raise PackageError("This tool requires its dedicated local approval or recovery handoff and cannot run as a package stage: " + ref["id"])
         tool_versions[ref["id"]] = ref["version"]
 
-    stage_fields = {"id", "kind", "script", "tool_id", "arguments", "depends_on", "inputs", "outputs",
+    stage_fields = {"id", "kind", "script", "tool_id", "arguments", "result_bindings", "depends_on", "inputs", "outputs",
                     "timeout_seconds", "retries", "idempotent", "checkpoint", "imports",
                     "network_destinations", "permissions", "arguments_list", "failure_policy"}
     stage_required = {"id", "kind", "depends_on", "inputs", "outputs", "timeout_seconds", "retries", "idempotent", "checkpoint"}
@@ -510,6 +860,7 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
     if not isinstance(stages, list) or not stages or len(stages) > int(limits["max_stages"]):
         raise PackageError("Package stages must be a non-empty bounded list")
     output_owners = {}
+    binding_declarations = {}
     for stage in stages:
         _check_object(stage, stage_fields, stage_required, "Stage")
         if not isinstance(stage["id"], str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,119}", stage["id"]):
@@ -524,7 +875,14 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
         if len(set(stage["inputs"])) != len(stage["inputs"]) or len(set(stage["outputs"])) != len(stage["outputs"]):
             raise PackageError("Stage paths may not be duplicated")
         for output in stage["outputs"]:
-            if not _within_declared_path(output, caps["create_paths"]) or output in output_owners:
+            normalized_output = PurePosixPath(output).as_posix().casefold()
+            collisions = any(
+                normalized_output == PurePosixPath(previous).as_posix().casefold()
+                or normalized_output.startswith(PurePosixPath(previous).as_posix().casefold().rstrip("/") + "/")
+                or PurePosixPath(previous).as_posix().casefold().startswith(normalized_output.rstrip("/") + "/")
+                for previous in output_owners
+            )
+            if not _within_declared_path(output, caps["create_paths"]) or collisions:
                 raise PackageError("Stage outputs must be unique files inside declared create paths")
             output_owners[output] = stage["id"]
         _bounded_int(stage["timeout_seconds"], "stage timeout", 1, caps["max_runtime_seconds"])
@@ -567,12 +925,33 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
             if not isinstance(stage.get("arguments_list", []), list) or len(stage.get("arguments_list", [])) > 100:
                 raise PackageError("Invalid Python stage arguments")
         else:
-            if set(stage) - (stage_required | {"tool_id", "arguments", "failure_policy"}) or "tool_id" not in stage or "arguments" not in stage:
+            if set(stage) - (stage_required | {"tool_id", "arguments", "result_bindings", "failure_policy"}) or "tool_id" not in stage or "arguments" not in stage:
                 raise PackageError("Tool stage fields do not match a registered tool stage")
             if stage["tool_id"] not in tool_versions or not isinstance(stage["arguments"], dict):
                 raise PackageError("Tool stage must call a versioned registered tool with object arguments")
             if stage["tool_id"] in {"automation.run", "automation.inspect", "automation.compare"}:
                 raise PackageError("Automation packages cannot recursively invoke the package runtime")
+        if "result_bindings" in stage:
+            if manifest["schema_version"] != "1.1" or stage["kind"] != "tool":
+                raise PackageError("result_bindings require a v1.1 tool stage")
+            bindings = stage["result_bindings"]
+            if not isinstance(bindings, list) or len(bindings) > 20:
+                raise PackageError("Tool result bindings must be a bounded list")
+            for binding in bindings:
+                _check_object(binding, {"name", "json_pointer", "type", "max_bytes"},
+                              {"name", "json_pointer", "type", "max_bytes"}, "Result binding")
+                name = binding["name"]
+                pointer = binding["json_pointer"]
+                if (not isinstance(name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", name)
+                        or not isinstance(pointer, str) or len(pointer) > 500
+                        or not pointer.startswith("/result/") or "~" in pointer.replace("~0", "").replace("~1", "")
+                        or binding["type"] not in {"string", "integer", "number", "boolean", "object", "array"}):
+                    raise PackageError("Invalid result binding name, JSON pointer, or type")
+                _bounded_int(binding["max_bytes"], "result binding max_bytes", 1, 12000)
+                key = stage["id"] + "." + name
+                if key in binding_declarations:
+                    raise PackageError("Result binding names must be unique per producer stage")
+                binding_declarations[key] = {**binding, "stage_id": stage["id"]}
     order = _topological(stages)
     by_id = {stage["id"]: stage for stage in stages}
     ancestors = {}
@@ -586,6 +965,30 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
             producer = output_owners.get(input_path)
             if producer is not None and producer not in inherited:
                 raise PackageError("Stage input must come from a packaged file or an earlier dependency output")
+    for stage in stages:
+        references = _find_binding_references(stage.get("arguments", {})) if stage["kind"] == "tool" else []
+        if (stage["kind"] == "tool" and stage["tool_id"] == "browser.open"
+                and _find_binding_references(stage["arguments"].get("allowed_domains", []))):
+            raise PackageError("browser.open allowed_domains must be statically declared by the inspected package")
+        if references and manifest["schema_version"] != "1.1":
+            raise PackageError("Result references require a v1.1 package")
+        binding_map = {}
+        for _, key in references:
+            binding = binding_declarations.get(key)
+            if binding is None:
+                raise PackageError("Stage argument references an undeclared result binding: " + key)
+            if binding["stage_id"] not in ancestors[stage["id"]]:
+                raise PackageError("A result binding producer must be an earlier declared stage dependency")
+            binding_map[key] = binding
+        if stage["kind"] == "tool":
+            if references:
+                schema = registry.definition(stage["tool_id"])["input_schema"]
+                # Replace typed reference nodes with values that satisfy the
+                # referenced field's actual enum/format where possible.
+                args = _binding_schema_placeholders(stage["arguments"], schema, binding_map)
+            else:
+                args = stage["arguments"]
+            registry.validate_input(stage["tool_id"], args)
     for stage in stages:
         if any(dep not in order[:order.index(stage["id"])] for dep in stage["depends_on"]):
             raise PackageError("Stage order cannot satisfy declared dependencies")
@@ -615,6 +1018,7 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
     result["stage_order"] = order
     result["entrypoint_stage_id"] = entrypoint_stage_id
     result["tool_versions"] = tool_versions
+    result["result_binding_declarations"] = binding_declarations
     result["manifest_sha256"] = canonical_hash(manifest)
     result["missing_dependencies"] = []
     return result
@@ -733,6 +1137,28 @@ def plan_patch(previous: dict, current: dict) -> dict:
             "rebuild_stages": [key for key in (new["stage_order"] if "stage_order" in new else list(new_stages)) if key in invalidated]}
 
 
+def _reject_unavailable_patch_bindings(manifest: dict, prior: dict, patch: dict) -> None:
+    """Reject a patch when it would reuse a binding producer without its private result."""
+    reusable = set(patch.get("reusable_stages", []))
+    prior_stages = prior.get("stages", {})
+    declarations = manifest.get("result_binding_declarations", {})
+    for consumer in manifest.get("stages", []):
+        if consumer.get("kind") != "tool" or consumer["id"] in reusable:
+            continue
+        for _, binding_key in _find_binding_references(consumer.get("arguments", {})):
+            declaration = declarations.get(binding_key)
+            if declaration is None:
+                continue
+            producer_id = declaration["stage_id"]
+            producer_record = prior_stages.get(producer_id, {})
+            if producer_id in reusable and producer_record.get("status") == "completed":
+                raise PackageError(
+                    "This incremental package run cannot reuse binding producer " + producer_id +
+                    " because its private tool result is not checkpointed, while consumer " + consumer["id"] +
+                    " must run again. Start a fresh package run to regenerate the in-memory result."
+                )
+
+
 def _file_hash(path: Path) -> str:
     digest = hashlib.sha256()
     with Path(path).open("rb") as stream:
@@ -784,10 +1210,39 @@ def prepare_package_run(args: dict, context: dict, registry) -> dict:
                                          "max_output_chars": getattr(context.get("config"), "automation_max_output_chars", 65536)})
     manifest = inspection["manifest"]
     for stage in manifest["stages"]:
-        if stage["kind"] == "tool":
+        if stage["kind"] == "tool" and not _find_binding_references(stage["arguments"]):
             registry.validate_input(stage["tool_id"], stage["arguments"])
     if inspection["archive_bytes"] > 50 * 1024 * 1024:
         raise PackageError("Package exceeds the archive size limit")
+    python_stage_reviews = []
+    python_stages = [stage for stage in manifest["stages"] if stage["kind"] == "python"]
+    if python_stages:
+        # Inspect and bind the full source shown to the user to the exact ZIP
+        # that passed this call's fresh review. Recheck the archive identity
+        # after reading so a concurrent replacement cannot change the preview.
+        try:
+            with zipfile.ZipFile(archive) as package_zip:
+                for stage in python_stages:
+                    script_bytes = package_zip.read(stage["script"])
+                    digest = hashlib.sha256(script_bytes).hexdigest()
+                    expected_digest = manifest["files"][stage["script"]]
+                    if digest != expected_digest:
+                        raise PackageError("Python source differs from the freshly inspected ZIP hash")
+                    script = script_bytes.decode("utf-8", errors="strict")
+                    python_stage_reviews.append({"stage": stage["id"], "path": stage["script"],
+                                                 "sha256": digest, "script": script})
+        except (KeyError, OSError, UnicodeError, zipfile.BadZipFile) as error:
+            raise PackageError("Could not bind package Python source to the inspected archive") from error
+        if _file_hash(archive) != inspection["archive_sha256"]:
+            raise PackageError("Package changed while preparing its exact Python source review")
+    prior_id = args.get("prior_run_id")
+    if prior_id is not None:
+        if not isinstance(prior_id, str) or not re.fullmatch(r"[a-f0-9]{32}", prior_id):
+            raise PackageError("Invalid prior run ID")
+        prior = _load_state(workspace / "runs" / prior_id / "state.json")
+        if prior.get("status") in {"completed", "partial", "failed", "cancelled"}:
+            patch = plan_patch(prior, {"manifest": manifest})
+            _reject_unavailable_patch_bindings(manifest, prior, patch)
     prepared = {"inspection": inspection, "archive_path": str(archive), "workspace": str(workspace),
             "package_id": manifest["package_id"], "task_id": manifest["task_id"],
             "resume_run_id": args.get("resume_run_id"), "prior_run_id": args.get("prior_run_id"),
@@ -799,14 +1254,22 @@ def prepare_package_run(args: dict, context: dict, registry) -> dict:
             "tool_stages": [{"stage": s["id"], "tool": s["tool_id"], "version": manifest["tool_versions"][s["tool_id"]],
                              "arguments": s["arguments"]} for s in manifest["stages"] if s["kind"] == "tool"],
             "python_stages": [{"stage": s["id"], "script": s["script"], "sha256": manifest["files"][s["script"]],
-                               "permissions": s.get("permissions", []), "network_destinations": s.get("network_destinations", [])}
+                               "inputs": s["inputs"], "outputs": s["outputs"],
+                               "arguments": s.get("arguments_list", []), "imports": s.get("imports", []),
+                               "permissions": s.get("permissions", []),
+                               "network_destinations": s.get("network_destinations", []),
+                               "timeout_seconds": s["timeout_seconds"], "retries": s["retries"],
+                               "idempotent": s["idempotent"], "checkpoint": s["checkpoint"]}
                               for s in manifest["stages"] if s["kind"] == "python"],
+            "python_stage_reviews": python_stage_reviews,
             "capabilities": manifest["capabilities"], "expected_outputs": manifest["expected_outputs"],
+            "requires_fresh_run_confirmation": _package_requires_fresh_confirmation(manifest),
             "approval_scope": "This exact package revision, tool set, workspace and declared capability/resource scope"}
     prepared["approval_scope_type"] = "automation_package"
     prepared["package_plan_hash"] = canonical_hash({key: prepared[key] for key in
         ("archive_sha256", "manifest_sha256", "workspace", "package_id", "task_id", "tool_stages",
-         "python_stages", "capabilities", "expected_outputs", "resume_run_id", "prior_run_id", "resource_limits")})
+         "python_stages", "capabilities", "expected_outputs", "resume_run_id", "prior_run_id", "resource_limits",
+         "python_stage_reviews", "requires_fresh_run_confirmation")})
     return prepared
 
 
@@ -848,18 +1311,30 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
     run_dir = workspace / "runs" / run_id
     if run_dir.exists() and resume_id is None:
         raise PackageError("Run directory already exists; select its run ID to resume")
-    run_dir.mkdir(parents=True, exist_ok=True)
     output_root = run_dir / "outputs"
-    output_root.mkdir(parents=True, exist_ok=True)
     state_path = run_dir / "state.json"
     previous = _load_state(state_path) if resume_id else {}
     if resume_id and previous.get("archive_sha256") != inspection["archive_sha256"]:
         raise PackageError("Resume package hash differs from the original run; use prior_run_id for an incremental patch")
+    if resume_id and any(record.get("status") == "uncertain"
+                         for record in previous.get("stages", {}).values()):
+        raise PackageError("A package stage has an uncertain effect; reconcile it before any resume or replay")
     if previous.get("status") == "completed":
         return {"status": "completed", "package_id": manifest["package_id"], "run_id": run_id,
                 "archive_sha256": inspection["archive_sha256"], "resumed": True,
                 "cache_hits": list(previous.get("stages", {})), "outputs": previous.get("outputs", []),
                 "summary": "The exact package run was already verified; no stage was repeated."}
+    if resume_id:
+        bound_producers = {binding["stage_id"]
+                           for binding in manifest.get("result_binding_declarations", {}).values()}
+        unavailable = sorted(stage_id for stage_id in bound_producers
+                             if previous.get("stages", {}).get(stage_id, {}).get("status") in {"completed", "cached"})
+        if unavailable:
+            raise PackageError(
+                "This run cannot resume because private tool results are intentionally not checkpointed "
+                "and completed binding producer(s) cannot be replayed safely: " + ", ".join(unavailable) +
+                ". Start a fresh package run to regenerate the in-memory results."
+            )
     prior = {}
     patch = {"mode": "full_rebuild", "reason": "no_prior_run", "reusable_stages": [],
              "rebuild_stages": manifest["stage_order"]}
@@ -869,6 +1344,11 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
         if prior.get("status") not in {"completed", "partial", "failed", "cancelled"}:
             raise PackageError("Prior run state is unavailable")
         patch = plan_patch(prior, {"manifest": manifest})
+        _reject_unavailable_patch_bindings(manifest, prior, patch)
+        # All binding/cache preflight checks have passed; now it is safe to
+        # create this run's output directory and copy reusable artifacts.
+        run_dir.mkdir(parents=True, exist_ok=True)
+        output_root.mkdir(parents=True, exist_ok=True)
         if patch["mode"] != "full_rebuild":
             for stage_id in patch["reusable_stages"]:
                 record = prior.get("stages", {}).get(stage_id, {})
@@ -900,6 +1380,10 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
                 else:
                     patch["rebuild_stages"].append(stage_id)
                     patch["reusable_stages"].remove(stage_id)
+    else:
+        # Defer run/output directory creation until resume validation has passed.
+        run_dir.mkdir(parents=True, exist_ok=True)
+        output_root.mkdir(parents=True, exist_ok=True)
     stages = {stage["id"]: stage for stage in manifest["stages"]}
     stage_records = {}
     if resume_id:
@@ -928,8 +1412,44 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
     cancel = context.get("cancelled", lambda: False)
     completed = set(stage_records)
     failures = []
+    # Tool outputs may contain private website or user data. Keep them in this
+    # run's memory only; checkpoints retain hashes and small status metadata.
+    tool_results = {}
+    binding_declarations = manifest.get("result_binding_declarations", {})
+    tab_locks = {}
     elapsed = 0.0
     concurrency = min(manifest["capabilities"]["max_concurrency"], int(getattr(context.get("config"), "automation_max_parallel_stages", 4)))
+    # Keep package-reviewed browser hosts available to every stage in this run.
+    # This is derived solely from the inspected manifest and copied into each
+    # subcontext; it does not modify session/global approval state.
+    package_approved_domains = list(context.get("approved_domains", []))
+    package_declared_domains = []
+    for reviewed_stage in manifest["stages"]:
+        if reviewed_stage.get("kind") != "tool":
+            continue
+        reviewed_tool = reviewed_stage.get("tool_id")
+        reviewed_args = reviewed_stage.get("arguments", {})
+        if reviewed_tool == "browser.tabs" and reviewed_args.get("operation") == "open":
+            reviewed_url = reviewed_args.get("url")
+            if isinstance(reviewed_url, str):
+                domain = URLPolicy.website_domain(reviewed_url)
+                if domain not in package_declared_domains:
+                    package_declared_domains.append(domain)
+            continue
+        if reviewed_tool != "browser.open":
+            continue
+        reviewed_url = reviewed_args.get("url")
+        if isinstance(reviewed_url, str):
+            domain = URLPolicy.website_domain(reviewed_url)
+            if domain not in package_approved_domains:
+                package_approved_domains.append(domain)
+            if domain not in package_declared_domains:
+                package_declared_domains.append(domain)
+        for domain in reviewed_args.get("allowed_domains", []):
+            if domain not in package_approved_domains:
+                package_approved_domains.append(domain)
+            if domain not in package_declared_domains:
+                package_declared_domains.append(domain)
 
     async def _await_stage(coroutine, timeout_seconds):
         task = asyncio.create_task(coroutine)
@@ -960,23 +1480,135 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
             raise asyncio.CancelledError()
         sid = stage["id"]
         start = time.monotonic()
+        started_at = time.time()
         fingerprint = canonical_hash({"stage": stage, "payload": manifest["files"].get(stage.get("script")),
                                       "inputs": {name: _sha256((package_dir / name).read_bytes()) for name in stage["inputs"] if (package_dir / name).is_file()},
                                       "dependencies": {dep: state["stages"].get(dep, {}).get("output_hashes", {}) for dep in stage["depends_on"]},
+                                      "dependency_tool_results": {dep: state["stages"].get(dep, {}).get("result", {}).get("result_sha256")
+                                                                   for dep in stage["depends_on"]},
                                       "tool_version": manifest["tool_versions"].get(stage.get("tool_id")),
                                       "python": list(sys.version_info[:3])})
         outputs = {}
         outcome = None
         max_attempts = stage["retries"] + 1 if stage["idempotent"] else 1
+        scratch_cleanup_verified = None
+        unverified_outputs_before = set()
         for attempt in range(1, max_attempts + 1):
             execution_started = False
+            stage_scratch = None
+
+            def cleanup_scratch(*, verify=True):
+                nonlocal stage_scratch, scratch_cleanup_verified
+                if stage_scratch is None:
+                    return
+                scratch_path = stage_scratch
+                if verify:
+                    _verify_stage_scratch(scratch_path, output_root)
+                _cleanup_stage_scratch(scratch_path, output_root)
+                stage_scratch = None
+                scratch_cleanup_verified = True
+
             try:
                 if stage["kind"] == "tool":
                     subcontext = dict(context)
                     subcontext.update(approved=True, approved_hash=context["package_plan_hash"],
-                                      package_stage=True, source_request_id=manifest["correlation_id"])
-                    outcome = await _await_stage(registry.execute(stage["tool_id"], stage["arguments"], subcontext),
-                                                 stage["timeout_seconds"])
+                                      package_stage=True, source_request_id=manifest["correlation_id"],
+                                      approved_domains=list(package_approved_domains))
+                    stage_arguments = _resolve_result_bindings(stage["arguments"], tool_results, binding_declarations)
+                    registry.validate_input(stage["tool_id"], stage_arguments)
+                    tool_id = stage["tool_id"]
+                    if tool_id == "browser.open":
+                        # Result-bound destinations may use only hosts named
+                        # statically by this same inspected stage. Never turn a
+                        # runtime binding into a new host authorization.
+                        reviewed_arguments = stage["arguments"]
+                        stage_domains = []
+                        reviewed_url = reviewed_arguments.get("url")
+                        if isinstance(reviewed_url, str):
+                            reviewed_domain = URLPolicy.website_domain(reviewed_url)
+                            if reviewed_domain not in stage_domains:
+                                stage_domains.append(reviewed_domain)
+                        for domain in reviewed_arguments.get("allowed_domains", []):
+                            if domain not in stage_domains:
+                                stage_domains.append(domain)
+                        destination_domain = URLPolicy.website_domain(stage_arguments["url"])
+                        _reject_ambiguous_numeric_host(destination_domain)
+                        if _find_binding_references(reviewed_arguments.get("url")):
+                            _require_public_browser_host(destination_domain)
+                        if not any(destination_domain == domain or destination_domain.endswith("." + domain)
+                                   for domain in stage_domains):
+                            raise PolicyError("Resolved browser.open destination is outside this inspected stage's declared hosts")
+                        registry.validate_call(tool_id, stage_arguments, subcontext)
+                        approved_domains = list(subcontext.get("approved_domains", []))
+                        for domain in stage_domains:
+                            if domain not in approved_domains:
+                                approved_domains.append(domain)
+                            authorize = getattr(subcontext.get("browser"), "authorize_tool_domain", None)
+                            if callable(authorize):
+                                authorize(domain)
+                        subcontext["approved_domains"] = approved_domains
+                    elif tool_id == "browser.tabs" and stage_arguments.get("operation") == "open":
+                        destination_domain = URLPolicy.website_domain(stage_arguments["url"])
+                        _reject_ambiguous_numeric_host(destination_domain)
+                        if _find_binding_references(stage["arguments"].get("url")):
+                            _require_public_browser_host(destination_domain)
+                            if not any(destination_domain == domain or destination_domain.endswith("." + domain)
+                                       for domain in package_declared_domains):
+                                raise PolicyError("Resolved browser.tabs destination is outside this package's inspected website hosts")
+                    elif tool_id in {"files.create", "files.append", "files.copy", "files.replace"}:
+                        # The filesystem's S: alias must be the exact mapped
+                        # destination returned by the same preflight as the
+                        # package's reviewed tool arguments.
+                        preflight = registry.validate_call(tool_id, stage_arguments, subcontext)
+                        if isinstance(preflight, dict) and preflight.get("s_drive_destination"):
+                            subcontext["s_drive_destination"] = preflight["s_drive_destination"]
+                    elif tool_id in {"site_knowledge.bind", "site_knowledge.save", "site_knowledge.invalidate"}:
+                        # Reuse the knowledge subsystem's normal validation and
+                        # consent payload, while binding this package-stage grant
+                        # to both the approved package plan and resolved args.
+                        from .site_knowledge import prepare_knowledge
+                        stage_approval_hash = canonical_hash({
+                            "package_plan_hash": context["package_plan_hash"],
+                            "stage_id": sid,
+                            "tool_id": stage["tool_id"],
+                            "arguments": stage_arguments,
+                        })
+                        reviewed = prepare_knowledge(stage_arguments, subcontext, name=tool_id)
+                        subcontext.update(approved_hash=stage_approval_hash,
+                                          approval_hash=stage_approval_hash,
+                                          site_knowledge_reviewed=reviewed)
+                        if tool_id == "site_knowledge.save":
+                            subcontext["site_knowledge_consent"] = reviewed
+                    elif tool_id == "discovery.manifest":
+                        from .discovery_engine import prepare_discovery
+                        reviewed = prepare_discovery(stage_arguments, subcontext)
+                        stage_approval_hash = canonical_hash({"package_plan_hash": context["package_plan_hash"],
+                                                              "stage_id": sid, "tool_id": tool_id,
+                                                              "arguments": stage_arguments})
+                        subcontext.update(approval_hash=stage_approval_hash,
+                                          approved_hash=stage_approval_hash,
+                                          discovery_reviewed=reviewed)
+                    elif tool_id in {"discovery.knowledge_save", "discovery.knowledge_invalidate",
+                                     "navigation.intent"}:
+                        from .discovery_knowledge import prepare_knowledge_tool
+                        reviewed = prepare_knowledge_tool(tool_id, stage_arguments, subcontext)
+                        stage_approval_hash = canonical_hash({"package_plan_hash": context["package_plan_hash"],
+                                                              "stage_id": sid, "tool_id": tool_id,
+                                                              "arguments": stage_arguments})
+                        subcontext.update(approval_hash=stage_approval_hash,
+                                          approved_hash=stage_approval_hash,
+                                          discovery_reviewed=reviewed)
+                        if tool_id == "discovery.knowledge_save":
+                            subcontext["discovery_save_consent"] = reviewed
+                    execution_started = True
+                    async def execute_tool_stage():
+                        tab_id = stage_arguments.get("tab_id")
+                        if stage["tool_id"] in {"browser.recon", "browser.route"} and isinstance(tab_id, str):
+                            lock = tab_locks.setdefault(tab_id, asyncio.Lock())
+                            async with lock:
+                                return await registry.execute(stage["tool_id"], stage_arguments, subcontext)
+                        return await registry.execute(stage["tool_id"], stage_arguments, subcontext)
+                    outcome = await _await_stage(execute_tool_stage(), stage["timeout_seconds"])
                     if not outcome.get("ok"):
                         if attempt < max_attempts and outcome.get("result", {}).get("side_effects_uncertain") is False:
                             continue
@@ -986,6 +1618,10 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
                     expected = [str(_approved_output_path(output_root, path)) for path in stage["outputs"]]
                     for target in expected:
                         Path(target).parent.mkdir(parents=True, exist_ok=True)
+                    scratch_parent = output_root / _SCRATCH_DIRNAME / sid
+                    scratch_parent.mkdir(parents=True, exist_ok=True)
+                    stage_scratch = scratch_parent / uuid.uuid4().hex
+                    stage_scratch.mkdir(parents=False, exist_ok=False)
                     # The orchestrator reads the hash-verified package script and
                     # submits its text to Code Runner. Only stage data inputs need
                     # the package's read_files grant.
@@ -996,7 +1632,8 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
                     permissions = list(stage.get("permissions", []))
                     code_args = {"script": script_path.read_text(encoding="utf-8"), "purpose": manifest["description"][:4000],
                                  "language": "local_python", "working_directory": str(package_dir), "read_paths": read_paths,
-                                 "create_paths": expected, "expected_outputs": expected, "commands": [],
+                                 "create_paths": expected, "create_roots": [str(stage_scratch.resolve())],
+                                 "expected_outputs": expected, "commands": [],
                                  "network_destinations": stage.get("network_destinations", []), "permissions": permissions,
                                  "risk_summary": "Execute this exact package stage under its reviewed manifest scope.",
                                  "recovery_notes": "Resume from the verified package checkpoint; do not repeat uncertain effects.",
@@ -1009,11 +1646,18 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
                                  }
                     runner = code_runner_factory(context["path_policy"], context["session_dir"], stage["timeout_seconds"],
                                                  min(manifest["capabilities"]["max_output_chars"], 12000))
+                    authorize_scratch = getattr(runner, "_authorize_package_scratch_root", None)
+                    if callable(authorize_scratch):
+                        authorize_scratch(stage_scratch, output_root)
                     proposed = runner.prepare(code_args)
+                    unverified_outputs_before = {path for path in expected
+                                                 if not Path(path).exists() and not Path(path).is_symlink()}
                     execution_started = True
                     outcome = await _await_stage(runner.run_async(code_args, proposed["proposal_hash"], process_registry=context.get("process_registry")),
                                                  stage["timeout_seconds"])
+                    cleanup_scratch()
                     if outcome.get("status") != "completed":
+                        _remove_unverified_stage_outputs(expected, output_root, unverified_outputs_before)
                         safe_retry = (outcome.get("side_effects_uncertain") is False
                                       and not any(Path(path).exists() for path in expected))
                         if attempt < max_attempts and safe_retry:
@@ -1021,8 +1665,42 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
                         break
                 break
             except asyncio.CancelledError:
+                if stage["kind"] == "python" and unverified_outputs_before:
+                    _remove_unverified_stage_outputs(
+                        [_approved_output_path(output_root, rel) for rel in stage["outputs"]],
+                        output_root, unverified_outputs_before)
+                try:
+                    cleanup_scratch()
+                except Exception:
+                    try:
+                        cleanup_scratch(verify=False)
+                    except Exception:
+                        pass
+                side_effects_uncertain = (execution_started and
+                    (stage["kind"] == "python"
+                     or registry.definition(stage["tool_id"]).get("approval_policy") != "read_only"))
+                state["stages"][sid] = {"status": "uncertain" if side_effects_uncertain else "cancelled",
+                                        "tool_id": stage.get("tool_id"),
+                                        "tool_version": manifest["tool_versions"].get(stage.get("tool_id")),
+                                        "started_at": started_at, "finished_at": time.time(),
+                                        "side_effects_uncertain": side_effects_uncertain,
+                                        "scratch_cleanup_verified": scratch_cleanup_verified,
+                                        "error": "Stage cancelled before a verified completion."}
+                _save_state(state_path, state)
                 raise
             except Exception as error:
+                if stage["kind"] == "python" and unverified_outputs_before:
+                    _remove_unverified_stage_outputs(
+                        [_approved_output_path(output_root, rel) for rel in stage["outputs"]],
+                        output_root, unverified_outputs_before)
+                try:
+                    cleanup_scratch()
+                except Exception as cleanup_error:
+                    try:
+                        cleanup_scratch(verify=False)
+                    except Exception:
+                        pass
+                    error = PackageError("Python stage scratch cleanup/verification failed: " + str(cleanup_error))
                 outcome = {"ok": False, "status": "failed", "error": str(error)[:1000],
                            "side_effects_uncertain": execution_started}
                 break
@@ -1030,12 +1708,32 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
             outputs = {rel: _file_hash(_approved_output_path(output_root, rel)) for rel in stage["outputs"]}
         elif stage["kind"] == "tool" and outcome and outcome.get("ok"):
             outputs = {}
-        success = outcome is not None and (outcome.get("ok", True) if stage["kind"] == "tool" else outcome.get("status") == "completed")
-        record = {"status": "completed" if success else "failed", "fingerprint": fingerprint,
+            tool_results[sid] = outcome
+        success = outcome is not None and (outcome.get("ok") is True if stage["kind"] == "tool" else outcome.get("status") == "completed")
+        if stage["kind"] == "tool" and outcome is not None:
+            serialized_tool_result = json.dumps(outcome.get("result", {}), ensure_ascii=False,
+                                                sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+            retained_result = {"ok": outcome.get("ok") is True,
+                               "result_sha256": hashlib.sha256(serialized_tool_result).hexdigest(),
+                               "result_bytes": len(serialized_tool_result)}
+            if isinstance(outcome.get("error"), dict):
+                retained_result["error"] = {key: outcome["error"].get(key) for key in ("code", "message")
+                                             if isinstance(outcome["error"].get(key), str)}
+        else:
+            retained_result = {key: outcome.get(key) for key in ("status", "exit_code", "stdout", "stderr", "audit_path", "side_effects_uncertain", "error") if key in outcome} if outcome else {}
+        outcome_result = outcome.get("result") if isinstance(outcome, dict) else None
+        outcome_uncertain = bool(outcome and (outcome.get("side_effects_uncertain") is True
+                                             or isinstance(outcome_result, dict) and outcome_result.get("side_effects_uncertain") is True
+                                             or outcome.get("status") == "uncertain"))
+        finished_at = time.time()
+        record = {"status": "completed" if success else "uncertain" if outcome_uncertain else "failed", "fingerprint": fingerprint,
                   "attempts": attempt, "duration_seconds": round(time.monotonic() - start, 4),
+                  "started_at": started_at, "finished_at": finished_at,
                   "output_hashes": outputs, "tool_id": stage.get("tool_id"),
                   "tool_version": manifest["tool_versions"].get(stage.get("tool_id")),
-                  "result": outcome if stage["kind"] == "tool" else {key: outcome.get(key) for key in ("status", "exit_code", "stdout", "stderr", "audit_path", "side_effects_uncertain", "error") if key in outcome}}
+                  "side_effects_uncertain": outcome_uncertain,
+                  "scratch_cleanup_verified": scratch_cleanup_verified,
+                  "result": retained_result}
         elapsed += record["duration_seconds"]
         if elapsed > manifest["capabilities"]["max_runtime_seconds"]:
             record["status"] = "failed"; record["error"] = "Package runtime budget expired"
@@ -1064,9 +1762,21 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
             if not ready:
                 raise PackageError("No runnable stage remains; dependency state is inconsistent")
             wave = ready[:concurrency]
-            # Do not overlap tool effects with one another. Python stages have
-            # disjoint declared create paths, so independent waves may run safely.
-            if any(stage["kind"] == "tool" for stage in wave):
+            # Read-only reconnaissance may overlap only on distinct, explicit
+            # owned tabs. Python workers may overlap only for local file work
+            # with isolated scratch and disjoint exact outputs. Network/tool
+            # effects and mixed waves remain serialized.
+            parallel_tab_reads = _parallel_read_tab_ids(
+                wave, tool_results, binding_declarations, registry, context,
+                package_approved_domains, manifest["correlation_id"]) is not None
+            parallel_python = (all(stage["kind"] == "python"
+                                    and set(stage.get("permissions", [])) <= {"read_files", "create_files"}
+                                    and not stage.get("network_destinations")
+                                    for stage in wave)
+                               and len(wave) > 1)
+            if not (parallel_tab_reads or parallel_python):
+                # Tool stages, network stages and mixed waves can cross an
+                # authority boundary or observe shared state, so serialize them.
                 wave = [wave[0]]
             results = await asyncio.gather(*(run_stage(stage) for stage in wave), return_exceptions=True)
             for stage, result in zip(wave, results):
@@ -1087,10 +1797,15 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
             state["status"] = "completed"
     except asyncio.CancelledError:
         state["status"] = "cancelled"
+        for stage in manifest["stages"]:
+            if stage["id"] not in state["stages"]:
+                state["stages"][stage["id"]] = {"status": "cancelled", "side_effects_uncertain": False}
         _save_state(state_path, state)
         return {"status": "cancelled", "package_id": manifest["package_id"], "run_id": run_id,
                 "archive_sha256": inspection["archive_sha256"], "patch_decision": patch,
                 "completed_stages": sorted(completed), "failed_stages": failures,
+                "uncertain_stages": sorted(stage_id for stage_id, record in state["stages"].items()
+                                            if record.get("status") == "uncertain"),
                 "summary": "Package execution was cancelled at a retained checkpoint."}
 
     validation = _validate_outputs(manifest, package_dir, output_root)

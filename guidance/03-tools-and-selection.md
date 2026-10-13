@@ -2,12 +2,19 @@
 
 Guidance version: 1.0.
 
-A locally reviewed browser approval also grants continued navigation for this
-agent session within the approved HTTPS websites and their subdomains. Use the
-`approved_navigation_scope` supplied by the orchestrator for further opens,
-history navigation, navigation-only plans and bounded same-origin new tabs.
-Do not claim forms, searches, customer-bound actions, downloads or scripts are
-covered. New hosts need approval. The scope expires when this agent session ends.
+A locally reviewed direct browser approval also grants continued navigation
+for this agent session within the approved HTTPS websites and their subdomains.
+Use the `approved_navigation_scope` supplied by the orchestrator for further
+opens, history navigation, navigation-only plans and bounded same-origin new
+tabs. Do not claim forms, searches, customer-bound actions, downloads or scripts
+are covered. New hosts need approval for direct browser tools.
+
+An explicit automation-package session grant additionally covers HTTPS hosts
+declared by `browser.open` and `browser.tabs.open` stages in later packages only
+after each ZIP passes fresh hash-bound inspection. That package grant does not
+skip URL validation or platform handoffs. Data-bound destinations require fresh
+run approval, must match statically declared package hosts, and must use public
+hosts. The grant expires when this agent session ends.
 Delivered decisions, plans and tool exchanges are shown to the user as Copilot
 process summaries; provide concise useful progress on each response.
 
@@ -64,4 +71,4 @@ Use `operation.learn` only after two distinct public GET URLs have already been 
 For drift, stop using the degraded operation, collect fresh browser evidence, and propose a new expected revision. For authentication, rate limiting, access denial or input rejection, stop and report the classified boundary. Do not turn a failed operation into an automatic browser action, retry loop or state-changing request.
 # Task routing and package execution
 
-Use the request's measured `task_routing` estimate as a route recommendation. Keep small, bounded requests on direct tools. For complex work spanning multiple files, stages, dependencies, recovery or validation, request one complete automation ZIP that follows the attached `automation-package-v1.schema.json`. Include manifest, README, exact file hashes, versioned registered-tool references, declared paths/capabilities, bounded resources, dependency-ordered stages, checkpoints, validation, expected outputs and a structured result contract. Ask Copilot to run relevant tests in its own cloud sandbox and report the results; no live environment test is expected because Copilot cannot access it. The local agent downloads and inspects the delivered revision, then returns all review failures together for repair. Local package execution requires a passing review and exact local approval. The agent retains the original ZIP and issues one explicit package-run review covering the exact revision and entire declared scope. Read-only registered tools and create-only outputs inside the approved workspace are supported. A changed package or scope requires a new review. See guidance 04 and 08 for worker and archive boundaries.
+Use the request's measured `task_routing` estimate as a route recommendation. Keep small, bounded requests on direct tools. For complex work spanning multiple files, stages, dependencies, recovery or validation, request one complete automation ZIP that follows the attached `automation-package-v1.1.schema.json`, the current authoring schema. It supports typed `result_bindings` between tool stages; use exact JSON pointers and exact `{"$binding":"stage.name"}` references when later tool arguments depend on earlier results. The attached `automation-package-v1.schema.json` remains compatible for packages without typed result bindings. Include manifest, README, exact file hashes, versioned registered-tool references, declared paths/capabilities, bounded resources, dependency-ordered stages, checkpoints, validation, expected outputs and a structured result contract. Ask Copilot to run relevant tests in its own cloud sandbox and report the results; cloud checks never replace a requested local live test. The local agent downloads and freshly inspects every delivered revision, then returns all review failures together for repair. A local session grant covers future packages only after fresh inspection and can cover declared registered tools, including bounded file edits inside already allowed roots or session-approved path extensions. Package Python source is shown in full with its SHA-256 and always requires fresh one-run approval; session grants cannot authorize executable package code. Consequential or unbounded actions also require fresh approval for that exact run. Package stages cannot call files.grant_path; a requested new location still needs its separate exact path approval. PathPolicy, protected paths and each tool's preflight/hash checks remain active. The displayed run shows the current package hashes, tool calls, effects, paths and resource scope. Existing protected-path checks, explicit approval for approved path extensions, and platform-required handoffs remain in force. Python stage outputs stay beneath the approved run output root; registered file tools follow their separate PathPolicy and explicit path-grant rules. A changed archive is always inspected again. See guidance 04 and 08 for worker and archive boundaries.

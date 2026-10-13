@@ -81,6 +81,21 @@ class TerminalInputTests(unittest.IsolatedAsyncioTestCase):
         items = await asyncio.to_thread(self._wait_for_items, 1)
         self.assertEqual('Please preserve the pending action plan', items[0]['text'])
 
+    async def test_session_grant_choices_are_delivered_to_active_approval_prompt(self):
+        self.broker.set_active('run-session-approval', threading.Event())
+
+        for choice in ('1', '2', '3', '4', 'session'):
+            with self.subTest(choice=choice):
+                approval = asyncio.create_task(self.broker.ask_approval('Choose approval scope'))
+                deadline = time.monotonic() + 1
+                while not self.broker._approval_prompt_active and time.monotonic() < deadline:
+                    await asyncio.sleep(.01)
+                self.assertTrue(self.broker._approval_prompt_active, 'approval prompt did not become active')
+                self.lines.put(choice)
+                self.assertEqual(choice, await asyncio.wait_for(approval, timeout=2))
+
+        self.assertEqual([], self.broker.poll_steering())
+
     def _wait_for_items(self, count):
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:

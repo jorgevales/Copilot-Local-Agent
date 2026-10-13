@@ -109,6 +109,7 @@ class BrowserEndpointTests(unittest.IsolatedAsyncioTestCase):
         with patch('copilot_agent.app.machine_key', return_value='vdi-synthetic'), \
              patch('copilot_agent.app.system'), \
              patch('copilot_agent.app.socket', SimpleNamespace(socket=sockets.socket)), \
+             patch('copilot_agent.app.edge.discover_edge_debugging_endpoints', return_value=[]), \
              patch('copilot_agent.app.edge.get_cdp_version', return_value={'Browser': 'OtherBrowser'}), \
              patch('copilot_agent.app.edge.validate_endpoint', side_effect=EndpointError('Not Edge')), \
              patch('copilot_agent.app.edge.validate_profile_ownership') as owner:
@@ -134,6 +135,65 @@ class BrowserEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(9666, config.debug_port)
         get_version.assert_called_once_with('http://127.0.0.1:9666')
         self.assertEqual(9666, settings['debug_ports']['vdi-synthetic'])
+
+    async def test_stale_explicit_port_fails_closed_without_trying_another_port(self):
+        sockets = FakeSockets([63741])
+        config = self.config(63741)
+        with patch('copilot_agent.app.machine_key', return_value='vdi-synthetic'), \
+             patch('copilot_agent.app.system'), \
+             patch('copilot_agent.app.socket', SimpleNamespace(socket=sockets.socket)), \
+             patch('copilot_agent.app.edge.discover_edge_debugging_endpoints', return_value=[]), \
+             patch('copilot_agent.app.edge.get_cdp_version', return_value=None), \
+             patch('copilot_agent.app.edge.validate_endpoint'), \
+             patch('copilot_agent.app.edge.validate_edge_listener'):
+            with self.assertRaisesRegex(ValueError, 'Explicit Edge debugging port 63741'):
+                await choose_browser_endpoint(config, SimpleNamespace(port=63741), {})
+        self.assertEqual([('127.0.0.1', 63741)], sockets.binds)
+        self.assertEqual(63741, config.debug_port)
+
+    async def test_explicit_port_and_profile_reject_wrong_listener_profile(self):
+        expected = Path('dedicated-profile').resolve()
+        actual = Path('different-profile').resolve()
+        payload = {'Browser': 'Edg/synthetic',
+                   'webSocketDebuggerUrl': 'ws://127.0.0.1:63741/devtools/browser/test'}
+        sockets = FakeSockets([63741])
+        config = self.config(63741)
+        config.profile_dir = expected
+        config._profile_explicit = True
+        config._configured_profile_dir = expected
+        with patch('copilot_agent.app.machine_key', return_value='vdi-synthetic'), \
+             patch('copilot_agent.app.system'), \
+             patch('copilot_agent.app.socket', SimpleNamespace(socket=sockets.socket)), \
+             patch('copilot_agent.app.edge.discover_edge_debugging_endpoints',
+                   return_value=[{'port': 63741, 'profile': actual}]), \
+             patch('copilot_agent.app.edge.get_cdp_version', return_value=payload), \
+             patch('copilot_agent.app.edge.validate_endpoint'), \
+             patch('copilot_agent.app.edge.validate_edge_listener'):
+            with self.assertRaisesRegex(ValueError, 'occupied by an unverified or mismatched listener'):
+                await choose_browser_endpoint(config, SimpleNamespace(port=63741), {})
+        self.assertEqual([], sockets.binds)
+        self.assertEqual(expected, config.profile_dir)
+
+    async def test_explicit_port_and_profile_reject_unknown_listener_profile(self):
+        expected = Path('dedicated-profile').resolve()
+        payload = {'Browser': 'Edg/synthetic',
+                   'webSocketDebuggerUrl': 'ws://127.0.0.1:63741/devtools/browser/test'}
+        sockets = FakeSockets([63741])
+        config = self.config(63741)
+        config.profile_dir = expected
+        config._profile_explicit = True
+        config._configured_profile_dir = expected
+        with patch('copilot_agent.app.machine_key', return_value='vdi-synthetic'), \
+             patch('copilot_agent.app.system'), \
+             patch('copilot_agent.app.socket', SimpleNamespace(socket=sockets.socket)), \
+             patch('copilot_agent.app.edge.discover_edge_debugging_endpoints', return_value=[]), \
+             patch('copilot_agent.app.edge.get_cdp_version', return_value=payload), \
+             patch('copilot_agent.app.edge.validate_endpoint'), \
+             patch('copilot_agent.app.edge.validate_edge_listener', return_value=None):
+            with self.assertRaisesRegex(ValueError, 'occupied by an unverified or mismatched listener'):
+                await choose_browser_endpoint(config, SimpleNamespace(port=63741), {})
+        self.assertEqual([], sockets.binds)
+        self.assertEqual(expected, config.profile_dir)
 
     async def test_explicit_port_uses_discovered_profile_for_safe_live_edge_attachment(self):
         profile = Path('actual-live-edge-profile')
@@ -203,6 +263,7 @@ class BrowserEndpointTests(unittest.IsolatedAsyncioTestCase):
         with patch('copilot_agent.app.machine_key', return_value='vdi-synthetic'), \
              patch('copilot_agent.app.system'), \
              patch('copilot_agent.app.socket', SimpleNamespace(socket=sockets.socket)), \
+             patch('copilot_agent.app.edge.discover_edge_debugging_endpoints', return_value=[]), \
              patch('copilot_agent.app.edge.get_cdp_version', side_effect=probe):
             await choose_browser_endpoint(config, SimpleNamespace(port=None), settings)
         self.assertCountEqual(observed, ['http://127.0.0.1:9222', 'http://127.0.0.1:9555', 'http://127.0.0.1:9443'])

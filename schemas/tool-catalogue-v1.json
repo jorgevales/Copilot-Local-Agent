@@ -1097,8 +1097,8 @@
     {
       "name": "browser.open",
       "version": "1.0",
-      "description": "After explicit approval, navigate the isolated managed tab to an HTTPS website. JavaScript is enabled; explicitly requested dependency hosts are separately approved. No Copilot authentication is shared.",
-      "intended_use": "After explicit approval, navigate the isolated managed tab to an HTTPS website. JavaScript is enabled; explicitly requested dependency hosts are separately approved. No Copilot authentication is shared.",
+      "description": "After explicit approval, open the HTTPS website in an owned tab of the same verified Edge profile, window and CDP port as Copilot. Returns its stable primary tab_id with the final URL and title for follow-up browser.tabs or browser.recon calls. Existing site sign-ins are shared. Dependency hosts require explicit approval; focus returns to Copilot after the tool.",
+      "intended_use": "After explicit approval, open the HTTPS website in an owned tab of the same verified Edge profile, window and CDP port as Copilot. Returns its stable primary tab_id with the final URL and title for follow-up browser.tabs or browser.recon calls. Existing site sign-ins are shared. Dependency hosts require explicit approval; focus returns to Copilot after the tool.",
       "preconditions": [
         "Current validated tool call",
         "Configured filesystem/domain boundaries",
@@ -1145,7 +1145,32 @@
             "type": "string"
           },
           "result": {
-            "type": "object"
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "tab_id": {
+                "type": "string"
+              },
+              "javascript_enabled": {
+                "type": "boolean"
+              },
+              "shared_verified_profile": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "url",
+              "title",
+              "tab_id",
+              "javascript_enabled",
+              "shared_verified_profile"
+            ],
+            "additionalProperties": false
           },
           "error": {
             "type": "object",

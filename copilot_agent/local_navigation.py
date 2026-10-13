@@ -13,6 +13,39 @@ from pathlib import Path
 from .policy import PathPolicy, PolicyError
 
 
+def prepare_session_path_extension(args, context):
+    """Validate one reachable user-selected file or directory before approval."""
+    base = context.get('path_policy')
+    state = context.get('session_state')
+    if not isinstance(base, PathPolicy) or state is None:
+        raise PolicyError('A current agent session and configured file policy are required')
+    if not isinstance(args.get('reason'), str) or not args['reason'].strip():
+        raise PolicyError('A user-provided reason is required for the requested path extension')
+    candidate = Path(args['path']).expanduser()
+    if not candidate.is_absolute():
+        raise PolicyError('A path extension requires an absolute existing location')
+    probe = PathPolicy([candidate], excluded_roots=base.excluded_roots,
+                       mapped_s_root=base.mapped_s_root)
+    resolved = probe.resolve(candidate, must_exist=True)
+    if resolved == Path(resolved.anchor):
+        raise PolicyError('Drive or share roots cannot be granted as file access extensions')
+    if any(resolved == excluded or resolved in excluded.parents
+           for excluded in base.excluded_roots):
+        raise PolicyError('A path extension cannot include a protected profile or credential root')
+    info = resolved.stat()
+    kind = 'directory' if resolved.is_dir() else 'file' if resolved.is_file() else None
+    if kind is None or kind != args['scope']:
+        raise PolicyError('The selected scope must match an existing regular file or directory')
+    if kind == 'file' and info.st_nlink > 1:
+        raise PolicyError('Files with hardlink aliases cannot be extended')
+    if any(resolved == root or root in resolved.parents for root in base.roots):
+        raise PolicyError('The selected location is already inside the configured file roots')
+    return {'path': str(resolved), 'scope': kind, 'kind': kind, 'reason': args['reason'].strip()[:2000],
+            'session_id': state.session_id, 'device': info.st_dev, 'inode': info.st_ino,
+            'approved_operations': ['read', 'create', 'replace'],
+            'extension_scope': 'exact file only' if kind == 'file' else 'selected directory and descendants'}
+
+
 class FilesystemAccessError(PolicyError):
     def __init__(self, code, message):
         self.code = code
@@ -93,3 +126,87 @@ class SessionPathPolicy(PathPolicy):
         except OSError as error:
             diagnostic = filesystem_diagnostic(error)
             raise FilesystemAccessError(diagnostic['code'], diagnostic['message']) from error
+
+
+class SessionPathExtensionPolicy(PathPolicy):
+    """Configured roots plus individually approved, session-only exact roots."""
+    def __init__(self, configured_policy, grants, session_id):
+        self.configured_policy = configured_policy
+        self.grants = grants
+        self.session_id = session_id
+        self.roots = configured_policy.roots
+        self.excluded_roots = configured_policy.excluded_roots
+        self.mapped_s_root = configured_policy.mapped_s_root
+
+    def is_extended(self, path):
+        try:
+            candidate = Path(path).expanduser().resolve()
+        except (OSError, ValueError):
+            return False
+        return any(self._contains(grant, candidate) for grant in self.grants
+                   if grant.get('session_id') == self.session_id)
+
+    def require_operation(self, path, operation):
+        candidate = Path(path).expanduser().resolve()
+        matches = [grant for grant in self.grants
+                   if grant.get('session_id') == self.session_id and self._contains(grant, candidate)]
+        if matches and not any(operation in grant.get('approved_operations', []) for grant in matches):
+            raise PolicyError('This session path extension does not approve the requested file operation')
+
+    @staticmethod
+    def _contains(grant, candidate):
+        root = Path(grant['path'])
+        return candidate == root if grant['kind'] == 'file' else candidate == root or root in candidate.parents
+
+    def resolve_internal_replace_temp(self, target, temporary):
+        """Resolve a generated sibling staging file for an exact-file grant.
+
+        This deliberately does not broaden normal path resolution: only the
+        replace implementation can call it, and only for an unpredictable,
+        agent-generated temporary name next to the exact granted file.
+        """
+        target = Path(target).resolve()
+        temporary = Path(temporary).absolute()
+        for grant in self.grants:
+            root = Path(grant.get('path', ''))
+            if (grant.get('session_id') != self.session_id or grant.get('kind') != 'file'
+                    or grant.get('approved_operations') is None or target != root):
+                continue
+            try:
+                info = root.stat()
+                if (info.st_dev, info.st_ino) != (grant.get('device'), grant.get('inode')):
+                    continue
+                if temporary.parent.resolve() != root.parent.resolve():
+                    continue
+                prefix = '.' + root.name + '.replace-'
+                if (not temporary.name.startswith(prefix) or not temporary.name.endswith('.tmp')
+                        or len(temporary.name) != len(prefix) + 32 + 4):
+                    continue
+                return temporary
+            except (OSError, ValueError):
+                continue
+        raise PolicyError('Internal replacement staging is outside the approved exact-file scope')
+
+    def resolve(self, path, must_exist=False):
+        try:
+            return self.configured_policy.resolve(path, must_exist=must_exist)
+        except PolicyError as base_error:
+            for grant in self.grants:
+                if grant.get('session_id') != self.session_id:
+                    continue
+                root = Path(grant.get('path', ''))
+                try:
+                    extended = PathPolicy([root], excluded_roots=self.excluded_roots,
+                                           mapped_s_root=self.mapped_s_root)
+                    candidate = extended.resolve(path, must_exist=must_exist)
+                    if not self._contains(grant, candidate):
+                        continue
+                    info = root.stat()
+                    if (info.st_dev, info.st_ino) != (grant.get('device'), grant.get('inode')):
+                        continue
+                    if grant['kind'] == 'file' and candidate != root:
+                        continue
+                    return candidate
+                except (PolicyError, OSError, ValueError, KeyError):
+                    continue
+            raise base_error

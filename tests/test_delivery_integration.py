@@ -5,15 +5,87 @@ import json
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 from copilot_agent.policy import PolicyError
 from copilot_agent.approvals import ApprovalManager
 from copilot_agent.logging_utils import redact
 from copilot_agent.orchestrator import Orchestrator
-from tests.test_orchestrator import MockBrowser, final_response
+from tests.test_orchestrator import MockBrowser, final_response, tool_response
 from tests.test_protocol_state import make_fixture
 
 
 class DeliveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_automatically_inspected_unnamed_automation_zip_satisfies_zip_delivery(self):
+        from copilot_agent.tools import ToolRegistry
+        from copilot_agent.delivery import delivery_requirements
+        from tests.test_automation_packages import package_bytes
+
+        prompt = ('Create and deliver a NEW executable automation ZIP that performs a fresh multi-tab '
+                  'GOV.UK navigation proof and stores the navigation knowledge.')
+        requirement = delivery_requirements(prompt)
+        self.assertEqual('zip', requirement['mode'])
+        self.assertEqual([], requirement['expected_names'])
+        self.assertEqual('The user explicitly requested an archive/package.', requirement['reason'])
+
+        root, config, state, _ = make_fixture('delivery-inspected-package-')
+        config.max_delivery_retries = 1
+        config.automation_package_score = 1
+        archive = root / 'workspace' / 'govuk-package.zip'
+        archive.write_bytes(package_bytes())
+
+        def download_request(message):
+            return tool_response(message, call_id='download-package', name='copilot.download',
+                                 arguments={'expected_name': archive.name,
+                                            'link_text': 'Download ' + archive.name})
+
+        browser = MockBrowser([final_response, download_request, *([final_response] * 4)])
+        registry = ToolRegistry()
+        agent = Orchestrator(config, browser, registry, state,
+                             approval_decider=lambda preview: 'once', display=lambda text: None)
+
+        class DownloadStub:
+            async def prepare(self, arguments, request_id):
+                return {'expected_name': arguments['expected_name'], 'request_id': request_id}
+
+        agent.download_service = DownloadStub()
+        original_execute = registry.execute
+
+        async def execute(name, arguments, context):
+            if name == 'copilot.download':
+                return {'ok': True, 'tool': name, 'result': {
+                    'status': 'downloaded', 'path': str(archive),
+                    'sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
+                    'size': archive.stat().st_size}}
+            return await original_execute(name, arguments, context)
+
+        with patch.object(registry, 'execute', new=AsyncMock(side_effect=execute)):
+            await agent.initialize()
+            result = await agent.turn(prompt)
+
+        self.assertEqual('complete', result['completion_status'])
+        self.assertNotIn('delivery_retry', [entry['message']['kind'] for entry in browser.sent])
+        inspections = [record for record in state.data['calls'].values()
+                       if record.get('request', {}).get('name') == 'automation.inspect']
+        self.assertEqual(1, len(inspections))
+        self.assertEqual('validated', inspections[0]['result']['result']['status'])
+        inspection_id = next(call_id for call_id, record in state.data['calls'].items()
+                             if record is inspections[0])
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        download_report = {'tool': 'copilot.download', 'status': 'downloaded',
+                           'path': str(archive), 'sha256': digest}
+        receipt = {'tool': 'automation.inspect', 'status': 'verified', 'review_status': 'passed',
+                   'path': str(archive), 'sha256': digest, 'inspection_call_id': inspection_id}
+        self.assertTrue(agent._delivery_verified(requirement, [download_report, receipt]))
+        self.assertFalse(agent._delivery_verified(
+            {'mode': 'zip', 'reason': requirement['reason'], 'expected_names': ['README.md']},
+            [download_report, receipt]))
+        self.assertFalse(agent._delivery_verified(
+            {'mode': 'zip', 'reason': 'Office outputs always require a downloadable ZIP, including single files.',
+             'expected_names': ['report.pptx']}, [download_report, receipt]))
+        self.assertFalse(agent._delivery_verified(
+            {'mode': 'zip', 'reason': requirement['reason'], 'expected_names': ['different.zip']},
+            [download_report, receipt]))
+
     async def test_large_package_report_keeps_hash_bound_verification(self):
         from copilot_agent.tools import ToolRegistry
         root, config, state, registry = make_fixture('delivery-large-report-')

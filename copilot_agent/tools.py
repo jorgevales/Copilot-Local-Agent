@@ -1,5 +1,6 @@
 """Versioned local capabilities. Browser tools use guarded owned Edge tabs."""
 import asyncio
+import ctypes
 import hashlib
 import json
 import os
@@ -13,13 +14,15 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from .policy import PathPolicy, URLPolicy, PolicyError, config_value, is_s_drive_path, resolve_s_drive_output
-from .local_navigation import SessionPathPolicy, SessionNavigationGrant, FilesystemAccessError, filesystem_diagnostic
+from .local_navigation import (SessionPathPolicy, SessionPathExtensionPolicy, SessionNavigationGrant,
+                               FilesystemAccessError, filesystem_diagnostic, prepare_session_path_extension)
 from .code_runner import CodeRunner, REQUIRED, FIELDS
 from .sync import CreatedSync
-from .logging_utils import redact
+from .logging_utils import redact, now
 from .archives import ArchiveService, inspect_zip, ArchiveError
 from .downloads import DownloadError
-from .web_navigation import NAVIGATION_SPECS, validate_navigation, execute_navigation, clear_navigation_state
+from .web_navigation import (NAVIGATION_SPECS, validate_navigation, execute_navigation,
+                             clear_navigation_state, get_primary_navigation_tab_id)
 from .web_documents import DOCUMENT_SPECS, DOCUMENT_EXAMPLES, validate_documents, execute_documents
 from .site_knowledge import KNOWLEDGE_SPECS, KNOWLEDGE_EXAMPLES, validate_knowledge, execute_knowledge, safe_proposal, KnowledgeValidationError, KnowledgeWriteError, reconcile_knowledge_call
 from .discovery_engine import DISCOVERY_SPECS, validate_discovery, execute_discovery
@@ -128,14 +131,16 @@ SPECS = {
     "files.read": (obj({"path":S,"max_chars":N},["path"]), "read_only", "Read bounded UTF-8 text; binary or oversized reads fail."),
     "files.create": (obj({"path":S,"text":{"type":"string","maxLength":100000}}), "user_approval", "Create a new UTF-8 file exclusively. Never overwrite. An exact approved S: output can resolve to its current UNC share."),
     "files.append": (obj({"path":S,"text":{"type":"string","maxLength":100000}}), "user_approval", "Append text to an existing file after explicit approval; preserves prior content."),
+    "files.replace": (obj({"path":S,"expected_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"text":{"type":"string","maxLength":100000}}), "user_approval", "Atomically replace one existing UTF-8 file after explicit approval and an exact current SHA-256 check. The file must be inside allowed write roots and may not be a link or hardlink."),
     "files.copy": (obj({"source":S,"destination":S}), "user_approval", "Copy one bounded file to a new exclusive destination."),
     "files.metadata": (obj(PATH), "read_only", "Read size, modification time and type."),
     "files.hash": (obj(PATH), "read_only", "Calculate SHA-256 for a file up to 20 MB."),
     "files.mkdir": (obj(PATH), "user_approval", "Create a new directory with an existing allowed parent."),
+    "files.grant_path": (obj({"path":S,"scope":{"type":"string","enum":["file","directory"]},"reason":{"type":"string","minLength":1,"maxLength":2000}}), "user_approval", "After a separate local approval, extend this session's file access to exactly one reachable existing file or directory and, for a directory, its descendants. Protected paths remain denied."),
     "system.versions": (obj({}), "read_only", "Read the exact current Python executable/version, operating system version and selected package versions; no environment variables."),
     "system.disk": (obj(PATH), "read_only", "Read filesystem capacity for an allowed path."),
     "system.processes": (obj({}), "read_only", "Report this agent PID and the explicitly launched owned Edge PID when available; no wider process or command-line inventory."),
-    "browser.open": (obj({"url":S,"allowed_domains":{"type":"array","items":S,"maxItems":30}},["url"]), "user_approval", "After explicit approval, open the HTTPS website in an owned tab of the same verified Edge profile, window and CDP port as Copilot. Existing site sign-ins are shared. Dependency hosts require explicit approval; focus returns to Copilot after the tool."),
+    "browser.open": (obj({"url":S,"allowed_domains":{"type":"array","items":S,"maxItems":30}},["url"]), "user_approval", "After explicit approval, open the HTTPS website in an owned tab of the same verified Edge profile, window and CDP port as Copilot. Returns its stable primary tab_id with the final URL and title for follow-up browser.tabs or browser.recon calls. Existing site sign-ins are shared. Dependency hosts require explicit approval; focus returns to Copilot after the tool."),
     "browser.back": (obj({}), "user_approval", "Navigate backward only if the target history URL passes policy."),
     "browser.forward": (obj({}), "user_approval", "Navigate forward only if the target history URL passes policy."),
     "browser.info": (obj({}), "read_only", "Read tool-tab URL and title."),
@@ -163,7 +168,7 @@ SPECS = {
     "archives.inspect": (obj(PATH), "read_only", "Inspect a bounded ZIP manifest, archive SHA-256 and native Office container type without extracting."),
     "archives.extract": (obj({"path":S,"destination":S,"expected_files":{"type":"array","items":S,"maxItems":1000},"expected_sha256":S},["path","destination","expected_sha256"]), "user_approval", "Extract a reviewed SHA-256-bound ZIP exclusively inside allowed roots; preflight paths and verify all files without executing code. Preserve original and partial outputs."),
     "automation.inspect": (obj({"path":S,"expected_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}},["path"]), "read_only", "Validate a complete automation package ZIP, its manifest, file hashes, tool versions, stage graph, declared capabilities and resource limits. Does not execute or extract package code."),
-    "automation.run": (obj({"archive_path":S,"expected_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"workspace":S,"resume_run_id":{"type":"string","pattern":"^[a-f0-9]{32}$"},"prior_run_id":{"type":"string","pattern":"^[a-f0-9]{32}$"}},["archive_path","expected_sha256","workspace"]), "user_approval", "Execute one exact, validated package revision in a dedicated allowed workspace. One explicit review may authorize all declared stages, read-only registered tool calls, workspace outputs, capability limits and expiry for this run. Changes to package, workspace or scope require fresh approval; execution uses the existing fixed worker and tool controls."),
+    "automation.run": (obj({"archive_path":S,"expected_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"workspace":S,"resume_run_id":{"type":"string","pattern":"^[a-f0-9]{32}$"},"prior_run_id":{"type":"string","pattern":"^[a-f0-9]{32}$"}},["archive_path","expected_sha256","workspace"]), "user_approval", "Run only the exact ZIP SHA-256 revision that passed fresh automatic automation.inspect review. A local session grant can authorize future freshly inspected packages and their declared registered tools until this agent session ends, including bounded file edits inside already allowed roots or session-approved path extensions. Package Python source is shown in full with its SHA-256 and always requires fresh one-run approval; session and reusable plan grants cannot authorize executable package code. Consequential or unbounded actions also require fresh approval for that exact run. Package stages cannot call files.grant_path; a requested new location still needs its separate exact path approval. PathPolicy, protected paths and every tool's preflight/hash checks remain active. Every run enforces its inspected tool, path, effect and resource declarations plus configured policies. Protected orchestration, authentication, customer authorization, uncertain-operation recovery and immutable-code review keep their dedicated handoffs; explicitly requested new file locations require a separate files.grant_path approval."),
     "code_runner": (obj(CODE_RUNNER_PROPERTIES, sorted(REQUIRED)), "immutable_plan_approval", "Run reviewed code. python_subset remains the default restricted evaluator. local_python is available only for an exact explicitly approved host-Python plan binding script bytes/hash, interpreter, arguments, imports, file/network/process/desktop scope, limits, effects and verification."),
 }
 
@@ -210,13 +215,18 @@ def tool_path_policy(name, context):
         profile = config_value(config, 'profile_dir')
         return PathPolicy([proof_workspace], excluded_roots=[profile] if profile else [])
     grant = context.get('local_navigation_grant')
+    if name.startswith('files.') and context.get('session_path_extensions'):
+        if isinstance(grant, SessionNavigationGrant) and grant.approved is True:
+            policy = SessionPathPolicy(policy, grant)
+        return SessionPathExtensionPolicy(policy, context['session_path_extensions'],
+                                          getattr(context.get('session_state'), 'session_id', None))
     if (name.startswith('files.') or name == 'system.disk') and isinstance(grant, SessionNavigationGrant):
         config = context.get('config', {})
         isolated_scoped = (config_value(config, '_automation_test_mode', False)
                            and name in {'files.list', 'files.exists', 'files.metadata',
                                         'files.read', 'files.hash', 'system.disk',
                                         'files.create', 'files.append', 'files.copy',
-                                        'files.mkdir', 'files.transfer_to_copilot'})
+                                        'files.mkdir', 'files.replace', 'files.transfer_to_copilot'})
         if isolated_scoped:
             # The proof harness binds PathPolicy to its exact isolated
             # workspace. Keep every file operation there without granting
@@ -232,11 +242,19 @@ def _write_target(name, args, policy, context):
     # Outside the one-shot isolated proof mode, agent-owned file mutations
     # remain restricted to the current S: mapping.
     profile = config_value(context.get('config', {}), 'profile_dir')
-    if config_value(context.get('config', {}), '_automation_test_mode', False):
+    if (config_value(context.get('config', {}), '_automation_test_mode', False)
+            or config_value(context.get('config', {}), '_local_knowledge_test_mode', False)):
         # The isolated proof config binds PathPolicy to its single workspace.
         # Keep normal approval and exclusive-create checks while allowing the
         # proof run to produce local files without a general navigation grant.
         return policy.resolve(value), False
+    if isinstance(policy, SessionPathExtensionPolicy):
+        checked = policy.resolve(value)
+        if policy.is_extended(checked):
+            operation = 'replace' if name == 'files.replace' else 'create' if name in {'files.create', 'files.copy'} else name.removeprefix('files.')
+            policy.require_operation(checked, operation)
+            return checked, False
+        policy = policy.configured_policy
     if isinstance(policy, SessionPathPolicy):
         checked = policy.resolve(value)  # Retain the run's one-time navigation grant.
         target = resolve_s_drive_output(str(checked), excluded_roots=[profile] if profile else [])
@@ -248,6 +266,95 @@ def _write_target(name, args, policy, context):
         checked = policy.resolve(value)
         target = resolve_s_drive_output(str(checked), excluded_roots=[profile] if profile else [])
     return target, True
+
+
+def _require_extended_read(path, policy):
+    if isinstance(policy, SessionPathExtensionPolicy):
+        checked = policy.resolve(path)
+        policy.require_operation(checked, 'read')
+        return checked
+    return policy.resolve(path)
+
+
+def _swap_replacement_file(path, temp):
+    if os.name == 'nt':
+        ctypes.windll.kernel32.ReplaceFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p,
+                                                          ctypes.c_wchar_p, ctypes.c_uint32,
+                                                          ctypes.c_void_p, ctypes.c_void_p]
+        ctypes.windll.kernel32.ReplaceFileW.restype = ctypes.c_int
+        if not ctypes.windll.kernel32.ReplaceFileW(str(path), str(temp), None, 0, None, None):
+            raise ctypes.WinError()
+    else:
+        os.replace(temp, path)
+
+
+def _atomic_replace(path, payload, expected_sha256, context, policy, *, operation_name='files.replace'):
+    """Write a sibling temp, preserve metadata, compare-and-swap, then verify."""
+    path = Path(path)
+    info = path.stat()
+    if not path.is_file() or info.st_size > 20 * 1024 * 1024 or info.st_nlink > 1:
+        raise PolicyError('Replacement requires a bounded regular file without hardlink aliases')
+    original = path.read_bytes()
+    original.decode('utf-8')
+    old_digest = hashlib.sha256(original).hexdigest()
+    if old_digest != expected_sha256:
+        raise PolicyError('Existing file no longer matches the expected SHA-256')
+    identity = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+    new_digest = hashlib.sha256(payload).hexdigest()
+    temp = path.parent / ('.' + path.name + '.replace-' + uuid.uuid4().hex + '.tmp')
+    exact_file_grant = (isinstance(policy, SessionPathExtensionPolicy)
+                        and any(grant.get('kind') == 'file' and Path(grant.get('path', '')) == path
+                                and grant.get('session_id') == policy.session_id for grant in policy.grants))
+    if exact_file_grant:
+        temp = policy.resolve_internal_replace_temp(path, temp)
+    else:
+        temp = policy.resolve(temp)
+    created = False
+    try:
+        with temp.open('xb') as stream:
+            created = True
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        # Preserve the source file's existing access metadata. On Windows,
+        # ReplaceFileW preserves the replaced file's ACL and attributes.
+        if os.name == 'nt':
+            # ReplaceFileW keeps the replaced file's DACL and Windows attributes.
+            pass
+        else:
+            shutil.copystat(path, temp, follow_symlinks=False)
+        current = _approved_write_target(operation_name,
+            {'path': str(path), 'expected_sha256': expected_sha256}, policy, context)
+        if current != path:
+            raise PolicyError('Replacement target changed after approval')
+        current_info = current.stat()
+        current_bytes = current.read_bytes()
+        if ((current_info.st_dev, current_info.st_ino, current_info.st_size, current_info.st_mtime_ns) != identity
+                or hashlib.sha256(current_bytes).hexdigest() != expected_sha256):
+            raise PolicyError('Existing file changed during replacement; no replacement was made')
+        context['file_replacement_evidence'] = {'path': str(path), 'staging_path': str(temp),
+                                                'staging_device': None, 'staging_inode': None,
+                                                'previous_sha256': old_digest,
+                                                'sha256': new_digest, 'operation': operation_name,
+                                                'session_id': getattr(context.get('session_state'), 'session_id', None)}
+        temp_info = temp.stat()
+        context['file_replacement_evidence'].update(staging_device=temp_info.st_dev,
+                                                    staging_inode=temp_info.st_ino)
+        context['filesystem_effect_started'] = True
+        _swap_replacement_file(path, temp)
+        actual = path.read_bytes()
+        if actual != payload:
+            raise OSError('Replaced file did not verify against approved text')
+        return {'path': str(path), 'size': len(actual), 'previous_sha256': old_digest,
+                'sha256': new_digest, 'verified': True, 'atomic': True}
+    finally:
+        if created:
+            try:
+                temp.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                context['filesystem_effect_started'] = True
 
 
 def _approved_write_target(name, args, policy, context):
@@ -294,6 +401,13 @@ class ToolRegistry:
         if name in DISCOVERY_SPECS or name in DISCOVERY_KNOWLEDGE_SPECS:
             errors = sorted(set(errors) | set(DISCOVERY_ERROR_CODES))
         result_schema={"type":"object"}
+        if name == "browser.open":
+            result_schema = {"type": "object", "properties": {
+                "url": {"type": "string"}, "title": {"type": "string"},
+                "tab_id": {"type": "string"}, "javascript_enabled": {"type": "boolean"},
+                "shared_verified_profile": {"type": "boolean"}},
+                "required": ["url", "title", "tab_id", "javascript_enabled", "shared_verified_profile"],
+                "additionalProperties": False}
         if name=="browser.structure":
             control_schema={"type":"object","properties":{
                 "tag":{"type":"string"},"type":{"type":["string","null"]},"role":{"type":["string","null"]},"label":{"type":"string","maxLength":200},"text":{"type":"string","maxLength":200},
@@ -354,11 +468,13 @@ class ToolRegistry:
         if name == 'automation.run':
             from .automation_packages import prepare_package_run
             return prepare_package_run(args, context, self)
+        if name == 'files.grant_path':
+            return prepare_session_path_extension(args, context)
         if name == 'files.transfer_to_copilot':
             return {'valid': True}
         if name.startswith("files.") or name in {"system.disk","ocr.image"}:
             keys=("source","destination") if name=="files.copy" else ("path",)
-            write_names={'files.create','files.mkdir','files.append','files.copy'}
+            write_names={'files.create','files.mkdir','files.append','files.copy','files.replace'}
             destination='destination' if name=='files.copy' else 'path'
             resolved={}
             s_destination=None
@@ -367,11 +483,26 @@ class ToolRegistry:
                     resolved[key], is_s_output = _write_target(name,args,policy,context)
                     if is_s_output: s_destination=str(resolved[key])
                 else:
-                    resolved[key]=policy.resolve(args[key])
+                    resolved[key]=_require_extended_read(args[key], policy)
             creates=("destination",) if name=="files.copy" else ("path",) if name in {"files.create","files.mkdir"} else ()
             for key in creates:
                 if resolved[key].exists(): raise PolicyError("Create destination already exists")
                 if not resolved[key].parent.is_dir(): raise PolicyError("Create destination parent must exist")
+            if name == 'files.replace':
+                target = resolved['path']
+                if not target.is_file(): raise PolicyError("Replacement requires an existing regular file")
+                info = target.stat()
+                if info.st_size > 20 * 1024 * 1024:
+                    raise PolicyError("Replacement requires a file of at most 20 MB")
+                if info.st_nlink > 1:
+                    raise PolicyError("Files with hardlink aliases are outside file capabilities")
+                try:
+                    original = target.read_bytes()
+                    original.decode('utf-8')
+                except (OSError, UnicodeError) as error:
+                    raise PolicyError("Replacement requires a readable UTF-8 file") from error
+                if hashlib.sha256(original).hexdigest() != args['expected_sha256']:
+                    raise PolicyError("Existing file no longer matches the expected SHA-256")
             if s_destination is not None:
                 return {'valid': True, 's_drive_destination': s_destination}
         if name=="browser.open":
@@ -530,8 +661,9 @@ class ToolRegistry:
 
     async def execute(self, name, args, context):
         if name=='research.perform': context['research_effects_started']=False
-        if name in {'files.create','files.mkdir','files.append','files.copy'}:
+        if name in {'files.create','files.mkdir','files.append','files.copy','files.replace'}:
             context['filesystem_effect_started']=False
+            context.pop('file_replacement_evidence', None)
         if name in DISCOVERY_SPECS or name in DISCOVERY_KNOWLEDGE_SPECS:
             context['discovery_effects_started'] = False
         try:
@@ -597,7 +729,7 @@ class ToolRegistry:
                 return {'ok': False, 'tool': name, 'error': {'code': error.code, 'message': str(error)},
                         'result': {'status': 'not_started', 'side_effects_uncertain': False}}
             certain_preflight = (name == 'operation.quarantine'
-                                or name in {'files.create','files.mkdir','files.append','files.copy'}
+                                or name in {'files.create','files.mkdir','files.append','files.copy','files.replace'}
                                 and not context.get('filesystem_effect_started'))
             return redact({'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {'status':'not_started','side_effects_uncertain':False} if certain_preflight else {},'error':{'code':'policy_denied','message':str(error)}})
         except ReconciliationRequired as error: return {"ok":False,"tool":name,"result":{"status":"uncertain" if error.side_effects_uncertain else "not_started","side_effects_uncertain":error.side_effects_uncertain},"error":{"code":"reconciliation_conflict","message":str(error)}}
@@ -610,7 +742,7 @@ class ToolRegistry:
                                               "message": review.get("summary", str(error))}}, context)
             return redact({'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {},'error':{'code':'invalid_arguments','message':str(error)}})
         except asyncio.TimeoutError:
-            if name in {'files.create','files.mkdir','files.append','files.copy'} and not context.get('filesystem_effect_started'):
+            if name in {'files.create','files.mkdir','files.append','files.copy','files.replace'} and not context.get('filesystem_effect_started'):
                 return {'ok':False,'tool':name,'result':{'status':'not_started','side_effects_uncertain':False},
                         'error':{'code':'timeout','message':'File validation timed out before any write was attempted'}}
             return {'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {},'error':{'code':'timeout','message':'Local operation timed out; inspect partial effects before retrying'}}
@@ -621,10 +753,11 @@ class ToolRegistry:
                                    'side_effects_uncertain': bool(context.get('knowledge_note_started'))}}
             if isinstance(error, OSError) and (name.startswith('files.') or name == 'system.disk'):
                 started = context.get('filesystem_effect_started', False)
+                extra = {'file_replacement_evidence': context['file_replacement_evidence']} if context.get('file_replacement_evidence') else {}
                 return {'ok': False, 'tool': name,
-                        'result': {'status': 'uncertain' if started else 'not_started', 'side_effects_uncertain': started},
+                        'result': {'status': 'uncertain' if started else 'not_started', 'side_effects_uncertain': started, **extra},
                         'error': filesystem_diagnostic(error)}
-            if name in {'files.create','files.mkdir','files.append','files.copy'} and not context.get('filesystem_effect_started'):
+            if name in {'files.create','files.mkdir','files.append','files.copy','files.replace'} and not context.get('filesystem_effect_started'):
                 return {'ok':False,'tool':name,'result':{'status':'not_started','side_effects_uncertain':False},
                         'error':{'code':'operation_failed','message':str(error)[:1000]}}
             if name=='research.perform':
@@ -647,6 +780,21 @@ class ToolRegistry:
         if name in {'knowledge.note', 'knowledge.lookup'}:
             from .knowledge_notes import execute_note
             return execute_note(name, args, context)
+        if name == 'files.grant_path':
+            if context.get('approved') is not True:
+                raise PolicyError('The exact requested path needs local approval before the session grant is added')
+            grant = prepare_session_path_extension(args, context)
+            reviewed = context.get('reviewed_path_extension')
+            if not isinstance(reviewed, dict) or reviewed != grant:
+                raise PolicyError('The path extension differs from the exact identity and scope reviewed for this call')
+            records = context.setdefault('session_path_extensions', [])
+            if not any(item.get('path') == grant['path'] and item.get('session_id') == grant['session_id']
+                       for item in records):
+                records.append(grant)
+            reviewed = context.get('reviewed_path_extension')
+            if not isinstance(reviewed, dict) or reviewed != grant:
+                raise PolicyError('The path extension differs from the exact identity and scope reviewed for this call')
+            return {key: grant[key] for key in ('path', 'scope', 'extension_scope', 'approved_operations', 'session_id')}
         if name in PERMISSION_SPECS: return await execute_permissions(name,args,context)
         customer_bound = bool(args.get('customer_key') or context.get('customer_key') or context.get('research_context',{}).get('active'))
         if customer_bound and name in {'browser.customer_summary','browser.read','browser.recon','browser.structure','browser.documents'}:
@@ -659,6 +807,69 @@ class ToolRegistry:
             return {'status': 'abandoned_unverifiable', 'call_id': args['call_id'],
                     'completion_credited': False, 'outcome_determined': False}
         if name == 'operation.reconcile':
+            call = context['session_state'].data.get('calls', {}).get(args['call_id'])
+            if (call and call.get('status') == 'uncertain'
+                    and call.get('request', {}).get('name') in {'files.replace', 'files.append'}):
+                evidence = (call.get('result') or {}).get('result', {}).get('file_replacement_evidence')
+                if not isinstance(evidence, dict) or evidence.get('session_id') != context['session_state'].session_id:
+                    raise PolicyError('No hash-bound replacement evidence is available for reconciliation')
+                request = call.get('request', {})
+                request_name, request_args = request.get('name'), request.get('arguments', {})
+                if evidence.get('operation') != request_name:
+                    raise PolicyError('Replacement evidence does not match the recorded operation')
+                policy = tool_path_policy(request_name, context)
+                requested_target, _ = _write_target(request_name, request_args, policy, context)
+                target = policy.resolve(evidence['path'], must_exist=True)
+                if requested_target != target:
+                    raise PolicyError('Replacement evidence does not match the recorded path')
+                if request_name == 'files.replace' and request_args.get('expected_sha256') != evidence.get('previous_sha256'):
+                    raise PolicyError('Replacement evidence does not match the approved starting hash')
+                actual = hashlib.sha256(target.read_bytes()).hexdigest()
+                if actual == evidence.get('sha256'):
+                    outcome = 'completed'
+                elif actual == evidence.get('previous_sha256'):
+                    staging_value = evidence.get('staging_path')
+                    if staging_value:
+                        staging = Path(staging_value)
+                        exact_file_grant = (isinstance(policy, SessionPathExtensionPolicy)
+                                            and any(grant.get('kind') == 'file' and Path(grant.get('path', '')) == target
+                                                    and grant.get('session_id') == policy.session_id for grant in policy.grants))
+                        if exact_file_grant:
+                            staging = policy.resolve_internal_replace_temp(target, staging)
+                        else:
+                            staging = policy.resolve(staging)
+                        if staging.exists():
+                            staging_info = staging.stat()
+                            staging_hash = hashlib.sha256(staging.read_bytes()).hexdigest()
+                            expected_identity = (evidence.get('staging_device'), evidence.get('staging_inode'))
+                            identity_changed = (None not in expected_identity and
+                                                (staging_info.st_dev, staging_info.st_ino) != expected_identity)
+                            if identity_changed or staging_hash != evidence.get('sha256'):
+                                raise PolicyError('Replacement staging artifact changed; uncertainty remains')
+                            staging.unlink()
+                    outcome = 'not_executed'
+                else:
+                    raise PolicyError('Current file content matches neither verified replacement state; uncertainty remains')
+                proof = {'kind': 'fresh_file_hash_readback', 'outcome': outcome,
+                         'session_id': context['session_state'].session_id,
+                         'call_id_sha256': hashlib.sha256(args['call_id'].encode()).hexdigest(),
+                         'path_sha256': hashlib.sha256(str(target).encode()).hexdigest(),
+                         'observed_sha256': actual}
+                state = context['session_state']
+                previous, prior_status = dict(call), state.data['status']
+                call.update(status=outcome, reconciliation=proof, reconciled_at=now())
+                if not any(item.get('status') == 'uncertain' for item in state.data['calls'].values()):
+                    state.data['status'] = 'ready'
+                try:
+                    state.save()
+                except Exception:
+                    state.data['calls'][args['call_id']] = previous
+                    state.data['status'] = prior_status
+                    raise
+                state.event('call_reconciled_from_fresh_evidence', call_id=args['call_id'],
+                            outcome=outcome, evidence_kind=proof['kind'])
+                return {'status': 'reconciled', 'outcome': outcome, 'verified': True,
+                        'sha256': actual, 'call_id': args['call_id']}
             return reconcile_knowledge_call(context['session_state'], context, args['call_id'])
         if name == 'browser.recover_uncertain':
             return await abandon_uncertain_browser_call(context['session_state'], context['browser'], **args)
@@ -687,7 +898,7 @@ class ToolRegistry:
                     shutil.copyfileobj(incoming,outgoing,65536)
                 return {"path":str(target),"size":target.stat().st_size}
             path=(_approved_write_target(name,args,policy,context)
-                  if name in {'files.create','files.mkdir','files.append'} else policy.resolve(args["path"]))
+                  if name in {'files.create','files.mkdir','files.append','files.replace'} else policy.resolve(args["path"]))
             if name=="files.exists": return {"exists":path.exists(),"path":str(path)}
             if name=="files.mkdir":
                 context['filesystem_effect_started']=True
@@ -711,10 +922,17 @@ class ToolRegistry:
             if name=="files.append":
                 if not path.is_file(): raise PolicyError("Append requires an existing regular file")
                 if path.stat().st_size>20971520 or path.stat().st_nlink>1: raise PolicyError("Append requires a bounded file without hardlink aliases")
-                path.read_text(encoding="utf-8")
-                context['filesystem_effect_started']=True
-                with path.open("a",encoding="utf-8") as stream: stream.write(args["text"])
-                return {"path":str(path),"size":path.stat().st_size}
+                original = path.read_bytes()
+                original.decode('utf-8')
+                payload = original + args['text'].encode('utf-8')
+                return _atomic_replace(path, payload, hashlib.sha256(original).hexdigest(), context, policy,
+                                       operation_name='files.append')
+            if name=="files.replace":
+                try:
+                    payload=args["text"].encode("utf-8")
+                except UnicodeError as error:
+                    raise ValueError('Replacement text must be valid UTF-8') from error
+                return _atomic_replace(path, payload, args['expected_sha256'], context, policy)
             if name=="files.list":
                 entries=[]
                 for item in path.iterdir():
@@ -827,7 +1045,8 @@ class ToolRegistry:
                     bindings.clear()
                 for field in ('web_document_tickets', 'document_catalogues'):
                     context.get(field, {}).clear()
-                return {"url":page.url,"title":await page.title(),"javascript_enabled":True,"shared_verified_profile":True}
+                return {"url":page.url,"title":await page.title(),"tab_id":get_primary_navigation_tab_id(context),
+                        "javascript_enabled":True,"shared_verified_profile":True}
             if page.url!="about:blank": urls.resolve(page.url)
             if name in {"browser.back","browser.forward"}:
                 session=await page.context.new_cdp_session(page)

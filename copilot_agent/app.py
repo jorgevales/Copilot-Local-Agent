@@ -57,7 +57,12 @@ async def ask(prompt: str) -> str:
 
 
 async def _terminal_approval_decider(_preview):
-    prompt = _TERMINAL.prompt('User', 'Choose 1 = Deny, 2 = Allow this exact execution once, 3 = Allow this exact displayed plan [1/2/3]: ')
+    is_package = _preview.get('approval_scope_type') == 'automation_package'
+    options = ('Choose 1 = Deny, 2 = Allow once, 3 = Allow this displayed plan, '
+               '4 = Allow freshly inspected packages for this agent session [1/2/3/4]: '
+               if is_package else
+               'Choose 1 = Deny, 2 = Allow this exact execution once, 3 = Allow this exact displayed plan [1/2/3]: ')
+    prompt = _TERMINAL.prompt('User', options)
     return await _TERMINAL_INPUT.ask_approval(prompt)
 
 
@@ -163,6 +168,10 @@ async def choose_browser_endpoint(config, args, settings):
             candidates.append(remembered)
     if config.debug_port not in candidates:
         candidates.append(config.debug_port)
+    if explicit_port:
+        # An operator-specified endpoint is a strict target. Never reinterpret
+        # a stale/mismatched dedicated port as permission to launch elsewhere.
+        candidates = [explicit_port]
     selected = None
     endpoints = [edge.cdp_endpoint(port) for port in candidates]
     payloads = await asyncio.gather(*(
@@ -180,6 +189,14 @@ async def choose_browser_endpoint(config, args, settings):
                     # the listener directly from its owning Windows process.
                     profile = await asyncio.to_thread(edge.validate_edge_listener, port)
                     discovered_item = {'port': port, 'profile': profile}
+                if explicit_port == port and getattr(config, '_profile_explicit', False):
+                    expected_profile = getattr(config, '_configured_profile_dir', None) or config.profile_dir
+                    actual_profile = discovered_item.get('profile') if discovered_item else None
+                    if actual_profile is None:
+                        actual_profile = await asyncio.to_thread(edge.validate_edge_listener, port)
+                        discovered_item = {'port': port, 'profile': actual_profile}
+                    if actual_profile is None or Path(actual_profile).resolve() != Path(expected_profile).resolve():
+                        raise edge.EndpointError('The explicit Edge port belongs to a different or unknown profile')
                 if discovered_item is not None:
                     await asyncio.to_thread(edge.validate_edge_listener, port, discovered_item['profile'])
                 else:
@@ -196,6 +213,21 @@ async def choose_browser_endpoint(config, args, settings):
                         config.profile_dir = discovered_item['profile']
                 system('Reusing a verified running Edge session on local port ' + str(port) + '.')
                 break
+    if selected is None:
+        if explicit_port:
+            explicit_payload = payloads[0] if payloads else None
+            if explicit_payload:
+                raise ValueError(f'Explicit Edge debugging port {explicit_port} is occupied by an unverified or mismatched listener.')
+            if getattr(config, '_profile_explicit', False):
+                raise ValueError(f'Cannot verify the explicitly requested Edge profile on port {explicit_port}.')
+            # A free explicit port may be used for a new owned browser, but it
+            # must remain exactly the requested port.
+            try:
+                with socket.socket() as probe:
+                    probe.bind(('127.0.0.1', explicit_port))
+            except OSError as exc:
+                raise ValueError(f'Explicit Edge debugging port {explicit_port} is unavailable.') from exc
+            selected = explicit_port
     if selected is None:
         for port in candidates:
             try:
@@ -226,7 +258,8 @@ async def start_new_session(config, previous, model_label, registry=None):
     owned_process = getattr(previous.browser, '_launched_process', None)
     await previous.close(preserve_browser_process=True)
     fresh_config = replace(config, attach_existing=True, model=model_label)
-    for name in ('_ui_upload_root', '_automation_test_mode', '_s_storage_verified',
+    for name in ('_ui_upload_root', '_automation_test_mode', '_local_knowledge_test_mode',
+                 '_proof_exact_edge_endpoint', '_s_storage_verified',
                  '_profile_explicit', '_configured_profile_dir', '_auto_s_drive_root',
                  '_auto_local_drive_root'):
         if hasattr(config, name):
@@ -294,7 +327,7 @@ def configure_isolated_test_workspace(config, requested_path, *, resume_session=
     if (target.drive.upper() != 'C:' or not target.is_relative_to(proof_parent)
             or target == proof_parent):
         raise ValueError('Isolated proof storage must be a new C: child of this project runtime/proof-runs folder.')
-    if target.exists() and any(target.iterdir()):
+    if target.exists() and (not target.is_dir() or any(target.iterdir())):
         resume_path = Path(resume_session).expanduser().resolve() if resume_session is not None else None
         sessions_root = (target / 'runtime' / 'sessions').resolve()
         if (resume_path is None or not resume_path.is_relative_to(sessions_root)
@@ -308,14 +341,38 @@ def configure_isolated_test_workspace(config, requested_path, *, resume_session=
     return target
 
 
+def configure_local_knowledge_test(config, requested_path):
+    """Enable an explicitly selected local C: store without changing S: defaults."""
+    local_app_data = os.environ.get('LOCALAPPDATA')
+    if not local_app_data:
+        raise ValueError('A local AppData root is required for the C: knowledge test store.')
+    allowed_parent = (Path(local_app_data) / 'CopilotLocalAgent' / 'live-navigation-tests').resolve()
+    target = Path(requested_path).expanduser().resolve()
+    if target.drive.upper() != 'C:' or target.parent != allowed_parent:
+        raise ValueError('The local knowledge test store must be a direct child of LocalAppData\\CopilotLocalAgent\\live-navigation-tests.')
+    if target.exists() and any(target.iterdir()):
+        raise ValueError('The local knowledge test store must be empty; existing files are preserved.')
+    config.select_storage(target)
+    config.knowledge_directory = target / 'Discoveries knowledge'
+    config._local_knowledge_test_mode = True
+    config._s_storage_verified = False
+    config.allowed_roots = [str(target)]
+    return target
+
+
 async def run(args):
     global _TERMINAL_INPUT, _UI_STEERING_POLL, _UI_TAKE_ATTACHMENTS
     terminal_input = None
     test_workspace = getattr(args, 'isolated_test_workspace', None)
-    config = Config.load(args.config, storage_override=test_workspace)
+    local_knowledge_test = getattr(args, 'local_knowledge_test_directory', None)
+    storage_override = test_workspace or local_knowledge_test
+    config = Config.load(args.config, storage_override=storage_override)
     if test_workspace is not None:
         test_workspace = configure_isolated_test_workspace(config, test_workspace, resume_session=args.resume)
         system('Isolated local proof mode: all agent storage and file roots are confined to ' + str(test_workspace))
+    elif local_knowledge_test is not None:
+        local_knowledge_test = configure_local_knowledge_test(config, local_knowledge_test)
+        system('Explicit local knowledge test mode: this run uses only ' + str(local_knowledge_test))
     else:
         from .storage import discoveries_storage
         canonical_storage = discoveries_storage(config.root)
@@ -353,7 +410,10 @@ async def run(args):
         config.max_corrections = 12
     # Remembered settings may predate the S:-only policy. Reapply it after
     # loading them so persisted C:/OneDrive roots cannot silently return.
-    if not getattr(config, '_automation_test_mode', False):
+    if getattr(config, '_local_knowledge_test_mode', False):
+        # Runtime settings cannot broaden the one explicitly selected C: test root.
+        config.allowed_roots = [str(local_knowledge_test.resolve())]
+    elif not getattr(config, '_automation_test_mode', False):
         s_root = mapped_s_drive_root().resolve()
         config.allowed_roots = [str(Path(root).resolve()) for root in config.allowed_roots
                                 if Path(root).resolve() == s_root or s_root in Path(root).resolve().parents]
@@ -373,6 +433,10 @@ async def run(args):
         # model value so startup consistently preselects the product default.
         config.model = 'GPT-6 Sol'
     config.validate()
+    if args.attach_existing and args.port and args.profile:
+        # Bind the live-proof guard to the exact operator-supplied endpoint and
+        # normalized profile before endpoint selection can return early.
+        config._proof_exact_edge_endpoint = (args.port, str(config.profile_dir.resolve()))
     validate_user_storage_directory(config.storage_dir)
     if not config.profile_dir.is_relative_to(config.storage_dir) and not (config.attach_existing and config.root.drive.upper() != 'S:'):
         raise ValueError('The persistent Edge profile must be inside the configured user storage.')
@@ -409,16 +473,22 @@ async def run(args):
     bug_reports = []
     system('Copilot Local Agent — reasoning through Microsoft 365 Copilot web UI')
     from .storage import discoveries_storage_paths
-    storage_paths = ({'s_path': str(config.storage_dir), 'unc_path': str(config.storage_dir)}
+    storage_paths = ({'s_path': str(config.knowledge_directory), 'unc_path': str(config.knowledge_directory)}
+                     if getattr(config, '_local_knowledge_test_mode', False)
+                     else {'s_path': str(config.storage_dir), 'unc_path': str(config.storage_dir)}
                      if getattr(config, '_automation_test_mode', False)
                      else discoveries_storage_paths(config.root))
-    system(('Isolated proof storage target: ' if getattr(config, '_automation_test_mode', False)
+    system(('Local test knowledge target: ' if getattr(config, '_local_knowledge_test_mode', False)
+            else 'Isolated proof storage target: ' if getattr(config, '_automation_test_mode', False)
             else 'Agent storage target for every save: ') + storage_paths['s_path'] + ' (resolved filesystem path: ' + storage_paths['unc_path'] + ').')
-    if not getattr(config, '_automation_test_mode', False):
+    if getattr(config, '_local_knowledge_test_mode', False):
+        system('Direct reads and new-file/folder creation in the explicit local test store are granted for this run; deletion or overwrite requires separate confirmation.')
+    elif not getattr(config, '_automation_test_mode', False):
         system('Direct reads and new-file/folder creation in Discoveries knowledge are granted for this run; deletion or overwrite requires separate confirmation.')
     system('Browser: Visible. Non-visible Copilot operation has not passed acceptance and is unavailable.')
     system('Permitted file roots: ' + ', '.join(Path(root).name for root in config.allowed_roots))
-    system('Agent-owned writes are restricted to the isolated proof workspace.' if getattr(config, '_automation_test_mode', False)
+    system('Agent-owned writes are restricted to the explicit local C: test store.' if getattr(config, '_local_knowledge_test_mode', False)
+           else 'Agent-owned writes are restricted to the isolated proof workspace.' if getattr(config, '_automation_test_mode', False)
            else 'Agent-owned writes are restricted to the S: share; no C: or OneDrive storage fallback is permitted.')
     system('Third-party browser domains: ' + ', '.join(config.allowed_domains))
     system('No files will be deleted. Generated-code execution always requires approval.')
@@ -686,6 +756,8 @@ def main():
     parser.add_argument('--yes-setup', action='store_true', help='Accept supplied browser settings; does not approve tools or scripts')
     parser.add_argument('--setup-only', action='store_true', help='Verify configured per-user storage and Edge without opening Copilot')
     parser.add_argument('--isolated-test-workspace', type=Path, help=argparse.SUPPRESS)
+    parser.add_argument('--local-knowledge-test-directory', type=Path,
+                        help='Explicitly use an empty C: LocalAppData directory for a live navigation-knowledge test; normal production storage remains S:-only.')
     args = parser.parse_args()
     try:
         asyncio.run(run(args))

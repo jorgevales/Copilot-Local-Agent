@@ -207,6 +207,15 @@ def knowledge_directory(context):
     selected = context.get("knowledge_directory")
     if selected is None:
         configured = context.get('config')
+        if getattr(configured, '_local_knowledge_test_mode', False):
+            selected = getattr(configured, 'knowledge_directory', None)
+            storage_root = Path(getattr(configured, 'storage_dir', '')).resolve()
+            if (selected is None or Path(selected).resolve().parent != storage_root
+                    or Path(selected).drive.upper() != 'C:'):
+                raise PolicyError('The explicit local knowledge test directory is outside its approved C: test store')
+            raw = Path(selected).expanduser().absolute()
+            reject_path_redirection(raw)
+            return raw
         project = configured.get('root') if isinstance(configured, dict) else getattr(configured, 'root', None)
         project_root = Path(project or Path(__file__).resolve().parents[1]).resolve()
         try:
@@ -444,27 +453,38 @@ def prepare_knowledge(args, context, name=None):
     if name=='site_knowledge.save': args,rejected=safe_proposal(args)
     validate_knowledge(name, args, context)
     scope = _scope(name, args, context)
+    local_test_store = getattr(context.get('config'), '_local_knowledge_test_mode', False)
     prepared = {"kind": name, "scope": scope, "namespace_id": _hash(scope),
-                "storage_scope": "Configured shared Discoveries knowledge store",
+                "storage_scope": "Explicit local C: navigation test store" if local_test_store else "Configured shared Discoveries knowledge store",
+                "storage_mode": "local_c_test" if local_test_store else "shared_s",
                 "directory": str(knowledge_directory(context)), "excluded_data": list(EXCLUDED_DATA),
                 "decline": "Decline this grant; the current task and ephemeral website map can continue."}
     from .storage import discoveries_storage_paths
-    try:
-        paths = discoveries_storage_paths(getattr(context.get('config'), 'root', Path(__file__).resolve().parents[1]))
-    except (OSError, ValueError):
-        # A caller may have supplied a test mapping resolver while storage.py
-        # still has the platform resolver. Reconstruct the mapped-drive alias
-        # from the already validated canonical knowledge path.
-        if context.get('knowledge_directory') is not None:
-            fixture_path = str(knowledge_directory(context))
-            paths = {'s_path': fixture_path, 'unc_path': fixture_path}
-        else:
-            directory = knowledge_directory(context).resolve()
-            share = mapped_s_drive_root().resolve()
-            relative = ntpath.relpath(str(directory), str(share))
-            if relative == '..' or relative.startswith('..\\'):
-                raise PolicyError('The Discoveries knowledge folder resolved outside the live S: share')
-            paths = {'s_path': str(Path('S:/') / Path(relative)), 'unc_path': str(directory)}
+    if local_test_store:
+        # Explicit C: test mode must preview the actual target even on machines
+        # where the production S: mapping is available.
+        fixture_path = str(knowledge_directory(context))
+        paths = {'s_path': fixture_path, 'unc_path': fixture_path}
+    else:
+        try:
+            paths = discoveries_storage_paths(getattr(context.get('config'), 'root', Path(__file__).resolve().parents[1]))
+        except (OSError, ValueError):
+            # A caller may have supplied a test mapping resolver while
+            # storage.py still has the platform resolver. Reconstruct the
+            # mapped-drive alias from the already validated canonical path.
+            if context.get('knowledge_directory') is not None:
+                fixture_path = str(knowledge_directory(context))
+                paths = {'s_path': fixture_path, 'unc_path': fixture_path}
+            elif getattr(context.get('config'), '_local_knowledge_test_mode', False):
+                fixture_path = str(knowledge_directory(context))
+                paths = {'s_path': fixture_path, 'unc_path': fixture_path}
+            else:
+                directory = knowledge_directory(context).resolve()
+                share = mapped_s_drive_root().resolve()
+                relative = ntpath.relpath(str(directory), str(share))
+                if relative == '..' or relative.startswith('..\\'):
+                    raise PolicyError('The Discoveries knowledge folder resolved outside the live S: share')
+                paths = {'s_path': str(Path('S:/') / Path(relative)), 'unc_path': str(directory)}
     prepared.update(storage_path_s=paths['s_path'], storage_path_unc=paths['unc_path'])
     if name == "site_knowledge.save":
         incoming = _sanitize_knowledge(args)

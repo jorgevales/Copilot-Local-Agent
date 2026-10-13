@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 from .policy import PathPolicy, PolicyError
 
 BASE_FIELDS = {"script", "purpose", "language", "working_directory", "read_paths", "create_paths", "expected_outputs", "commands", "subprocesses", "network_destinations", "permissions", "risk_summary", "recovery_notes", "source_path", "source_sha256"}
-LOCAL_FIELDS = {"interpreter", "arguments", "imports", "modify_paths", "timeout_seconds", "max_output_chars", "expected_effects", "viewer_windows"}
+LOCAL_FIELDS = {"interpreter", "arguments", "imports", "modify_paths", "create_roots", "timeout_seconds", "max_output_chars", "expected_effects", "viewer_windows"}
 FIELDS = BASE_FIELDS | LOCAL_FIELDS
 REQUIRED = BASE_FIELDS - {"subprocesses", "source_path", "source_sha256"}
 OPTIONAL = FIELDS - REQUIRED
@@ -39,6 +39,15 @@ class CodeRunner:
         self.max_steps = min(100000, int(limits.get("max_steps", 10000)))
         self.max_output = min(12000, int(limits.get("max_output_chars", 12000)))
         self.max_seconds = min(30, float(limits.get("tool_timeout", 10)))
+        self._package_scratch_grant = None
+
+    def _authorize_package_scratch_root(self, scratch_root, output_root):
+        """Bind one internal package attempt to a fresh scratch directory."""
+        output = self.policy.resolve(Path(output_root), True)
+        scratch = self.policy.resolve(Path(scratch_root), True)
+        if not output.is_dir() or not scratch.is_dir() or scratch == output or not scratch.is_relative_to(output):
+            raise PolicyError("Package scratch must be an existing directory beneath its run output root")
+        self._package_scratch_grant = (str(output), str(scratch))
 
     def _plan(self, args):
         if not isinstance(args, dict) or set(args) - FIELDS or REQUIRED - set(args):
@@ -72,12 +81,27 @@ class CodeRunner:
             if missing:
                 raise ValueError("local_python requires fields: " + ", ".join(sorted(missing)))
             path_keys.append("modify_paths")
+            plan["create_roots"] = args.get("create_roots", [])
+            if not isinstance(plan["create_roots"], list) or len(plan["create_roots"]) > 10 or any(not isinstance(value, str) for value in plan["create_roots"]):
+                raise ValueError("Invalid create_roots")
+        elif "create_roots" in args:
+            raise PolicyError("create_roots are available only to local_python plans")
         elif set(args) & LOCAL_FIELDS:
             raise PolicyError("local_python-only fields cannot be added to a python_subset plan")
         for key in path_keys:
             plan[key] = [str(self.policy.resolve(Path(plan["working_directory"]) / p)) for p in args[key]]
             if len(plan[key]) != len(set(plan[key])):
                 raise PolicyError(f"Duplicate {key}")
+        plan["create_roots"] = [str(self.policy.resolve(Path(root), True))
+                                for root in plan.get("create_roots", [])]
+        for root in plan.get("create_roots", []):
+            if not Path(root).is_dir():
+                raise PolicyError("Approved create root must be an existing directory: " + root)
+        if plan.get("create_roots"):
+            grant = self._package_scratch_grant
+            if (grant is None or len(plan["create_roots"]) != 1
+                    or plan["create_roots"][0] != grant[1]):
+                raise PolicyError("create_roots are reserved for an internally authorized package-stage scratch directory")
         permitted_outputs = set(plan["create_paths"]) | set(plan.get("modify_paths", []))
         if not set(plan["expected_outputs"]).issubset(permitted_outputs):
             raise PolicyError("Expected outputs must be declared creates or modifications")

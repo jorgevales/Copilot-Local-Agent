@@ -234,11 +234,13 @@ async def _read_bounded(stream, limit: int) -> bytes:
             raise PolicyError("Process output exceeded the approved limit")
 
 
-def _safe_environment(working: Path) -> dict[str, str]:
+def _safe_environment(working: Path, create_roots=()) -> dict[str, str]:
     allowed = {"SystemRoot", "WINDIR", "PATH", "PATHEXT", "COMSPEC", "TEMP", "TMP", "LANG", "LC_ALL"}
     environment = {key: value for key, value in os.environ.items() if key in allowed}
     environment.update({"PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1",
                         "COPILOT_APPROVED_WORKING_DIRECTORY": str(working)})
+    if len(create_roots) == 1:
+        environment["COPILOT_PACKAGE_STAGE_SCRATCH"] = str(create_roots[0])
     return environment
 
 
@@ -252,6 +254,7 @@ async def execute_local_python(plan: dict, prepared: dict, session_dir: Path,
     plan_path, ledger_path, audit_path = run_dir / "worker-plan.json", run_dir / "children.jsonl", run_dir / "audit.json"
     worker_plan = {key: plan[key] for key in ("working_directory", "read_paths", "create_paths", "modify_paths",
                                                "network_destinations", "permissions", "subprocesses", "arguments", "imports")}
+    worker_plan["create_roots"] = list(plan.get("create_roots", []))
     worker_plan["script_sha256"] = prepared["script_sha256"]
     worker_plan["application_root"] = prepared["runtime_binding"]["application_root"]
     plan_path.write_text(json.dumps(worker_plan, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -274,7 +277,7 @@ async def execute_local_python(plan: dict, prepared: dict, session_dir: Path,
         # after it has started.
         launch_directory = prepared["runtime_binding"]["application_root"]
         process = await asyncio.create_subprocess_exec(*command, cwd=launch_directory,
-            env=_safe_environment(Path(plan["working_directory"])), stdin=asyncio.subprocess.DEVNULL,
+            env=_safe_environment(Path(plan["working_directory"]), plan.get("create_roots", [])), stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             creationflags=flags, start_new_session=os.name != "nt")
         try:

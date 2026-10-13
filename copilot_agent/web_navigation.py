@@ -242,6 +242,18 @@ def _state(context):
     return state
 
 
+def get_primary_navigation_tab_id(context):
+    """Return the registered ID for the currently owned primary tool page."""
+    browser = context.get("browser")
+    primary_page = getattr(browser, "tool_page", None)
+    state = _state(context)
+    matches = [tab_id for tab_id, tab in state["tabs"].items()
+               if tab.get("primary") is True and tab.get("page") is primary_page]
+    if len(matches) != 1:
+        raise PolicyError("Owned primary browser tab is not uniquely registered")
+    return matches[0]
+
+
 async def clear_navigation_state(browser):
     """Before a separately approved browser.open, release the prior origin guard.
 

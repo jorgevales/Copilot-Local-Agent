@@ -121,7 +121,7 @@ class CodeRunnerTests(unittest.TestCase):
 
     def test_source_fields_are_optional_paired_and_script_stays_required(self):
         self.assertEqual({"subprocesses","source_path","source_sha256","interpreter","arguments","imports",
-                          "modify_paths","timeout_seconds","max_output_chars","expected_effects","viewer_windows"},OPTIONAL)
+                          "modify_paths","create_roots","timeout_seconds","max_output_chars","expected_effects","viewer_windows"},OPTIONAL)
         self.assertEqual(FIELDS-OPTIONAL,REQUIRED)
         self.assertIn("script",REQUIRED)
         _,args=self.source_plan()
@@ -220,6 +220,96 @@ class LocalPythonRunnerTests(unittest.TestCase):
     def run_plan(self, plan):
         prepared = self.runner.prepare(plan)
         return asyncio.run(self.runner.run_async(plan, prepared["proposal_hash"], process_registry=self.registry))
+
+    def test_package_scratch_roots_require_internal_grant_and_are_usable(self):
+        scratch = self.root / "outputs" / ".stage-scratch" / "stage" / "attempt"
+        scratch.mkdir(parents=True)
+        args = self.plan(
+            "import os\nfrom pathlib import Path\nscratch=Path(os.environ['COPILOT_PACKAGE_STAGE_SCRATCH'])\np=scratch/'nested'/'draft.txt'\np.parent.mkdir()\np.write_text('a')\np.write_text(p.read_text()+'b')\nPath('result.txt').write_text('verified')\n",
+            imports=["os", "pathlib"], create_paths=["result.txt"], expected_outputs=["result.txt"],
+            create_roots=[str(scratch)], permissions=["create_files"],
+            expected_effects=["Create verified output and stage-local scratch"])
+        with self.assertRaises(PolicyError):
+            self.runner.prepare(args)
+        self.runner._authorize_package_scratch_root(scratch, self.root / "outputs")
+        prepared = self.runner.prepare(args)
+        result = asyncio.run(self.runner.run_async(args, prepared["proposal_hash"], process_registry=self.registry))
+        self.assertEqual("completed", result["status"], result)
+        self.assertEqual("ab", (scratch / "nested" / "draft.txt").read_text(encoding="utf-8"))
+        self.assertEqual("verified", (self.root / "result.txt").read_text(encoding="utf-8"))
+
+    def test_direct_package_scratch_grant_rejects_outside_policy_root(self):
+        outside = Path(tempfile.mkdtemp(prefix="outside_code_policy_"))
+        with self.assertRaises(PolicyError):
+            self.runner._authorize_package_scratch_root(outside, self.root)
+
+    def test_package_scratch_cannot_read_sibling_scratch_or_outside_files(self):
+        output_root = self.root / "outputs"
+        scratch = output_root / ".stage-scratch" / "stage-a" / "attempt"
+        other_scratch = output_root / ".stage-scratch" / "stage-b" / "attempt"
+        scratch.mkdir(parents=True)
+        other_scratch.mkdir(parents=True)
+        (other_scratch / "secret.txt").write_text("private", encoding="utf-8")
+        outside = self.root / "outside.txt"
+        outside.write_text("outside", encoding="utf-8")
+        script = (
+            "from pathlib import Path\n"
+            f"targets=[Path({str(other_scratch / 'secret.txt')!r}), Path({str(outside)!r})]\n"
+            "for target in targets:\n"
+            " try: target.read_text()\n"
+            " except PermissionError: pass\n"
+            " else: raise AssertionError('read escaped this stage scratch')\n"
+            "print('blocked')\n")
+        plan = self.plan(script, imports=["pathlib"], create_roots=[str(scratch)], permissions=[],
+                         expected_effects=["Deny reads outside this attempt scratch"])
+        self.runner._authorize_package_scratch_root(scratch, output_root)
+        prepared = self.runner.prepare(plan)
+        result = asyncio.run(self.runner.run_async(plan, prepared["proposal_hash"], process_registry=self.registry))
+        self.assertEqual("completed", result["status"], result)
+        self.assertEqual(["blocked"], result["stdout"].splitlines())
+
+    def test_scratch_stream_blocks_buffer_truncate_and_over_limit_write(self):
+        scratch = self.root / "outputs" / ".stage-scratch" / "stage" / "attempt"
+        scratch.mkdir(parents=True)
+        args = self.plan(
+            "import os, sys\nfrom pathlib import Path\np=Path(os.environ['COPILOT_PACKAGE_STAGE_SCRATCH'])/'x.bin'\nwith open(p,'wb') as f:\n f.write(b'x')\n try: f.buffer.write(b'y')\n except PermissionError: pass\n else: raise AssertionError('buffer bypass')\n try: f._stream.write(b'y')\n except PermissionError: pass\n else: raise AssertionError('private stream bypass')\n try: f.truncate(60000000)\n except PermissionError: pass\n else: raise AssertionError('truncate bypass')\n try: os.write(os.open(p, os.O_WRONLY|os.O_APPEND), b'z')\n except PermissionError: pass\n else: raise AssertionError('raw descriptor bypass')\n try: import mmap\n except PermissionError: pass\n else: raise AssertionError('mmap bypass')\n try: import msvcrt\n except PermissionError: pass\n else: raise AssertionError('CRT write bypass')\n try:\n  raw=sys.modules['_io'].open(p,'ab')\n  try: raw.write(b'x'*(50*1024*1024+1))\n  finally: raw.close()\n except PermissionError: pass\n else: raise AssertionError('private _io.open quota bypass')\n",
+            imports=["os", "pathlib", "sys", "mmap", "msvcrt"], create_roots=[str(scratch)], permissions=[],
+            expected_effects=["Exercise bounded stage scratch"])
+        self.runner._authorize_package_scratch_root(scratch, self.root / "outputs")
+        prepared = self.runner.prepare(args)
+        result = asyncio.run(self.runner.run_async(args, prepared["proposal_hash"], process_registry=self.registry))
+        self.assertEqual("completed", result["status"], result)
+        self.assertEqual(1, (scratch / "x.bin").stat().st_size)
+
+        too_large = self.plan(
+            "import os\nfrom pathlib import Path\np=Path(os.environ['COPILOT_PACKAGE_STAGE_SCRATCH'])/'large.bin'\np.write_bytes(b'x'*(50*1024*1024+1))\n",
+            imports=["os", "pathlib"], create_roots=[str(scratch)], permissions=[],
+            expected_effects=["Reject oversized stage scratch write"])
+        self.runner._authorize_package_scratch_root(scratch, self.root / "outputs")
+        oversized = self.runner.prepare(too_large)
+        rejected = asyncio.run(self.runner.run_async(too_large, oversized["proposal_hash"], process_registry=self.registry))
+        self.assertEqual("failed", rejected["status"])
+        self.assertEqual(0, (scratch / "large.bin").stat().st_size)
+
+    def test_package_scratch_quota_counts_buffer_bytes_not_elements(self):
+        scratch = self.root / "outputs" / ".stage-scratch" / "stage" / "attempt"
+        scratch.mkdir(parents=True)
+        plan = self.plan(
+            "import os\nfrom array import array\nfrom pathlib import Path\n"
+            "p=Path(os.environ['COPILOT_PACKAGE_STAGE_SCRATCH'])/'wide.bin'\n"
+            "payload=memoryview(array('Q',[1])*6600000)\n"
+            "with open(p,'wb') as f:\n"
+            " try: f.write(payload)\n"
+            " except PermissionError: print('blocked')\n"
+            " else: raise AssertionError('buffer byte quota bypass')\n",
+            imports=["os", "array", "pathlib"], create_roots=[str(scratch)], permissions=[],
+            expected_effects=["Count actual buffer bytes for scratch quota"])
+        self.runner._authorize_package_scratch_root(scratch, self.root / "outputs")
+        prepared = self.runner.prepare(plan)
+        result = asyncio.run(self.runner.run_async(plan, prepared["proposal_hash"], process_registry=self.registry))
+        self.assertEqual("completed", result["status"], result)
+        self.assertEqual(["blocked"], result["stdout"].splitlines())
+        self.assertEqual(0, (scratch / "wide.bin").stat().st_size)
 
     def test_declared_import_arguments_and_created_output_are_executed_and_verified(self):
         plan = self.plan("import sys\nfrom pathlib import Path\nPath('result.txt').write_text(sys.argv[1], encoding='utf-8')\nprint(sys.argv[1])\n",

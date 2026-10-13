@@ -317,7 +317,7 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Do not ask the user to inspect files', instruction)
         self.assertIn('No local package stages have run.', instruction)
         self.assertIn("Copilot's cloud sandbox", instruction)
-        self.assertIn('No live environment test is expected', instruction)
+        self.assertIn('Cloud tests do not replace a user-requested live test', instruction)
 
     async def test_first_copilot_zip_is_reviewed_immediately_and_all_failures_return_for_one_repair(self):
         from tests.test_automation_packages import package_bytes
@@ -358,7 +358,7 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
             instruction = message['content']['instruction']
             self.assertIn('fix every finding below together', instruction)
             self.assertIn("Copilot's cloud sandbox", instruction)
-            self.assertIn('No live environment test is expected', instruction)
+            self.assertIn('Cloud tests do not replace a user-requested live test', instruction)
             self.assertIn('rebuilt ZIP download link', instruction)
             return download_request(message, 'revision-2')
 

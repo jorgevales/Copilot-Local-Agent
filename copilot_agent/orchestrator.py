@@ -66,6 +66,7 @@ class Orchestrator:
                              'pending_file_attachments': [],
                              'approved_attachment_hashes': self.approved_attachment_hashes,
                              'site_knowledge_bindings': {},
+                             'session_path_extensions': [],
                              'active_research_grants': {}, 'research_usage': {}, 'research_context': {'active': False},
                              'discovery_runs': {},
                              'web_document_tickets': {},
@@ -457,7 +458,7 @@ class Orchestrator:
         lines = [
             'The local ZIP review did not pass. Please fix every finding below together, rebuild the ZIP, '
             'then run the relevant build and package tests in Copilot\'s cloud sandbox when available and report '
-            'the checks and results. No live environment test is expected because Copilot cannot access the user\'s live environment.'
+            'the checks and results. Cloud tests do not replace a user-requested live test in the local agent environment; do not claim live success from cloud results.'
         ]
         if summaries:
             lines.append('Review result: ' + '; '.join(dict.fromkeys(summaries)))
@@ -473,7 +474,7 @@ class Orchestrator:
 
     @staticmethod
     def _package_local_build_rejection(name):
-        if name not in {'files.create', 'files.append', 'files.copy', 'files.mkdir',
+        if name not in {'files.create', 'files.append', 'files.copy', 'files.mkdir', 'files.replace',
                         'code_runner', 'archives.extract'}:
             return None
         return {
@@ -1304,7 +1305,7 @@ class Orchestrator:
                     self.feedback.emit('Orchestrator', 'The local package run failed. Returning the captured stage and output failures to Copilot automatically for repair.')
                     kind, content = 'recovery', {
                         'goal': user_input,
-                        'instruction': ('Continue automatically from the local run result. Correct the reported package failure, run relevant tests in Copilot\'s cloud sandbox when available, and deliver a fresh clickable ZIP for automatic local inspection. Do not ask the user to inspect files or write a repair request. No live environment test is expected.\n\n' + repair),
+                        'instruction': ('Continue automatically from the local run result. Correct the reported package failure, run relevant tests in Copilot\'s cloud sandbox when available, and deliver a fresh clickable ZIP for automatic local inspection. Do not ask the user to inspect files or write a repair request. Cloud tests do not replace any user-requested live test in the local agent environment; do not claim live success until it passes.\n\n' + repair),
                         'failed_package_run': redact(package_run_failure)}
                     continue
             if package_review_failure and response['response_type'] in {'final', 'clarification'}:
@@ -1317,7 +1318,7 @@ class Orchestrator:
                     'goal': user_input,
                     'instruction': ('Continue automatically from the local review. Do not ask the user to inspect the ZIP or write a repair request. '
                                     'Fix every listed issue together, run relevant tests in your cloud sandbox when available, and deliver a fresh clickable ZIP. '
-                                    'No live environment test is expected.\n\n' + repair),
+                                    'Cloud tests do not replace any user-requested live test in the local agent environment; do not claim live success until it passes.\n\n' + repair),
                     'failed_package_review': redact(package_review_failure)}
                 continue
             if response['response_type'] == 'final':
@@ -1482,6 +1483,9 @@ class Orchestrator:
                     context['navigation_scope_granted'] = True
                 prepared = None
                 artifact = None
+                if call['name'] == 'files.grant_path':
+                    prepared = self.registry.validate_call(call['name'], call['arguments'], context)
+                    context.pop('reviewed_path_extension', None)
                 if call['name'] == 'operation.quarantine':
                     from .web_privacy import private_id
                     target_id = call['arguments']['call_id']
@@ -1495,7 +1499,7 @@ class Orchestrator:
                                 'status': target['status'],
                                 'effect_domains': sorted(operation_domains(target['request']['name'])),
                                 'outcome_credited': False}}
-                if call['name'] in {'files.create', 'files.mkdir', 'files.append', 'files.copy'}:
+                if call['name'] in {'files.create', 'files.mkdir', 'files.append', 'files.copy', 'files.replace'}:
                     file_preflight = self.registry.validate_call(call['name'], call['arguments'], context)
                     if isinstance(file_preflight, dict) and file_preflight.get('s_drive_destination'):
                         prepared = {'mapped_s_drive_destination': file_preflight['s_drive_destination'],
@@ -1584,7 +1588,7 @@ class Orchestrator:
                     if manifest.get('office'):
                         raise PolicyError('A native Office container was delivered as ZIP; request a real outer ZIP containing the Office file.')
                     prepared = {'archive_manifest': manifest, 'destination': str(self.policy.resolve(call['arguments']['destination'])), 'expected_files': call['arguments'].get('expected_files', [])}
-                if call['name'] in {'files.create', 'files.mkdir', 'files.append', 'files.copy',
+                if call['name'] in {'files.create', 'files.mkdir', 'files.append', 'files.copy', 'files.replace',
                                     'site_knowledge.invalidate', 'discovery.knowledge_invalidate'}:
                     target = (prepared or {}).get('mapped_s_drive_destination') or (prepared or {}).get('directory') or self.prompts.storage_paths['unc_path']
                     self.feedback.emit('System', 'Save target: intended S: path ' + self._display_s_path(target) +
@@ -1604,6 +1608,8 @@ class Orchestrator:
                         break
                     context['approved'] = True
                     context['approval_hash'] = approval_hash
+                    if call['name'] == 'files.grant_path':
+                        context['reviewed_path_extension'] = prepared
                     if call['name'] == 'automation.run':
                         context['package_plan_hash'] = prepared['package_plan_hash']
                         context['approved_hash'] = prepared['package_plan_hash']
@@ -1762,6 +1768,26 @@ class Orchestrator:
                     results.append(package_review)
                     if package_review.get('ok'):
                         package_review_failure = None
+                        downloaded = self._delivery_result('copilot.download', result)
+                        inspected = package_review.get('result', {})
+                        review = inspected.get('review', {}) if isinstance(inspected, dict) else {}
+                        expected_digest = downloaded.get('sha256') if isinstance(downloaded, dict) else None
+                        inspected_digest = (review.get('archive_sha256') if isinstance(review, dict) else None)
+                        inspected_path = inspected.get('archive') if isinstance(inspected, dict) else None
+                        try:
+                            download_path = downloaded.get('path', '') if isinstance(downloaded, dict) else ''
+                            same_path = (self.policy.resolve(download_path, must_exist=True)
+                                         == self.policy.resolve(inspected_path or '', must_exist=True))
+                        except (OSError, PolicyError, TypeError, ValueError):
+                            same_path = False
+                        if (self._review_passed(package_review) and isinstance(expected_digest, str)
+                                and len(expected_digest) == 64 and inspected_digest == expected_digest
+                                and inspected.get('archive_sha256') == expected_digest and same_path):
+                            delivery_reports.append({
+                                'tool': 'automation.inspect', 'status': 'verified', 'review_status': 'passed',
+                                'path': downloaded['path'], 'sha256': expected_digest,
+                                'inspection_call_id': package_review.get('call_id'),
+                            })
                     else:
                         package_review_failure = package_review
                         break
@@ -1818,7 +1844,7 @@ class Orchestrator:
                     '\n\nThis is a Copilot-delivered package task. Do not build or unpack a local substitute. '
                     'Create the ZIP in Copilot Chat, run relevant tests in Copilot\'s cloud sandbox when available, '
                     'and include a fresh clickable download link with the matching download request. '
-                    'The local orchestrator will inspect it immediately. No live environment test is expected.'
+                    'The local orchestrator will inspect it immediately. Cloud tests do not replace any user-requested live test in the local agent environment; do not claim live success until it passes.'
                 )
             download_recovery = self._download_recovery_instruction(results)
             if download_recovery:
@@ -2022,6 +2048,55 @@ class Orchestrator:
             explicitly_named_zips = {name.casefold() for name in requirement.get('expected_names', [])
                                       if Path(name).suffix.casefold() == '.zip'}
             return bool(zip_names) and (not explicitly_named_zips or bool(zip_names & explicitly_named_zips))
+        if (requirement.get('mode') == 'zip'
+                and not requirement.get('reason', '').startswith('Office outputs ')):
+            expected_names = requirement.get('expected_names', [])
+            zip_only = (isinstance(expected_names, (list, tuple))
+                        and all(isinstance(name, str) and Path(name).suffix.casefold() == '.zip'
+                                for name in expected_names))
+            if zip_only:
+                for receipt in reports:
+                    if (receipt.get('tool') != 'automation.inspect'
+                            or receipt.get('status') != 'verified'
+                            or receipt.get('review_status') != 'passed'):
+                        continue
+                    inspection_id = receipt.get('inspection_call_id')
+                    inspection = self.state.data.get('calls', {}).get(inspection_id, {})
+                    request_record = inspection.get('request', {}) if isinstance(inspection, dict) else {}
+                    arguments = request_record.get('arguments', {}) if isinstance(request_record, dict) else {}
+                    outcome = inspection.get('result', {}) if isinstance(inspection, dict) else {}
+                    inspected = outcome.get('result', {}) if isinstance(outcome, dict) else {}
+                    review = inspected.get('review', {}) if isinstance(inspected, dict) else {}
+                    digest = receipt.get('sha256')
+                    if (request_record.get('name') != 'automation.inspect'
+                            or not self._review_passed(outcome)
+                            or arguments.get('expected_sha256') != digest
+                            or review.get('archive_sha256') != digest
+                            or inspected.get('archive_sha256') != digest):
+                        continue
+                    try:
+                        receipt_path = self.policy.resolve(receipt['path'], True)
+                        inspected_path = self.policy.resolve(arguments.get('path', ''), True)
+                    except (KeyError, OSError, PolicyError, TypeError, ValueError):
+                        continue
+                    if receipt_path != inspected_path:
+                        continue
+                    matched_download = False
+                    for download in downloads:
+                        if download.get('sha256') != digest:
+                            continue
+                        try:
+                            if self.policy.resolve(download['path'], True) == receipt_path:
+                                matched_download = True
+                                break
+                        except (KeyError, OSError, PolicyError, TypeError, ValueError):
+                            continue
+                    if not matched_download:
+                        continue
+                    if expected_names and receipt_path.name.casefold() not in {
+                            name.casefold() for name in expected_names}:
+                        continue
+                    return True
         candidates = []
         for report in reports:
             if report.get('tool') == 'archives.extract' and report.get('status') in {'verified', 'verified_with_limitations'}:
@@ -2052,6 +2127,7 @@ class Orchestrator:
         return bool(actual) and expected.issubset(actual)
 
     async def close(self, *, preserve_browser_process=False):
+        self.approvals.revoke_session_grants()
         self.state.data['status'] = 'closed'
         self.state.save()
         cleaned = await asyncio.to_thread(self.process_registry.cleanup_all)

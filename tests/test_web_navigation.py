@@ -309,7 +309,7 @@ class NavigationBrowserTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_failed_postcondition_preserves_partial_and_never_replays_effect(self):
         await self.page.goto("https://fixture.test/profile/C100")
-        plan = {"task_id": "task-1", "steps": [{"id": "save", "op": "click", "locator": {"testid": "read-once"}, "effect": "search", "timeout_ms": 50, "expect": [{"kind": "visible", "locator": {"testid": "never-present"}}]}], "success": [{"kind": "visible", "locator": {"testid": "never-present"}}]}
+        plan = {"task_id": "task-1", "steps": [{"id": "save", "op": "click", "locator": {"testid": "read-once"}, "effect": "search", "timeout_ms": 1000, "expect": [{"kind": "visible", "locator": {"testid": "never-present"}}]}], "success": [{"kind": "visible", "locator": {"testid": "never-present"}}]}
         result = await self.execute("browser.plan", plan)
         self.assertEqual("verification_failed", result["error"]["code"])
         self.assertEqual("save", result["uncertain_step"])

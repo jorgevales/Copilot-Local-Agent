@@ -12,6 +12,19 @@ from copilot_agent.storage import machine_key, read_user_settings
 
 class ResourceSetupTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        missing = object()
+        original_temp_environment = {
+            name: os.environ.get(name, missing) for name in ('TEMP', 'TMP', 'TMPDIR')
+        }
+        def restore_temp_environment():
+            for name, value in original_temp_environment.items():
+                if value is missing:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+        self.addCleanup(restore_temp_environment)
+        original_tempdir = tempfile.tempdir
+        self.addCleanup(setattr, tempfile, 'tempdir', original_tempdir)
         base=Path(os.environ.get('COPILOT_TEST_ROOT',str(PROJECT_ROOT/'runtime/test-runs')))
         base.mkdir(parents=True,exist_ok=True)
         self.root=Path(tempfile.mkdtemp(prefix='setup-resources-',dir=base))

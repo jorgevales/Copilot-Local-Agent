@@ -11,12 +11,12 @@ For each step record UTC timestamp, submitted-message ordinal where applicable, 
 - Start the application and observe a dedicated visible Edge debugging session with loopback-only connection.
 - Verify Playwright connects and Copilot Chat opens. Perform manual sign-in if prompted.
 - Discover model names exactly as displayed. Record ranking/default rationale and verify the selected model's actual UI state.
-- Verify startup contains exactly eight reference files: guidance 01–06 as six unchanged originals, `07-08-complete-guidance.md`, and `protocol-schema-and-tool-catalogue.md`. Recover the four grouped components using their recorded offsets and verify all ten originals' exact bytes, lengths and SHA-256. Confirm BOM, line-ending and final-newline preservation with synthetic fixtures.
-- Observe exactly eight initial reference uploads containing those complete components. Record upload confirmation rather than inferring it from local file existence. Record the ten-to-eight physical slot change (20%) separately from model-quality claims.
+- Verify startup contains exactly eight reference files: guidance 01–06 as six unchanged originals, `07-08-complete-guidance.md`, and `protocol-schema-and-tool-catalogue.md`. Recover all six grouped components using their recorded offsets and verify all twelve originals' exact bytes, lengths and SHA-256, including both automation package schemas. Confirm BOM, line-ending and final-newline preservation with synthetic fixtures.
+- Observe exactly eight initial reference uploads containing those complete components. Record upload confirmation rather than inferring it from local file existence. Record the ten-to-eight physical slot change (20%), now preserving twelve source components in eight files separately from model-quality claims.
 - Inspect the initialization message for the direct complete required JSON response shape and strict envelope instructions alongside the full attached schema and catalogue.
 - Observe insertion/submission of the initial compact message, generation start, completion signals and one newly correlated assistant envelope.
 - Record parsed session/request identity and successful schema validation.
-- Change an original reference component or either completed group in an isolated synthetic test and verify the next send is refused. Verify all eight physical attachment hashes are checked as well as the ten original component hashes. Do not alter the real live session's approved references to perform this check.
+- Change an original reference component or either completed group in an isolated synthetic test and verify the next send is refused. Verify all eight physical attachment hashes are checked as well as the twelve original component hashes. Do not alter the real live session's approved references to perform this check.
 
 ## Conversation and tools
 
@@ -70,3 +70,7 @@ For each step record UTC timestamp, submitted-message ordinal where applicable, 
 - Exit through the supported user command. Verify session state was preserved, pending uncertainty was recorded, all managed persistent processes/viewers were stopped, and the owned browser/session closed cleanly according to configured lifecycle.
 - Review retained synthetic files, sanitized logs and screenshots. Verify no files were deleted and no existing CDD workflow files were modified.
 - Report total passed/failed/blocked/not-run steps, automation results separately, limitations and any required follow-up. Full acceptance cannot be claimed while required visible steps remain unexecuted or blocked.
+
+## Recorded GOV.UK package proof
+
+The scoped final local GOV.UK package proof passed on 2026-10-13 using exact Edge port 63741 and the explicit C: test store. It verified five fresh owned tabs, overlapping reconnaissance, navigation knowledge save/readback, and final ZIP delivery. See [the acceptance report](LIVE_GOVUK_PACKAGE_ACCEPTANCE_20261013.md) for independent hash verification and measured timings. Real S:/VDI operation was outside this local proof's scope.

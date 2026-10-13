@@ -100,6 +100,10 @@ class NewSessionTests(unittest.IsolatedAsyncioTestCase):
     async def test_new_session_preserves_isolated_proof_boundaries(self):
         root, config, state, registry, old_browser, old = self.previous()
         config._automation_test_mode = True
+        config._local_knowledge_test_mode = True
+        config.knowledge_directory = root / 'C-test-store' / 'Discoveries knowledge'
+        config.debug_port = 63741
+        config._proof_exact_edge_endpoint = (63741, str(config.profile_dir.resolve()))
         config._s_storage_verified = False
         config._local_navigation_confirmed = False
         fresh_browser = SessionBrowser([final_response])
@@ -109,6 +113,9 @@ class NewSessionTests(unittest.IsolatedAsyncioTestCase):
 
         fresh_config = factory.call_args.args[0]
         self.assertTrue(fresh_config._automation_test_mode)
+        self.assertTrue(fresh_config._local_knowledge_test_mode)
+        self.assertEqual(config.knowledge_directory, fresh_config.knowledge_directory)
+        self.assertEqual(config._proof_exact_edge_endpoint, fresh_config._proof_exact_edge_endpoint)
         self.assertFalse(fresh_config._s_storage_verified)
         self.assertFalse(fresh_config._local_navigation_confirmed)
         self.assertFalse(new.base_context['local_navigation_grant'].approved)

@@ -15,6 +15,12 @@ checks its hash, removes it, and checks SQLite schema and integrity. The verifie
 S: path and resolved UNC filesystem path are included in the startup contract and
 each agent save response.
 
+For a local live navigation test only, `app.py --local-knowledge-test-directory`
+can select an empty direct child of `%LOCALAPPDATA%\\CopilotLocalAgent\\live-navigation-tests`.
+The test store is reported explicitly and scoped as the only agent write root for
+that run. This opt-in does not change the normal S:-only production path or act as
+an automatic fallback.
+
 Website knowledge and discovery records share the SQLite ledger. Compatible JSON
 records already under the selected S: Discoveries root are read through a
 compatibility path and promoted on approved saves. The app no longer searches

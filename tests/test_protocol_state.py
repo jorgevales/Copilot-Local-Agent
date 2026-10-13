@@ -323,14 +323,14 @@ class StateAndPromptTests(unittest.TestCase):
                       message['execution_strategy']['answering'])
         package_guidance = message['execution_strategy']['automation_packages']
         self.assertIn('local orchestrator automatically runs automation.inspect', package_guidance)
-        self.assertIn('Do not use local files tools, Code Runner or archives.extract', package_guidance)
-        self.assertIn('deliver a fresh ZIP', package_guidance)
-        self.assertIn("tests in Copilot's own cloud sandbox", package_guidance)
-        self.assertIn('No live environment test is expected', package_guidance)
-        self.assertIn('automatically runs automation.inspect', package_guidance)
-        self.assertIn('do not request a second review', package_guidance)
-        self.assertIn('passes inspection and receives local approval', package_guidance)
-        self.assertIn('local tools only download, review and run it under approval',
+        self.assertIn('Use registered file tools for reads and writes', package_guidance)
+        self.assertIn('deliver a new ZIP', package_guidance)
+        self.assertIn("tests in Copilot's cloud sandbox", package_guidance)
+        self.assertIn('A local session grant covers future packages only after fresh automatic inspection', package_guidance)
+        self.assertIn('fresh automatic inspection', package_guidance)
+        self.assertIn('automation-package-v1.1.schema.json is the current authoring schema', package_guidance)
+        self.assertIn('automation-package-v1.schema.json remains for compatibility', package_guidance)
+        self.assertIn('local tools download and automatically inspect every verified revision',
                       message['execution_strategy']['delivery'])
 
     def test_reference_snapshot_retains_approval_and_pending_safety_state(self):
@@ -443,10 +443,11 @@ class StateAndPromptTests(unittest.TestCase):
         recovered = {path.name: path.read_bytes() for path in builder.guidance[:6]}
         for group in builder.bundle['group_records']:
             recovered.update(read_bundle_components(group['path'], group))
-        self.assertEqual(11, len(recovered))
+        self.assertEqual(12, len(recovered))
+        self.assertIn('automation-package-v1.1.schema.json', recovered)
         for source in builder.component_paths:
             self.assertEqual(source.read_bytes(), recovered[source.name])
-        self.assertEqual(11, json.loads(text)['startup_references']['component_count'])
+        self.assertEqual(12, json.loads(text)['startup_references']['component_count'])
         self.assertLessEqual(len(names), 20)
         # Restored initialization can coincide with a findings boundary and a context reference.
         state.data['message_count'] = 9
@@ -487,6 +488,29 @@ class StateAndPromptTests(unittest.TestCase):
         self.assertTrue(runner['execution_modes']['local_python']['available'])
         self.assertEqual(['copilot_agent.desktop'],
                          runner['execution_modes']['local_python']['exposed_application_imports'])
+
+    def test_automation_run_catalogue_describes_session_grant_and_fresh_review(self):
+        root, config, state, _ = make_fixture('automation-run-catalogue-')
+        from copilot_agent.tools import ToolRegistry
+        registry = ToolRegistry()
+        builder = PromptBuilder(config, registry, state, Findings(state.directory))
+        text, _ = builder.build('initialize', 'Synthetic initialization.', 'automation-catalogue-request')
+        message = json.loads(text)
+        catalogue = json.loads(builder.catalogue.read_text(encoding='utf-8'))
+        run = next(item for item in catalogue['tools'] if item['name'] == 'automation.run')
+        description = run['description']
+        self.assertIn('fresh automatic automation.inspect review', description)
+        self.assertIn('local session grant', description)
+        self.assertIn('declared registered tools', description)
+        self.assertIn('including bounded file edits inside already allowed roots or session-approved path extensions', description)
+        self.assertIn('dedicated handoffs', description)
+        self.assertIn('files.grant_path', description)
+        self.assertIn('Package Python source is shown in full with its SHA-256', description)
+        self.assertIn('fresh one-run approval', description)
+        strategy = message['execution_strategy']['automation_packages']
+        self.assertIn('can cover declared registered tools', strategy)
+        self.assertIn('session grants cannot authorize executable package code', strategy)
+        self.assertIn('fresh automatic inspection', strategy)
 
     def test_plan_grant_covers_exact_plan_and_once_is_not_persistent(self):
         async def exercise():

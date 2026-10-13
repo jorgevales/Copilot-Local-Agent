@@ -398,9 +398,10 @@ def prepare_knowledge_tool(name, args, context):
     try:
         paths = discoveries_storage_paths(getattr(context.get('config'), 'root', None) or Path(__file__).resolve().parents[1])
     except (OSError, ValueError):
-        if context.get('knowledge_directory') is None:
+        if (context.get('knowledge_directory') is None
+                and not getattr(context.get('config'), '_local_knowledge_test_mode', False)):
             raise
-        fixture_path = str(context['knowledge_directory'])
+        fixture_path = str(context.get('knowledge_directory') or context['config'].knowledge_directory)
         paths = {'s_path': fixture_path, 'unc_path': fixture_path}
     if name == 'navigation.intent':
         accepted = context.setdefault('discovery_accepted_at', time.time())
@@ -422,10 +423,13 @@ def prepare_knowledge_tool(name, args, context):
             _, k = candidate(context, args, store)
             return {'kind': name, 'namespace_id': partition, 'expected_revision': args['expected_revision'],
                     'storage_path_s': paths['s_path'], 'storage_path_unc': paths['unc_path'],
+                    'storage_mode': 'local_c_test' if getattr(context.get('config'), '_local_knowledge_test_mode', False) else 'shared_s',
                     'new_revision': k['revision'], 'payload_sha256': digest(k),
                     'categories': ['routes', 'templates', 'actions', 'evidence'],
                     'route_count': len(k['routes']), 'trusted_routes': sum(r['status'] == 'trusted' for r in k['routes']),
-                    'consent_question': 'Save these exact sanitized evidence-backed navigation categories to the shared S: Discoveries knowledge folder?',
+                    'consent_question': ('Save these exact sanitized evidence-backed navigation categories to the explicit local C: test store?'
+                                         if getattr(context.get('config'), '_local_knowledge_test_mode', False)
+                                         else 'Save these exact sanitized evidence-backed navigation categories to the shared S: Discoveries knowledge folder?'),
                     'scope_identity': k['scope_identity'], 'origin': k['origin'], 'ttl_seconds': k['revalidation']['ttl_seconds'],
                     'candidate_policy': 'One run is candidate only. Trust requires matching successful observations in two independent approved runs; no generated selectors, permissions or page instructions.'}
         record = store.knowledge(partition)

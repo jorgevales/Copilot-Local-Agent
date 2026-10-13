@@ -2,10 +2,12 @@
 from pathlib import Path
 from types import SimpleNamespace
 import os
+import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from copilot_agent.app import run
+from copilot_agent.app import configure_local_knowledge_test, run
+from copilot_agent.config import Config
 from copilot_agent.state import SessionState, latest_committed_request_id
 from tests.test_protocol_state import make_fixture
 
@@ -49,6 +51,44 @@ class StartupBrowser:
         self.events.append('browser:close')
 
 
+class LocalKnowledgeTestStoreTests(unittest.TestCase):
+    def test_local_c_store_requires_empty_direct_localappdata_child(self):
+        if os.name != 'nt':
+            self.skipTest('C: path policy is Windows-specific')
+        with tempfile.TemporaryDirectory() as temp:
+            local = Path(temp)
+            if local.drive.upper() != 'C:':
+                self.skipTest('Temporary directory is not on C:')
+            parent = local / 'CopilotLocalAgent' / 'live-navigation-tests'
+            parent.mkdir(parents=True)
+            target = parent / 'run-one'
+            config = Config(root=Path(__file__).resolve().parents[1], storage_dir=local / 'runtime')
+            with patch.dict(os.environ, {'LOCALAPPDATA': str(local)}):
+                configured = configure_local_knowledge_test(config, target)
+            self.assertEqual(target.resolve(), configured.resolve())
+            self.assertTrue(config._local_knowledge_test_mode)
+            self.assertEqual((target / 'Discoveries knowledge').resolve(), config.knowledge_directory.resolve())
+            self.assertEqual([str(target.resolve())], config.allowed_roots)
+            with self.assertRaisesRegex(ValueError, 'direct child'):
+                configure_local_knowledge_test(Config(root=config.root, storage_dir=local / 'other'), target / 'nested')
+
+    def test_local_c_store_preserves_nonempty_existing_target(self):
+        if os.name != 'nt':
+            self.skipTest('C: path policy is Windows-specific')
+        with tempfile.TemporaryDirectory() as temp:
+            local = Path(temp)
+            if local.drive.upper() != 'C:':
+                self.skipTest('Temporary directory is not on C:')
+            parent = local / 'CopilotLocalAgent' / 'live-navigation-tests'
+            target = parent / 'existing'
+            target.mkdir(parents=True)
+            (target / 'keep.txt').write_text('keep', encoding='utf-8')
+            with patch.dict(os.environ, {'LOCALAPPDATA': str(local)}):
+                with self.assertRaisesRegex(ValueError, 'must be empty'):
+                    configure_local_knowledge_test(Config(root=Path(__file__).resolve().parents[1], storage_dir=local), target)
+            self.assertEqual('keep', (target / 'keep.txt').read_text(encoding='utf-8'))
+
+
 class StartupOrchestrator:
     events = None
 
@@ -89,7 +129,8 @@ class StartupOrchestrator:
 
 class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
     async def run_flow(self, answers, explicit_model=None, configured_model='GPT-6 Sol',
-                       resume=False, resume_capture=False, resume_unsent=False):
+                       resume=False, resume_capture=False, resume_unsent=False,
+                       exact_attach=False):
         root, config, _, _ = make_fixture('app-startup-flow-')
         config.storage_dir = root
         config.model = configured_model
@@ -119,9 +160,12 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
             events.append('ask:' + prompt)
             return next(replies)
 
-        args = SimpleNamespace(config=None, attach_existing=False, port=None,
-                               profile=None, model=explicit_model, setup_only=False,
+        explicit_profile = config.storage_dir / 'dedicated-edge-profile' if exact_attach else None
+        args = SimpleNamespace(config=None, attach_existing=exact_attach,
+                               port=63741 if exact_attach else None,
+                               profile=explicit_profile, model=explicit_model, setup_only=False,
                                resume=resume_path, yes_setup=True)
+        endpoint_choice = AsyncMock()
         with patch.dict(os.environ), \
              patch('copilot_agent.app._UI_PERMISSION_CONTEXT'), \
              patch('copilot_agent.app.Config.load', return_value=config), \
@@ -134,12 +178,14 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
              patch('copilot_agent.storage.discoveries_storage_paths', return_value={'s_path': r'S:\Discoveries knowledge', 'unc_path': str(root)}), \
              patch('copilot_agent.app.mapped_s_drive_root', return_value=root), \
              patch('copilot_agent.app.choose_edge', new=AsyncMock(side_effect=lambda *a, **k: events.append('edge:choose'))), \
-             patch('copilot_agent.app.choose_browser_endpoint', new=AsyncMock()), \
+             patch('copilot_agent.app.choose_browser_endpoint', new=endpoint_choice), \
              patch('copilot_agent.app.BrowserAdapter', return_value=browser), \
              patch('copilot_agent.app.Orchestrator', StartupOrchestrator), \
              patch('copilot_agent.app.ask', side_effect=answer), \
              patch('copilot_agent.app.system'):
             await run(args)
+        if exact_attach:
+            return events, endpoint_choice.await_args.args[0]
         return events
 
     async def test_resume_page_binding_uses_last_confirmed_request_not_uncommitted_tail(self):
@@ -165,6 +211,14 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(events.index('orchestrator:initialize'),
                         events.index('browser:ready:GPT-6 Sol'))
         self.assertLess(events.index('browser:ready:GPT-6 Sol'), events.index(user_prompt))
+
+    async def test_explicit_attach_binds_exact_port_and_profile_before_endpoint_selection(self):
+        events, selected_config = await self.run_flow(['', ':exit'], exact_attach=True)
+        self.assertTrue(selected_config.attach_existing)
+        self.assertEqual(63741, selected_config.debug_port)
+        self.assertEqual((63741, str(selected_config.profile_dir.resolve())),
+                         selected_config._proof_exact_edge_endpoint)
+        self.assertIn('edge:choose', events)
 
     async def test_alternate_choice_changes_model_once_after_default_preselection(self):
         events = await self.run_flow(['2', ':exit'])

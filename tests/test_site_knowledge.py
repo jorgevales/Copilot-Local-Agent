@@ -2,6 +2,7 @@
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import json
+import os
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -143,6 +144,39 @@ class SiteKnowledgeTests(unittest.TestCase):
         self.assertFalse(result["knowledge_saved"])
         self.assertFalse((self.root / "private-memory").exists())
         self.assertEqual(self.retrieve()["status"], "missing")
+
+    @unittest.skipUnless(os.name == "nt", "Explicit C: knowledge test store is Windows-specific")
+    def test_local_c_store_preview_does_not_use_available_s_drive_mapping(self):
+        from copilot_agent.app import configure_local_knowledge_test
+        from copilot_agent.config import Config, PROJECT_ROOT
+
+        with tempfile.TemporaryDirectory() as temporary:
+            local = Path(temporary).resolve()
+            if local.drive.upper() != "C:":
+                self.skipTest("Temporary directory is not on C:")
+            appdata = local / "local-app-data"
+            parent = appdata / "CopilotLocalAgent" / "live-navigation-tests"
+            parent.mkdir(parents=True)
+            target = parent / "knowledge-preview"
+            config = Config(root=PROJECT_ROOT, storage_dir=appdata / "runtime")
+            with patch.dict(os.environ, {"LOCALAPPDATA": str(appdata)}):
+                configure_local_knowledge_test(config, target)
+
+            context = dict(self.context)
+            context.pop("knowledge_directory", None)
+            context.update(config=config, session_dir=target / "session")
+            with patch("copilot_agent.storage.discoveries_storage_paths",
+                       return_value={"s_path": r"S:\Projects\Discoveries knowledge",
+                                     "unc_path": r"\\server\share\Discoveries knowledge"}) as resolver:
+                prepared = prepare_knowledge(self.bind_args, context, name="site_knowledge.bind")
+
+            expected = str(config.knowledge_directory.resolve())
+            self.assertEqual("local_c_test", prepared["storage_mode"])
+            self.assertIn("C:", prepared["storage_scope"])
+            self.assertEqual(expected, prepared["directory"])
+            self.assertEqual(expected, prepared["storage_path_s"])
+            self.assertEqual(expected, prepared["storage_path_unc"])
+            resolver.assert_not_called()
 
     def test_decline_and_llm_consent_flags_cannot_save(self):
         self.bind()

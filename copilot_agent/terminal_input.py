@@ -52,7 +52,7 @@ class TerminalInputBroker:
             if active:
                 with self._lock:
                     approval_prompt = self._approval_prompt_active
-                    if approval_prompt and line.casefold() in {'1', '2', '3', 'deny', 'once', 'plan'}:
+                    if approval_prompt and line.casefold() in {'1', '2', '3', '4', 'deny', 'once', 'plan', 'session'}:
                         self._approval_prompt_active = False
                         self._answers.put({'text': line, 'attachments': []})
                         continue

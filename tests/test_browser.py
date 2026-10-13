@@ -3,8 +3,9 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
+import sys
 import tempfile
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -142,8 +143,14 @@ class StartupRecoveryTests(unittest.IsolatedAsyncioTestCase):
             adapter.close = AsyncMock()
             adapter._connect_running_edge_fallback = AsyncMock(return_value=object())
             manager = SimpleNamespace(start=AsyncMock(return_value=object()))
+            playwright_package = ModuleType('playwright')
+            playwright_async_api = ModuleType('playwright.async_api')
+            playwright_async_api.async_playwright = lambda: manager
+            playwright_package.async_api = playwright_async_api
 
-            with patch.object(browser_module.edge, 'get_cdp_version', return_value={'Browser':'Edge'}), \
+            with patch.dict(sys.modules, {'playwright': playwright_package,
+                                          'playwright.async_api': playwright_async_api}), \
+                 patch.object(browser_module.edge, 'get_cdp_version', return_value={'Browser':'Edge'}), \
                  patch.object(browser_module.edge, 'validate_endpoint'), \
                  patch.object(browser_module.edge, 'validate_profile_ownership'), \
                  patch.object(browser_module.edge, 'connect_bounded',

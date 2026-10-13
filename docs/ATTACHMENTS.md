@@ -43,12 +43,12 @@ Catalogues stay within the current task/customer/tenant/site namespace. A later 
 
 ## Startup references
 
-Initialization uploads **eight reference files** containing all ten original components:
+Initialization uploads **eight reference files** containing all twelve original components:
 
 - Guidance 01–06 remain six separate original files, unchanged byte-for-byte.
 - `07-08-complete-guidance.md` contains the complete original guidance 07 and 08 in separate labelled sections.
-- `protocol-schema-and-tool-catalogue.md` contains the complete current response schema and runtime tool catalogue, each in its own JSON fence.
+- `protocol-schema-and-tool-catalogue.md` contains the complete response schema, runtime tool catalogue, automation package schema 1.0 compatibility version, and current automation package schema 1.1 with typed result bindings, each in its own JSON fence.
 
 Nothing is summarized. Each grouped component's manifest records its name, version, SHA-256, original byte length and absolute start/end byte offsets; end offsets are exclusive. Original source bytes, including BOMs, line endings and final-newline state, are preserved. All eight physical files also have locally recorded SHA-256 hashes. The aggregate startup reference size, including generated group headers and manifests, is capped at 20 MiB. The initialization message directly includes the complete required JSON response shape and envelope instructions so the requested format is explicit alongside the full schema.
 
-The orchestrator rechecks all ten source component hashes and all eight physical attachment hashes before every send. Previous generated group versions are retained when replaced; original guidance remains unchanged. A fresh or replacement chat receives initialization again. Ten physical uploads become eight, reducing startup attachment slots by 20% while preserving exact source bytes. This does not prove that a model will use the material identically; the visible initialization response and protocol checks remain acceptance evidence.
+The orchestrator rechecks all twelve source component hashes and all eight physical attachment hashes before every send. Previous generated group versions are retained when replaced; original guidance remains unchanged. A fresh or replacement chat receives initialization again. Ten physical uploads become eight, reducing startup attachment slots by 20% while preserving exact source bytes. This does not prove that a model will use the material identically; the visible initialization response and protocol checks remain acceptance evidence.

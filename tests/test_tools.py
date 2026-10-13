@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import os
 import tempfile
 import unittest
@@ -10,6 +11,7 @@ from copilot_agent.policy import PathPolicy, URLPolicy, PolicyError
 from copilot_agent.policy import resolve_s_drive_output
 from copilot_agent.state import SessionState
 from copilot_agent.config import Config
+from copilot_agent.approvals import ApprovalManager
 
 
 class ToolTests(unittest.TestCase):
@@ -19,6 +21,107 @@ class ToolTests(unittest.TestCase):
         self.context={"config":{"allowed_roots":[str(self.root)],"allowed_domains":["example.com"]},"session_dir":str(self.root)}
 
     def run_tool(self,name,args): return asyncio.run(self.registry.execute(name,args,self.context))
+
+    def test_explicit_path_extension_is_exact_session_scoped_and_allows_atomic_file_tools(self):
+        external = self.root.parent / (self.root.name + '_extended')
+        external.mkdir()
+        existing = external / 'notes.md'
+        existing.write_text('before', encoding='utf-8')
+        session = SessionState(self.root / 'session')
+        self.context.update(path_policy=PathPolicy([self.root]), session_state=session,
+                            session_path_extensions=[], approved=True)
+        request = {'path': str(external), 'scope': 'directory',
+                   'reason': 'Save the requested report in this selected folder.'}
+
+        reviewed = self.registry.validate_call('files.grant_path', request, self.context)
+        self.context['reviewed_path_extension'] = reviewed
+
+        grant = self.run_tool('files.grant_path', request)
+
+        self.assertTrue(grant['ok'])
+        self.assertEqual(str(external.resolve()), grant['result']['path'])
+        self.assertTrue(self.run_tool('files.read', {'path': str(existing)})['ok'])
+        child = external / 'nested'
+        child.mkdir()
+        created = self.run_tool('files.create', {'path': str(child / 'new.md'), 'text': 'created'})
+        self.assertTrue(created['ok'])
+        previous = existing.read_bytes()
+        replaced = self.run_tool('files.replace', {
+            'path': str(existing), 'expected_sha256': hashlib.sha256(previous).hexdigest(), 'text': 'after'})
+        self.assertTrue(replaced['ok'])
+        self.assertEqual('after', existing.read_text(encoding='utf-8'))
+        sibling = external.parent / (external.name + '_sibling')
+        sibling.mkdir()
+        self.assertFalse(self.run_tool('files.read', {'path': str(sibling / 'unknown.md')})['ok'])
+        secret = external / '.env'
+        secret.write_text('never expose', encoding='utf-8')
+        self.assertFalse(self.run_tool('files.read', {'path': str(secret)})['ok'])
+
+        self.context['session_state'] = SessionState(self.root / 'new-session')
+        self.assertFalse(self.run_tool('files.read', {'path': str(existing)})['ok'])
+
+    def test_exact_file_extension_allows_only_approved_operations(self):
+        external = self.root.parent / (self.root.name + '_single_file')
+        external.mkdir()
+        target = external / 'notes.txt'
+        target.write_text('before', encoding='utf-8')
+        session = SessionState(self.root / 'session')
+        self.context.update(path_policy=PathPolicy([self.root]), session_state=session,
+                            session_path_extensions=[], approved=True)
+        request = {'path': str(target), 'scope': 'file', 'reason': 'Update the selected notes file.'}
+        self.context['reviewed_path_extension'] = self.registry.validate_call('files.grant_path', request, self.context)
+        self.assertTrue(self.run_tool('files.grant_path', request)['ok'])
+        self.assertTrue(self.run_tool('files.read', {'path': str(target)})['ok'])
+        self.assertFalse(self.run_tool('files.append', {'path': str(target), 'text': ' forbidden'})['ok'])
+        self.assertEqual('before', target.read_text(encoding='utf-8'))
+        self.assertFalse(self.run_tool('files.create', {'path': str(external / 'sibling.txt'), 'text': 'no'})['ok'])
+        replace_args = {'path': str(target), 'expected_sha256': hashlib.sha256(target.read_bytes()).hexdigest(), 'text': 'after'}
+        self.assertTrue(self.run_tool('files.replace', replace_args)['ok'])
+        self.assertEqual('after', target.read_text(encoding='utf-8'))
+
+    def test_path_extension_identity_change_after_review_blocks_grant(self):
+        external = self.root.parent / (self.root.name + '_identity')
+        external.mkdir()
+        target = external / 'notes.txt'
+        target.write_text('before', encoding='utf-8')
+        session = SessionState(self.root / 'session')
+        self.context.update(path_policy=PathPolicy([self.root]), session_state=session,
+                            session_path_extensions=[], approved=True)
+        request = {'path': str(external), 'scope': 'directory', 'reason': 'Save in this folder.'}
+        self.context['reviewed_path_extension'] = self.registry.validate_call('files.grant_path', request, self.context)
+        moved = external.with_name(external.name + '_old')
+        external.rename(moved)
+        external.mkdir()
+        result = self.run_tool('files.grant_path', request)
+        self.assertFalse(result['ok'])
+        self.assertEqual([], self.context['session_path_extensions'])
+
+    def test_path_extension_scope_is_visible_in_approval(self):
+        class CapturingFeedback:
+            def __init__(self): self.sections = []
+            def section(self, *args): self.sections.append(args)
+            def record(self, *args, **kwargs): pass
+            def emit(self, *args, **kwargs): pass
+        external = self.root.parent / (self.root.name + '_approval')
+        external.mkdir()
+        target = external / 'notes.txt'
+        target.write_text('notes', encoding='utf-8')
+        session = SessionState(self.root / 'session')
+        self.context.update(path_policy=PathPolicy([self.root]), session_state=session,
+                            session_path_extensions=[], approved=True)
+        request = {'path': str(target), 'scope': 'file', 'reason': 'Edit these notes.'}
+        prepared = self.registry.validate_call('files.grant_path', request, self.context)
+        feedback = CapturingFeedback()
+        manager = ApprovalManager(session, feedback=feedback)
+        call = {'call_id': 'grant', 'name': 'files.grant_path', 'arguments': request}
+        manager._show({'complete_pending_plan': {'tool_requests': [call]}, 'current_call_id': 'grant',
+                       'prepared_code': prepared, 'plan_hash': 'plan', 'call_hash': 'call',
+                       'choices': ['deny', 'once', 'plan']}, self.root / 'approval.json')
+        section = next(item for item in feedback.sections if item[0] == 'Requested file access extension')
+        displayed = dict(section[2])
+        self.assertEqual(prepared['path'], displayed['Selected path'])
+        self.assertEqual(prepared['extension_scope'], displayed['Grant scope'])
+        self.assertEqual(prepared['approved_operations'], displayed['Operations'])
 
     def test_mapped_s_share_is_an_optional_permitted_root(self):
         share = self.root / 'mapped-share'
@@ -78,6 +181,111 @@ class ToolTests(unittest.TestCase):
         self.assertFalse(self.run_tool('files.create', crlf)['ok'])
         self.assertFalse((self.root / 'windows-lines.md').exists())
 
+    def test_replace_requires_approval_and_exact_existing_hash(self):
+        self.context['config']['_automation_test_mode'] = True
+        target = self.root / 'replace-me.txt'
+        target.write_text('before', encoding='utf-8')
+        digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        args = {'path': str(target), 'expected_sha256': digest, 'text': 'after'}
+        denied = self.run_tool('files.replace', args)
+        self.assertFalse(denied['ok'])
+        self.assertEqual('before', target.read_text(encoding='utf-8'))
+
+        self.context['approved'] = True
+        stale = dict(args, expected_sha256='0' * 64)
+        result = self.run_tool('files.replace', stale)
+        self.assertFalse(result['ok'])
+        self.assertFalse(result['result']['side_effects_uncertain'])
+        self.assertEqual('before', target.read_text(encoding='utf-8'))
+
+    def test_replace_is_atomic_and_verifies_new_content(self):
+        self.context['config']['_automation_test_mode'] = True
+        target = self.root / 'replace-me.txt'
+        target.write_text('before', encoding='utf-8')
+        old_digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        args = {'path': str(target), 'expected_sha256': old_digest, 'text': 'after\nverified'}
+        prepared = self.registry.validate_call('files.replace', args, self.context)
+        self.assertTrue(prepared['valid'])
+        self.context['approved'] = True
+
+        result = self.run_tool('files.replace', args)
+
+        self.assertTrue(result['ok'], result)
+        self.assertTrue(result['result']['verified'])
+        self.assertTrue(result['result']['atomic'])
+        self.assertEqual(old_digest, result['result']['previous_sha256'])
+        self.assertEqual(hashlib.sha256(target.read_bytes()).hexdigest(), result['result']['sha256'])
+        self.assertEqual('after\nverified', target.read_text(encoding='utf-8'))
+        self.assertEqual([], list(self.root.glob('.replace-me.txt.replace-*.tmp')))
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX mode metadata assertion')
+    def test_replace_preserves_restrictive_mode(self):
+        self.context['config']['_automation_test_mode'] = True
+        target = self.root / 'restricted.txt'
+        target.write_text('before', encoding='utf-8')
+        target.chmod(0o640)
+        args = {'path': str(target), 'expected_sha256': hashlib.sha256(target.read_bytes()).hexdigest(), 'text': 'after'}
+        self.context['approved'] = True
+        result = self.run_tool('files.replace', args)
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(0o640, target.stat().st_mode & 0o777)
+
+    def test_uncertain_replace_reconciles_from_fresh_hash_without_replay(self):
+        self.context['config']['_automation_test_mode'] = True
+        state = SessionState(self.root / 'session')
+        self.context['session_state'] = state
+        target = self.root / 'replace-me.txt'
+        target.write_text('before', encoding='utf-8')
+        args = {'path': str(target), 'expected_sha256': hashlib.sha256(target.read_bytes()).hexdigest(), 'text': 'after'}
+        self.context['approved'] = True
+        real_swap = __import__('copilot_agent.tools', fromlist=['_swap_replacement_file'])._swap_replacement_file
+        def swap_then_lose_ack(path, temp):
+            real_swap(path, temp)
+            raise OSError('synthetic acknowledgement loss')
+        with patch('copilot_agent.tools._swap_replacement_file', side_effect=swap_then_lose_ack):
+            result = self.run_tool('files.replace', args)
+        self.assertFalse(result['ok'])
+        self.assertTrue(result['result']['side_effects_uncertain'])
+        self.assertEqual(hashlib.sha256(target.read_bytes()).hexdigest(), result['result']['file_replacement_evidence']['sha256'])
+        request = {'call_id': 'replace-uncertain', 'name': 'files.replace', 'version': '1.0', 'arguments': args}
+        state.begin_call(request)
+        state.finish_call('replace-uncertain', result)
+        reconciled = self.run_tool('operation.reconcile', {'call_id': 'replace-uncertain'})
+        self.assertTrue(reconciled['ok'], reconciled)
+        self.assertEqual('completed', state.data['calls']['replace-uncertain']['status'])
+        self.assertEqual('completed', reconciled['result']['outcome'])
+
+    def test_replace_stale_approval_does_not_overwrite_concurrent_change(self):
+        self.context['config']['_automation_test_mode'] = True
+        target = self.root / 'replace-me.txt'
+        target.write_text('before', encoding='utf-8')
+        digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        args = {'path': str(target), 'expected_sha256': digest, 'text': 'replacement'}
+        self.registry.validate_call('files.replace', args, self.context)
+        target.write_text('changed after review', encoding='utf-8')
+        self.context['approved'] = True
+
+        result = self.run_tool('files.replace', args)
+
+        self.assertFalse(result['ok'])
+        self.assertFalse(result['result']['side_effects_uncertain'])
+        self.assertEqual('changed after review', target.read_text(encoding='utf-8'))
+
+    def test_replace_failure_before_swap_keeps_original_and_removes_temp(self):
+        self.context['config']['_automation_test_mode'] = True
+        target = self.root / 'replace-me.txt'
+        target.write_text('before', encoding='utf-8')
+        digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        args = {'path': str(target), 'expected_sha256': digest, 'text': 'after'}
+        self.context['approved'] = True
+        with patch('copilot_agent.tools._swap_replacement_file', side_effect=OSError('synthetic swap failure')):
+            result = self.run_tool('files.replace', args)
+
+        self.assertFalse(result['ok'])
+        self.assertTrue(result['result']['side_effects_uncertain'])
+        self.assertEqual('before', target.read_text(encoding='utf-8'))
+        self.assertEqual([], list(self.root.glob('.replace-me.txt.replace-*.tmp')))
+
     def test_exact_s_output_is_bound_to_approved_unc_identity(self):
         folder = self.root / 'simulated-share'
         folder.mkdir()
@@ -94,6 +302,18 @@ class ToolTests(unittest.TestCase):
         self.assertTrue(result['ok'])
         self.assertTrue(result['result']['verified'])
         self.assertEqual(args['text'], target.read_text(encoding='utf-8'))
+
+        target.write_text('Prior verified content.', encoding='utf-8')
+        replacement_args = {'path': r'S:\Reports\report.md',
+                            'expected_sha256': hashlib.sha256(target.read_bytes()).hexdigest(),
+                            'text': 'Updated verified content.'}
+        with patch('copilot_agent.tools.resolve_s_drive_output', return_value=target):
+            prepared = self.registry.validate_call('files.replace', replacement_args, self.context)
+            self.assertEqual(str(target), prepared['s_drive_destination'])
+            self.context['s_drive_destination'] = prepared['s_drive_destination']
+            replaced = self.run_tool('files.replace', replacement_args)
+        self.assertTrue(replaced['ok'], replaced)
+        self.assertEqual('Updated verified content.', target.read_text(encoding='utf-8'))
 
     def test_s_mapping_change_after_approval_prevents_creation(self):
         first = self.root / 'first'
@@ -201,6 +421,58 @@ class ToolTests(unittest.TestCase):
         self.registry.validate_call("browser.open", {"url":"https://new-site.test/start"}, self.context)
         for url in ["http://example.com", "https://notexample.com", "https://user:password@example.com", "file:///x", "https://example.com:444"]:
             with self.assertRaises((PolicyError,ValueError)): policy.resolve(url)
+
+    def test_browser_open_returns_registered_primary_tab_id_for_followup_tools(self):
+        browser_context = object()
+
+        class Page:
+            def __init__(self):
+                self.context = browser_context
+                self.url = "about:blank"
+                self.closed = False
+
+            def is_closed(self):
+                return self.closed
+
+            async def route(self, pattern, handler):
+                pass
+
+            async def unroute(self, pattern, handler):
+                pass
+
+            async def goto(self, url, **kwargs):
+                self.url = url
+
+            async def title(self):
+                return "Documents"
+
+        class Browser:
+            def __init__(self, page):
+                self.tool_page = page
+                self.tool_context = browser_context
+                self._tool_pages = [page]
+                self.tool_domains = set()
+
+            def authorize_tool_domain(self, domain):
+                self.tool_domains.add(domain)
+
+        page = Page()
+        self.context.update(browser=Browser(page), approved=True)
+
+        async def run():
+            opened = await self.registry.execute(
+                "browser.open", {"url": "https://example.com/documents"}, self.context)
+            self.assertTrue(opened["ok"], opened)
+            from copilot_agent.protocol import validate_schema
+            self.assertEqual([], validate_schema(
+                opened, self.registry.definition("browser.open")["output_schema"]))
+
+            tabs = await self.registry.execute("browser.tabs", {"operation": "list"}, self.context)
+            self.assertTrue(tabs["ok"], tabs)
+            primary = next(tab for tab in tabs["result"]["tabs"] if tab["primary"])
+            self.assertEqual(primary["tab_id"], opened["result"]["tab_id"])
+
+        asyncio.run(run())
 
     def test_preflight_is_side_effect_free(self):
         with self.assertRaises(PolicyError):
