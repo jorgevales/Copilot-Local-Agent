@@ -11,7 +11,8 @@ from copilot_agent.policy import PathPolicy, PolicyError
 from copilot_agent.tools import tool_path_policy
 from tests.live_package_run import (load_proof_config, package_archive_was_executed,
                                     proof_retry_instruction, recover_denied_run_plan,
-                                    proof_import_scope_valid, latest_package_run_was_denied,
+                                    proof_import_scope_valid, proof_description_is_synthetic,
+                                    latest_package_run_was_denied,
                                     should_recover_denied_run_plan,
                                      latest_failed_proof_run_state, DEFAULT_PROOF_REVISIONS,
                                      parse_proof_revision_limit, proof_revision_allowed,
@@ -108,6 +109,68 @@ class IsolatedProofModeTests(unittest.TestCase):
         manifest["files"]["project/src/os.py"] = "b" * 64
         manifest["capabilities"]["imports"].append("os")
         self.assertFalse(proof_import_scope_valid(manifest))
+
+    def test_proof_accepts_invented_data_description_as_synthetic_scope(self):
+        self.assertTrue(proof_description_is_synthetic({
+            "description": "Generate from entirely invented transit reliability data."
+        }))
+        self.assertTrue(proof_description_is_synthetic({"description": "Synthetic data for fictional transit routes."}))
+        self.assertFalse(proof_description_is_synthetic({"description": "Analyze customer transit data."}))
+        self.assertFalse(proof_description_is_synthetic({
+            "description": "Synthetic wrapper around customer trip records."
+        }))
+        self.assertFalse(proof_description_is_synthetic({
+            "description": "Entirely invented transit data using live customer records."
+        }))
+        self.assertFalse(proof_description_is_synthetic({
+            "description": "Synthetic data generated from production operational logs."
+        }))
+        self.assertFalse(proof_description_is_synthetic({
+            "description": "Synthetic data reconstructed from a live feed."
+        }))
+        self.assertFalse(proof_description_is_synthetic({
+            "description": "Synthetic data based on real-world measurements."
+        }))
+        self.assertFalse(proof_description_is_synthetic({
+            "description": "Fictional data derived from real source records."
+        }))
+        self.assertFalse(proof_description_is_synthetic({
+            "description": "Synthetic data derived from genuine observations."
+        }))
+        self.assertFalse(proof_description_is_synthetic({
+            "description": "Synthetic data from authentic observations."
+        }))
+        self.assertFalse(proof_description_is_synthetic({
+            "description": "Not synthetic data; use production records."
+        }))
+        self.assertFalse(proof_description_is_synthetic({
+            "description": "No synthetic data; manually assembled from the schedule."
+        }))
+        self.assertFalse(proof_description_is_synthetic({
+            "description": "Synthetic data is not used."
+        }))
+        self.assertFalse(proof_description_is_synthetic({
+            "description": "Do not use synthetic data."
+        }))
+        self.assertFalse(proof_description_is_synthetic({
+            "description": "Synthetic data isn't used."
+        }))
+        self.assertFalse(proof_description_is_synthetic({
+            "description": "We don't use synthetic data."
+        }))
+        self.assertFalse(proof_description_is_synthetic({
+            "description": "Synthetic data shouldn't be used."
+        }))
+        self.assertFalse(proof_description_is_synthetic({
+            "description": "Synthetic data will not be used."
+        }))
+        self.assertFalse(proof_description_is_synthetic({
+            "description": "Synthetic data will never be used."
+        }))
+        self.assertFalse(proof_description_is_synthetic({
+            "description": "Synthetic data must not be used."
+        }))
+        self.assertFalse(proof_description_is_synthetic({"description": None}))
 
     def test_latest_failed_proof_state_recovers_only_run_metadata(self):
         with tempfile.TemporaryDirectory() as temp:
