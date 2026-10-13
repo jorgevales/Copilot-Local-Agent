@@ -129,7 +129,7 @@ SPECS = {
     "files.list": (obj(PATH), "read_only", "List up to 200 immediate children inside allowed roots."),
     "files.exists": (obj(PATH), "read_only", "Check a path inside allowed roots."),
     "files.read": (obj({"path":S,"max_chars":N},["path"]), "read_only", "Read bounded UTF-8 text; binary or oversized reads fail."),
-    "files.create": (obj({"path":S,"text":{"type":"string","maxLength":100000}}), "user_approval", "Create a new UTF-8 file exclusively inside allowed write roots. App-verified portable storage is allowed; S: outputs bind to the current UNC share. Never overwrite."),
+    "files.create": (obj({"path":S,"text":{"type":"string","maxLength":100000}}), "user_approval", "Create a new UTF-8 file exclusively. Never overwrite. An exact approved S: output can resolve to its current UNC share."),
     "files.append": (obj({"path":S,"text":{"type":"string","maxLength":100000}}), "user_approval", "Append text to an existing file after explicit approval; preserves prior content."),
     "files.replace": (obj({"path":S,"expected_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"text":{"type":"string","maxLength":100000}}), "user_approval", "Atomically replace one existing UTF-8 file after explicit approval and an exact current SHA-256 check. The file must be inside allowed write roots and may not be a link or hardlink."),
     "files.copy": (obj({"source":S,"destination":S}), "user_approval", "Copy one bounded file to a new exclusive destination."),
@@ -239,8 +239,8 @@ def tool_path_policy(name, context):
 def _write_target(name, args, policy, context):
     key = 'destination' if name == 'files.copy' else 'path'
     value = args[key]
-    # Normal mutations use the current S: mapping or the verified portable
-    # store; exact session-approved path extensions stay handled below.
+    # Outside the one-shot isolated proof mode, agent-owned file mutations
+    # remain restricted to the current S: mapping.
     profile = config_value(context.get('config', {}), 'profile_dir')
     if (config_value(context.get('config', {}), '_automation_test_mode', False)
             or config_value(context.get('config', {}), '_local_knowledge_test_mode', False)):
@@ -257,50 +257,15 @@ def _write_target(name, args, policy, context):
         policy = policy.configured_policy
     if isinstance(policy, SessionPathPolicy):
         checked = policy.resolve(value)  # Retain the run's one-time navigation grant.
-        portable_target = _portable_storage_write_target(checked, context, policy)
-        if portable_target is not None:
-            return portable_target, False
         target = resolve_s_drive_output(str(checked), excluded_roots=[profile] if profile else [])
-    elif is_s_drive_path(value):
-        target = resolve_s_drive_output(value, excluded_roots=[profile] if profile else [])
-        if policy.mapped_s_root is not None:
-            policy.resolve(target)
-    elif str(value).startswith('\\\\'):
-        checked = policy.resolve(value)
-        portable_target = _portable_storage_write_target(checked, context, policy)
-        if portable_target is not None:
-            return portable_target, False
+    elif is_s_drive_path(value) or str(value).startswith('\\\\'):
         target = resolve_s_drive_output(value, excluded_roots=[profile] if profile else [])
         if policy.mapped_s_root is not None:
             policy.resolve(target)
     else:
         checked = policy.resolve(value)
-        portable_target = _portable_storage_write_target(checked, context, policy)
-        if portable_target is not None:
-            return portable_target, False
         target = resolve_s_drive_output(str(checked), excluded_roots=[profile] if profile else [])
     return target, True
-
-
-def _portable_storage_write_target(checked, context, policy):
-    """Allow normal writes only within the app-verified portable data root."""
-    config = context.get('config', {})
-    if (not config_value(config, '_portable_storage_verified', False)
-            or config_value(config, '_s_storage_verified', False)):
-        return None
-    storage_value = config_value(config, 'storage_dir')
-    if not storage_value:
-        return None
-    storage_root = Path(storage_value).expanduser().resolve()
-    target = Path(checked).expanduser().resolve()
-    if target != storage_root and storage_root not in target.parents:
-        return None
-    # SessionPathPolicy permits explicit operator navigation. Recheck the
-    # portable target through the configured PathPolicy so protected names,
-    # aliases, hardlinks and the browser profile remain excluded.
-    strict_policy = PathPolicy(policy.roots, excluded_roots=policy.excluded_roots,
-                               mapped_s_root=policy.mapped_s_root)
-    return strict_policy.resolve(target)
 
 
 def _require_extended_read(path, policy):

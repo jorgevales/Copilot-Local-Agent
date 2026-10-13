@@ -40,17 +40,6 @@ class KnowledgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(second['trusted_routes'], 2)
             self.assertEqual(second['revision'], 2)
 
-    async def test_local_environment_knowledge_review_uses_portable_mode_and_path(self):
-        with workspace() as (_, context), patch.dict(os.environ, {'COPILOT_AGENT_EXECUTION_MODE': 'testing'}), \
-             patch('copilot_agent.storage.discoveries_storage_paths', return_value={
-                 's_path': str(context['knowledge_directory']),
-                 'unc_path': str(context['knowledge_directory'])}):
-            _, _, consent = await self.observe_and_save(context, 0)
-
-        self.assertEqual('portable_local', consent['storage_mode'])
-        self.assertEqual(str(context['knowledge_directory']), consent['storage_path_s'])
-        self.assertIn('configured local', consent['consent_question'].casefold())
-
     async def test_save_requires_separate_exact_consent_and_cas(self):
         with workspace() as (_, context), patch.dict(os.environ, {'COPILOT_AGENT_EXECUTION_MODE': 'testing'}):
             _, save, consent = await self.observe_and_save(context, 0)

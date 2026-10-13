@@ -11,7 +11,6 @@ from unittest.mock import patch
 
 from copilot_agent.policy import PolicyError
 from copilot_agent.protocol import validate_schema
-from copilot_agent.approvals import ApprovalManager
 from copilot_agent.site_knowledge import (
     KNOWLEDGE_EXAMPLES, KNOWLEDGE_SPECS, execute_knowledge, knowledge_directory,
     KnowledgeWriteError, prepare_knowledge, validate_knowledge,
@@ -489,77 +488,17 @@ class SiteKnowledgeTests(unittest.TestCase):
         project = share / 'Scripts and projects' / 'Copilot Local Agent'
         project.mkdir(parents=True)
         context["config"] = {"root": str(project), "storage_dir": str(self.root / "OneDrive" / "Copilot Agent")}
-        expected = share / 'Scripts and projects' / 'Discoveries knowledge'
-        with patch('copilot_agent.site_knowledge.discoveries_storage', return_value=expected), \
-             patch('copilot_agent.site_knowledge.discoveries_storage_paths', return_value={
-                 's_path': r'S:\Scripts and projects\Discoveries knowledge',
-                 'unc_path': str(expected)}):
+        with patch('copilot_agent.site_knowledge.mapped_s_drive_root', return_value=share):
             directory = knowledge_directory(context)
-            self.assertEqual(directory, expected.resolve())
+            self.assertEqual(directory, (share / 'Scripts and projects' / 'Discoveries knowledge').resolve())
             prepared = prepare_knowledge(self.bind_args, context, name="site_knowledge.bind")
             self.assertIn("Discoveries knowledge", prepared["storage_scope"])
-            self.assertEqual("shared_s", prepared["storage_mode"])
-            self.assertEqual(directory.resolve(), Path(prepared['storage_path_unc']).resolve())
+            self.assertEqual(str(directory), prepared['storage_path_unc'])
             self.assertIn('S:', prepared['storage_path_s'])
             self.assertFalse(directory.exists())
-
-    def test_default_knowledge_uses_verified_portable_local_store_without_s(self):
-        context = dict(self.context)
-        context.pop("knowledge_directory")
-        project = self.root / 'checkout'
-        project.mkdir()
-        portable = self.root / 'LocalAppData' / 'CopilotLocalAgent' / 'Discoveries knowledge'
-        context['config'] = SimpleNamespace(root=project, knowledge_directory=portable,
-                                            _portable_storage_verified=True,
-                                            _s_storage_verified=False)
-        with patch('copilot_agent.site_knowledge.discoveries_storage', return_value=portable), \
-             patch('copilot_agent.site_knowledge.discoveries_storage_paths', return_value={
-                 's_path': str(portable), 'unc_path': str(portable)}):
-            directory = knowledge_directory(context)
-            prepared = prepare_knowledge(self.bind_args, context, name='site_knowledge.bind')
-
-        self.assertEqual(portable.resolve(), directory.resolve())
-        self.assertEqual('portable_local', prepared['storage_mode'])
-        self.assertEqual(str(portable.resolve()), prepared['directory'])
-        self.assertEqual(portable.resolve(), Path(prepared['storage_path_s']).resolve())
-        self.assertEqual(portable.resolve(), Path(prepared['storage_path_unc']).resolve())
-        self.assertIn('local', prepared['storage_scope'].casefold())
-
-    def test_portable_storage_approval_shows_configured_path_without_claiming_s(self):
-        context = dict(self.context)
-        context.pop('knowledge_directory')
-        portable = self.root / 'portable-discoveries'
-        context['config'] = SimpleNamespace(root=self.root, storage_dir=self.root,
-                                            knowledge_directory=portable,
-                                            _portable_storage_verified=True,
-                                            _s_storage_verified=False)
-        with patch('copilot_agent.site_knowledge.discoveries_storage', return_value=portable), \
-             patch('copilot_agent.site_knowledge.discoveries_storage_paths', return_value={
-                 's_path': str(portable), 'unc_path': str(portable)}):
-            prepared = prepare_knowledge(self.bind_args, context, name='site_knowledge.bind')
-
-        class CapturingFeedback:
-            def __init__(self): self.sections = []
-            def section(self, *args, **kwargs): self.sections.append(args)
-            def record(self, *args, **kwargs): pass
-            def emit(self, *args, **kwargs): pass
-
-        feedback = CapturingFeedback()
-        state = SessionState(self.root / 'approval')
-        manager = ApprovalManager(state, feedback=feedback)
-        call = {'call_id': 'bind', 'name': 'site_knowledge.bind', 'arguments': self.bind_args}
-        manager._show({'complete_pending_plan': {'tool_requests': [call]},
-                        'current_call_id': 'bind', 'prepared_code': prepared,
-                        'plan_hash': 'hash'},
-                       self.root / 'approval.json')
-        approval = next(section for section in feedback.sections if section[0] == 'Approval')
-        displayed = dict(approval[2])
-
-        self.assertEqual(Path(prepared['directory']).resolve(),
-                         Path(displayed['Configured Discoveries folder']).resolve())
-        self.assertNotIn('Discoveries S: folder', displayed)
-        self.assertNotIn('Discoveries UNC filesystem path', displayed)
-        self.assertEqual(prepared['storage_mode'], displayed['Storage mode'])
+        with patch('copilot_agent.site_knowledge.mapped_s_drive_root', side_effect=PolicyError('unavailable')):
+            with self.assertRaises(PolicyError):
+                knowledge_directory(context)
 
     def test_bounded_payload_ttl_strict_boolean_and_current_https_scope(self):
         self.bind()

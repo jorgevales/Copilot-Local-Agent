@@ -89,7 +89,7 @@ class ResourceSetupTests(unittest.IsolatedAsyncioTestCase):
         args=SimpleNamespace(config=None,attach_existing=False,port=None,profile=None,
                              model=None,setup_only=True,resume=None,yes_setup=True)
         with patch('copilot_agent.app.Config.load',return_value=config), \
-             patch('copilot_agent.app.discoveries_storage',return_value=canonical_storage), \
+             patch('copilot_agent.storage.discoveries_storage',return_value=canonical_storage), \
              patch('copilot_agent.app.mapped_s_drive_root',return_value=simulated_share), \
              patch('copilot_agent.config.mapped_s_drive_root',return_value=simulated_share), \
              patch('copilot_agent.app.ask',AsyncMock(side_effect=['2',str(self.executable)])), \

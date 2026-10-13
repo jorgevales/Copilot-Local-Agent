@@ -6,12 +6,23 @@ execution, authentication bypass, website transactions or arbitrary file changes
 File navigation probes the current local/mapped/network volume and reports sanitized
 OS errors. Browser-profile access remains protected.
 
-Knowledge uses the current environment's canonical `Discoveries knowledge` store. Mapped S: is preferred: a checkout on that share uses its sibling store, and other checkouts use `S:\CopilotLocalAgent\Discoveries knowledge`. Without mapped S:, accessible UNC checkouts use their sibling store; local checkouts use `%LOCALAPPDATA%\CopilotLocalAgent\Discoveries knowledge`. Remembered host paths do not choose the destination on a different machine. Startup verifies a unique probe, its hash, and SQLite schema/integrity. The actual storage mode and filesystem path are included in the startup contract and save responses.
+Knowledge uses `Discoveries knowledge` beside the project's parent on the live
+S: share. It does not follow runtime, workspace, profile or OneDrive storage. On
+a machine where the project is not on the mapped S: share, the agent stops before
+writing rather than silently falling back. A configured `knowledge_directory`
+must match this canonical folder. Startup creates a unique probe, flushes it,
+checks its hash, removes it, and checks SQLite schema and integrity. The verified
+S: path and resolved UNC filesystem path are included in the startup contract and
+each agent save response.
 
-For an isolated live test, `app.py --local-knowledge-test-directory` can select an empty direct child of `%LOCALAPPDATA%\CopilotLocalAgent\live-navigation-tests`. This explicit test store remains separate from normal environment-selected storage.
+For a local live navigation test only, `app.py --local-knowledge-test-directory`
+can select an empty direct child of `%LOCALAPPDATA%\\CopilotLocalAgent\\live-navigation-tests`.
+The test store is reported explicitly and scoped as the only agent write root for
+that run. This opt-in does not change the normal S:-only production path or act as
+an automatic fallback.
 
 Website knowledge and discovery records share the SQLite ledger. Compatible JSON
-records already under the selected Discoveries root are read through a
+records already under the selected S: Discoveries root are read through a
 compatibility path and promoted on approved saves. The app no longer searches
 legacy OneDrive or LocalAppData knowledge stores automatically.
 Known columns in newer stores remain readable; incompatible writes return a

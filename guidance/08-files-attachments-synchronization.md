@@ -22,7 +22,7 @@ Successful local path inspection does not prove upload completion. Wait for UI e
 
 ## Required delivery format
 
-The current delivery workflow uses the actual Copilot UI download, followed by local hash verification. Ordinary archive extraction remains separately approved and never executes code. Automation packages use `automation.inspect` followed by `automation.run` in a dedicated runtime-provided workspace. Use the current registered-tool catalogue and local run/session approval scope; fresh hash-bound inspection remains required for every run. Keep package paths relative to runtime-provided directories rather than embedding a machine's username, checkout location or drive letter. Do not use Created-folder synchronization for package state.
+The current delivery workflow uses the actual Copilot UI download, followed by local hash verification. Ordinary archive extraction remains separately approved and never executes code. Automation packages use `automation.inspect` followed by `automation.run` in a dedicated allowed workspace; package execution is permitted only after the local user reviews the exact package revision, stage list, registered read-only tools, paths, permissions, network hosts, outputs and resource limits. One approval covers every stage in that unchanged run and expires after 30 minutes. Changes require a new review. Do not use OneDrive Created-folder synchronization for package state.
 
 For every requested Office document, always request a downloadable ZIP containing the intended Office file or files. This applies to Word, Excel and PowerPoint formats, their related templates and macro-capable variants, and legacy Office formats. A single Office file still goes inside a ZIP. For a complete coding project/package, always request a ZIP preserving the intended package structure.
 
@@ -46,7 +46,7 @@ Approval is scoped to the requested generated artifact(s), current task, observe
 
 ## ZIP inspection and extraction
 
-Retain the original downloaded ZIP. Use `archives.inspect` to obtain a bounded member manifest and safety assessment before proposing extraction. Use `archives.extract` only with approval binding the inspected archive SHA-256, complete inspected member manifest, required expected output files and destination scope inside the configured permitted roots. Extract create-only into a new scoped directory; never overwrite or delete an existing file. Inspection does not itself authorize extraction.
+Retain the original downloaded ZIP. Use `archives.inspect` to obtain a bounded member manifest and safety assessment before proposing extraction. Use `archives.extract` only with approval binding the inspected archive SHA-256, complete inspected member manifest, required expected output files and destination scope inside the selected OneDrive permitted roots. Extract create-only into a new scoped directory; never overwrite or delete an existing file. Inspection does not itself authorize extraction.
 
 Reject unsafe or unsupported archives: path traversal, absolute/drive/UNC paths, alternate data streams, Windows reserved/ambiguous names, symlinks or special entries, duplicate/colliding destinations, encryption not supported by the service, or excessive member count, sizes or expansion ratio. Do not silently rename unsafe entries, recursively unpack nested archives, or execute any extracted code. The catalogue defines exact constraints and argument names.
 
@@ -60,4 +60,4 @@ If several UI artifacts, downloads or archive members could match, request disam
 
 ## Evidence and retention
 
-Return concise artifact paths, metadata, hashes and verification results. Distinguish generated, link observed, download completed, archive inspected, extraction approved, package execution approved and outputs verified. Preserve the ZIP, package source, checkpoints and existing files; avoid duplicate uploads/writes. Runtime records and diagnostic snapshots use the supplied `Discoveries knowledge` store. A package can execute only through the reviewed `automation.run` path.
+Return concise artifact paths, metadata, hashes and verification results. Distinguish generated, link observed, download completed, archive inspected, extraction approved, package execution approved and outputs verified. Preserve the ZIP, package source, checkpoints and existing files; avoid duplicate uploads/writes. Runtime records and diagnostic snapshots stay in the S: project-sibling `Discoveries knowledge` folder; never use C: or OneDrive as an automatic fallback. A package can execute only through the reviewed `automation.run` path.

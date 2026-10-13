@@ -1,4 +1,4 @@
-"""Environment-local discovery storage and operator-selected storage helpers."""
+"""S: project-sibling persistence and operator-selected storage helpers."""
 from __future__ import annotations
 
 import hashlib
@@ -19,35 +19,27 @@ def machine_key(hostname=None) -> str:
     return 'vdi-' + hashlib.sha256(name.casefold().encode('utf-8')).hexdigest()[:16]
 
 
-def discoveries_storage(project_root: Path, environ=None) -> Path:
-    """Prefer the live shared store, otherwise use this host's local app data."""
+def discoveries_storage(project_root: Path) -> Path:
+    """Return the verified S: project sibling used for all durable agent data."""
     from .policy import PolicyError, mapped_s_drive_root
     root = Path(project_root).expanduser().resolve()
     try:
         share = mapped_s_drive_root().resolve()
-    except (PolicyError, OSError):
-        # A reachable UNC checkout needs no particular mapped drive letter.
-        if root.drive.startswith('\\\\'):
-            return root.parent / 'Discoveries knowledge'
-        environment = os.environ if environ is None else environ
-        local = environment.get('LOCALAPPDATA') or str(Path.home() / 'AppData' / 'Local')
-        return validate_user_storage_directory(Path(local) / 'CopilotLocalAgent' / 'Discoveries knowledge')
-    if root != share and share in root.parents:
-        return root.parent / 'Discoveries knowledge'
-    # A VDI may pull its source onto C: while durable data lives on S:.
-    return share / 'CopilotLocalAgent' / 'Discoveries knowledge'
+    except (PolicyError, OSError) as error:
+        raise ValueError('S: must be mapped to its UNC share before the agent can start; no local C: storage fallback is permitted') from error
+    if root != share and share not in root.parents:
+        raise ValueError('The project is not under the live S: UNC mapping; place/run the project from S: to enable persistent storage')
+    target = root.parent / 'Discoveries knowledge'
+    if target == share or share not in target.parents:
+        raise ValueError('The Discoveries knowledge folder must be a sibling of the project root inside the mapped S: share')
+    return target
 
 
 def discoveries_storage_paths(project_root: Path) -> dict[str, str]:
-    """Describe the selected folder without assuming a drive mapping exists."""
-    from .policy import PolicyError, mapped_s_drive_root
+    """Describe the same folder as an S: path and its live UNC filesystem path."""
+    from .policy import mapped_s_drive_root
     target = discoveries_storage(project_root).resolve()
-    try:
-        share = mapped_s_drive_root().resolve()
-    except (PolicyError, OSError):
-        return {'s_path': str(target), 'unc_path': str(target)}
-    if target != share and share not in target.parents:
-        return {'s_path': str(target), 'unc_path': str(target)}
+    share = mapped_s_drive_root().resolve()
     relative = ntpath.relpath(str(target), str(share))
     if relative == '..' or relative.startswith('..\\'):
         raise ValueError('The Discoveries knowledge folder resolved outside the live S: share')
@@ -55,9 +47,9 @@ def discoveries_storage_paths(project_root: Path) -> dict[str, str]:
 
 
 def default_local_storage(environ=None) -> Path:
-    """Select storage for the current machine and checkout."""
+    """Compatibility name: agent storage is the S: Discoveries project sibling."""
     from .config import PROJECT_ROOT
-    return discoveries_storage(PROJECT_ROOT, environ=environ)
+    return discoveries_storage(PROJECT_ROOT)
 
 
 def validate_user_storage_directory(path: Path) -> Path:
