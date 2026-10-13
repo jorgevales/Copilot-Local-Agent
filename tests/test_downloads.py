@@ -11,7 +11,8 @@ import unittest
 from unittest.mock import patch
 import uuid
 
-from copilot_agent.downloads import DownloadError, DownloadService, _wait_for_completed_file, validate_download_args
+from copilot_agent.downloads import (DownloadError, DownloadService, _download_path_identity,
+                                     _wait_for_completed_file, validate_download_args)
 from copilot_agent.policy import PathPolicy
 
 
@@ -135,6 +136,27 @@ class DownloadCompletionTests(unittest.IsolatedAsyncioTestCase):
         await task
         self.assertEqual(stat.st_size, len(b'PK\\x03\\x04completed'))
         self.assertEqual(artifact.read_bytes(), b'PK\\x03\\x04completed')
+
+
+class DownloadPathIdentityTests(unittest.TestCase):
+    def test_s_path_and_redirected_unc_path_share_one_download_identity(self):
+        root = Path(os.environ.get('COPILOT_TEST_ROOT', str(Path(__file__).resolve().parents[1] / 'runtime' / 'tests'))) / ('download-path-identity-'+uuid.uuid4().hex)
+        share = root / 'mapped-share'
+        downloads = share / 'Edge Downloads'
+        downloads.mkdir(parents=True)
+        policy = PathPolicy([share])
+
+        def resolve_live_s_path(path, *, must_exist=False, **kwargs):
+            value = str(path).replace('/', '\\')
+            if value.casefold() in {r's:\edge downloads', r'\\server\share\edge downloads'}:
+                return downloads
+            raise ValueError('not the mapped S: download directory')
+
+        with patch('copilot_agent.policy.resolve_s_drive_output', side_effect=resolve_live_s_path), patch('copilot_agent.downloads.resolve_s_drive_output', side_effect=resolve_live_s_path):
+            s_identity = _download_path_identity(policy, r'S:\Edge Downloads', must_exist=True)
+            unc_identity = _download_path_identity(policy, r'\\server\share\Edge Downloads', must_exist=True)
+
+        self.assertEqual(s_identity, unc_identity)
 
 
 class DownloadTests(unittest.IsolatedAsyncioTestCase):

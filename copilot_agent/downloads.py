@@ -22,7 +22,7 @@ import uuid
 from urllib.parse import urlsplit
 
 from .archives import ArchiveError, verify_file
-from .policy import is_s_drive_path
+from .policy import PolicyError, is_s_drive_path, resolve_s_drive_output
 
 
 _ZIP_LINK_SETTLE_SECONDS = 3
@@ -93,10 +93,17 @@ async def _wait_for_completed_file(path, timeout, *, stable_samples=3, poll_inte
 
 
 def _download_path_identity(policy, path, *, must_exist=False):
-    """Canonicalize mapped S: paths by their current UNC identity."""
+    """Canonicalize S: and redirected UNC paths to the mapped share identity."""
     value = str(path)
     if is_s_drive_path(value):
         return os.path.normcase(str(policy.resolve(value, must_exist=must_exist)))
+    if value.startswith(('\\\\', '//')) and not value.startswith(('\\\\?\\', '\\\\.\\')):
+        try:
+            return os.path.normcase(str(resolve_s_drive_output(value, must_exist=must_exist)))
+        except PolicyError:
+            # Edge can use an unrelated UNC default directory. Keep identity
+            # comparison useful for that location without treating it as S:.
+            pass
     return os.path.normcase(str(Path(path).resolve(strict=must_exist)))
 
 

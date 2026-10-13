@@ -1,7 +1,25 @@
 param([ValidateSet('Setup','Start','UI','Tests')][string]$Mode = 'Start')
 $ErrorActionPreference = 'Stop'
 $repoRoot = $PSScriptRoot
-$productionShare = ([System.IO.Path]::GetPathRoot($repoRoot) -ieq 'S:\')
+function Test-SharedDeploymentPath([string]$Value, [string]$MappedShare) {
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
+    try { $normalized = [System.IO.Path]::GetFullPath($Value.Replace('/', '\')).TrimEnd('\') } catch { return $false }
+    if ($normalized.StartsWith('\\?\') -or $normalized.StartsWith('\\.\')) { return $false }
+    if ([string]::IsNullOrWhiteSpace($MappedShare) -or -not $MappedShare.StartsWith('\\')) { return $false }
+    if ($normalized -match '^S:\\') { return $true }
+    $share = $MappedShare.TrimEnd('\')
+    return ($normalized.Equals($share, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $normalized.StartsWith($share + '\', [System.StringComparison]::OrdinalIgnoreCase))
+}
+
+# DisplayRoot reports the live Windows mapping; the Python probe independently
+# verifies resolved runtime/dependency identities before any application launch.
+$sDrive = Get-PSDrive -Name S -PSProvider FileSystem -ErrorAction SilentlyContinue
+$mappedSShare = if ($sDrive) { [string]$sDrive.DisplayRoot } else { '' }
+$productionShare = Test-SharedDeploymentPath $repoRoot $mappedSShare
+if (([System.IO.Path]::GetPathRoot($repoRoot) -ieq 'S:\' -or $repoRoot.StartsWith('\\')) -and -not $productionShare) {
+    throw 'The UNC checkout must belong to the share currently mapped as S:.'
+}
 $candidates = [System.Collections.Generic.List[string]]::new()
 $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
@@ -15,7 +33,7 @@ function Add-PythonCandidate([string]$Value) {
         return
     }
     if ([System.IO.Path]::GetFileName($candidate) -ine 'python.exe') { return }
-    if ($productionShare -and ([System.IO.Path]::GetPathRoot($candidate) -ine 'S:\')) { return }
+    if ($productionShare -and -not (Test-SharedDeploymentPath $candidate $mappedSShare)) { return }
     if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { return }
     $entry = Get-Item -LiteralPath $candidate -Force
     if (-not (Test-SafePythonEntry $entry)) { return }
@@ -25,7 +43,7 @@ function Add-PythonCandidate([string]$Value) {
         $parent = $parent.Parent
     }
     $resolved = (Resolve-Path -LiteralPath $candidate).Path
-    if ($productionShare -and ([System.IO.Path]::GetPathRoot($resolved) -ine 'S:\')) { return }
+    if ($productionShare -and -not (Test-SharedDeploymentPath $resolved $mappedSShare)) { return }
     if ($seen.Add($resolved)) { $candidates.Add($resolved) }
 }
 
@@ -73,7 +91,7 @@ function Read-PythonMethod {
 
 function Read-PythonPath {
     Write-Host 'Paste the full path to python.exe or its installation folder. Surrounding quotes are allowed.'
-    if ($productionShare) { Write-Host 'The complete Python installation must be on S:.' }
+    if ($productionShare) { Write-Host 'The complete Python installation must be on S: or its currently mapped UNC share.' }
     for ($attempt = 0; $attempt -lt 5; $attempt++) {
         Add-PythonCandidate (Read-Host 'Python path')
         if ($candidates.Count -gt 0) { return }
@@ -267,7 +285,7 @@ try {
                 $nearby = [System.Collections.Generic.List[string]]::new()
                 $cursor = [System.IO.DirectoryInfo]::new($repoRoot)
                 for ($depth = 0; $depth -lt 4 -and $cursor; $depth++) {
-                    if (-not $productionShare -or $cursor.Root.FullName -ieq 'S:\') {
+                    if (-not $productionShare -or (Test-SharedDeploymentPath $cursor.FullName $mappedSShare)) {
                         $nearby.Add($cursor.FullName)
                         foreach ($folder in @('Python','python','Shared Python','.venv')) {
                             $nearby.Add((Join-Path $cursor.FullName $folder))
@@ -351,9 +369,7 @@ def mapped_shared_root():
 def is_shared_path(value):
     if not isinstance(value, str) or not ntpath.isabs(value):
         return False
-    if ntpath.splitdrive(ntpath.normpath(value))[0].casefold() == 's:':
-        return True
-    if not value.startswith(WINDOWS_SLASH * 2):
+    if ntpath.splitdrive(ntpath.normpath(value))[0].casefold() != 's:' and not value.startswith(WINDOWS_SLASH * 2):
         return False
     root = mapped_shared_root()
     if root is None:

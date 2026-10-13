@@ -32,10 +32,22 @@ class SharedRuntimeProbeTests(unittest.TestCase):
         cls.locked_versions = staticmethod(namespace['locked_versions'])
         cls.source = source
 
+    def setUp(self):
+        self.mapped_root.cache_clear()
+        original = os.path.realpath
+        def mapped(path, *, strict=False):
+            if str(path).lower().startswith('s:' + chr(92)):
+                return r'\\server\share' + str(path)[2:]
+            return original(path, strict=strict)
+        patcher = patch('os.path.realpath', side_effect=mapped)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self.mapped_root.cache_clear)
+
     def test_mapped_s_unc_runtime_and_dependency_paths_accepted(self):
         def resolve(path, *, strict):
             self.assertTrue(strict)
-            return '\\' * 2 + r'server\share' if path.casefold() == 's:' + chr(92) else path
+            return '\\' * 2 + r'server\share' + path[2:] if path.casefold().startswith('s:' + chr(92)) else path
         with patch('os.path.realpath', side_effect=resolve):
             self.mapped_root.cache_clear()
             self.check(r'S:\Env\Scripts\python.exe', r'S:\Python',
@@ -50,7 +62,7 @@ class SharedRuntimeProbeTests(unittest.TestCase):
     def test_unrelated_unc_share_and_prefix_collision_rejected(self):
         def resolve(path, *, strict):
             self.assertTrue(strict)
-            return '\\' * 2 + r'server\share' if path.casefold() == 's:' + chr(92) else path
+            return '\\' * 2 + r'server\share' + path[2:] if path.casefold().startswith('s:' + chr(92)) else path
         with patch('os.path.realpath', side_effect=resolve):
             self.mapped_root.cache_clear()
             for other in (r'\\other\share\Python\python.exe',
@@ -65,16 +77,26 @@ class SharedRuntimeProbeTests(unittest.TestCase):
     def test_unc_rejected_when_s_mapping_cannot_be_verified(self):
         with patch('os.path.realpath', side_effect=OSError('unavailable')):
             self.mapped_root.cache_clear()
-            with self.assertRaisesRegex(RuntimeError, 'base executable'):
+            with self.assertRaisesRegex(RuntimeError, 'Shared deployment'):
                 self.check(r'S:\Env\Scripts\python.exe', r'S:\Python',
                            r'\\server\share\Python\python.exe', r'S:\Python\Lib')
+            self.assertFalse(self.shared_path(r'S:\Python\python.exe'))
         self.mapped_root.cache_clear()
+
+    def test_s_runtime_redirected_to_another_share_is_rejected(self):
+        def resolve(path, *, strict):
+            if path.casefold() == 's:' + chr(92):
+                return r'\\server\share'
+            return r'\\other\share\Python\python.exe'
+        with patch('os.path.realpath', side_effect=resolve):
+            self.mapped_root.cache_clear()
+            self.assertFalse(self.shared_path(r'S:\Python\python.exe'))
 
     def test_extended_unc_resolution_and_redirect_outside_share(self):
         def resolve(path, *, strict):
             self.assertTrue(strict)
-            if path.casefold() == 's:' + chr(92):
-                return r'\\?\UNC\server\share'
+            if path.casefold().startswith('s:' + chr(92)):
+                return r'\\?\UNC\server\share' + path[2:]
             if path == r'\\server\share\redirected\python.exe':
                 return r'C:\outside\python.exe'
             return path
@@ -183,7 +205,8 @@ class PythonSetupChoiceTests(unittest.TestCase):
     def run_helpers(self, body):
         source = (Path(__file__).resolve().parents[1] / 'Launcher.ps1').read_text(encoding='utf-8-sig')
         helpers = source[source.index('function Add-PythonCandidate'):source.index('\ntry {', source.index('function Initialize-AgentEnvironment'))]
-        script = "$ErrorActionPreference='Stop'; $productionShare=$false; " + source[source.index('$candidates ='):source.index('function Add-PythonCandidate')] + helpers + body
+        mapping_helper = source[source.index('function Test-SharedDeploymentPath'):source.index('# DisplayRoot')]
+        script = "$ErrorActionPreference='Stop'; $productionShare=$false; $mappedSShare=''; " + mapping_helper + source[source.index('$candidates ='):source.index('function Add-PythonCandidate')] + helpers + body
         result = subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', script], capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return result.stdout
@@ -370,3 +393,30 @@ class PythonSetupChoiceTests(unittest.TestCase):
 
 if __name__=='__main__':
     unittest.main()
+
+
+class SharedDeploymentPathTests(unittest.TestCase):
+    def test_s_and_current_unc_checkout_and_candidates_use_shared_mode(self):
+        shell = shutil.which('powershell')
+        if not shell:
+            self.skipTest('Windows PowerShell unavailable')
+        source = (Path(__file__).resolve().parents[1] / 'Launcher.ps1').read_text(encoding='utf-8-sig')
+        helper = source[source.index('function Test-SharedDeploymentPath'):source.index('# DisplayRoot')]
+        checks = r"""
+$share = '\\server\share'
+foreach ($path in @('S:\Projects\Agent', '\\server\share\Projects\Agent', '\\SERVER\SHARE\Python\python.exe')) {
+    if (-not (Test-SharedDeploymentPath $path $share)) { throw ('Expected shared path: ' + $path) }
+}
+foreach ($path in @('C:\Python\python.exe', '\\server\share-other\Python', '\\other\share\Python', '\\?\UNC\server\share\Python')) {
+    if (Test-SharedDeploymentPath $path $share) { throw ('Unexpected shared path: ' + $path) }
+}
+if (Test-SharedDeploymentPath '\\server\share\Projects' '') { throw 'Unmapped UNC accepted' }
+if (Test-SharedDeploymentPath 'S:\Projects' '') { throw 'Unmapped S accepted' }
+if (Test-SharedDeploymentPath 'S:\Projects' 'C:\local') { throw 'Local S accepted' }
+"""
+        result = subprocess.run([shell, '-NoProfile', '-NonInteractive', '-Command', helper + checks],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn('$productionShare = Test-SharedDeploymentPath $repoRoot $mappedSShare', source)
+        self.assertIn('Test-SharedDeploymentPath $candidate $mappedSShare', source)
+        self.assertIn('Test-SharedDeploymentPath $resolved $mappedSShare', source)
