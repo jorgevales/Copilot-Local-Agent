@@ -9,6 +9,15 @@ import uuid
 
 def write_preserving(path: Path, text: str) -> None:
     path = Path(path)
+    # Approval hashes and the atomic-write suffix can push a redirected UNC
+    # filename beyond legacy Windows limits even when its folder exists.
+    # This changes only the Win32 I/O spelling, never the selected destination.
+    if os.name == 'nt':
+        absolute = os.path.abspath(path)
+        if not absolute.startswith('\\\\?\\'):
+            absolute = ('\\\\?\\UNC\\' + absolute[2:] if absolute.startswith('\\\\')
+                        else '\\\\?\\' + absolute)
+        path = Path(absolute)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         history = path.parent / '.history' / path.name
