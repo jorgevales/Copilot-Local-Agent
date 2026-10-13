@@ -31,8 +31,14 @@ class ApprovalManager:
         current_call = next((item for item in current if item.get('call_id') == preview['current_call_id']), {})
         arguments = current_call.get('arguments', {})
         scope = preview.get('prepared_code') or {}
-        storage_label = ('Discoveries C: local test folder' if scope.get('storage_mode') == 'local_c_test'
-                         else 'Discoveries S: folder')
+        storage_mode = scope.get('storage_mode')
+        storage_label = ('Discoveries C: local test folder' if storage_mode == 'local_c_test'
+                         else 'Discoveries S: folder' if storage_mode == 'shared_s'
+                         else 'Configured Discoveries folder')
+        storage_path = (scope.get('storage_path_s') or scope.get('storage_folder_s_path')
+                        or scope.get('directory') or scope.get('storage_folder'))
+        resolved_storage_path = (scope.get('storage_path_unc') or scope.get('storage_folder')
+                                 or scope.get('directory'))
         if scope.get('approval_scope_type') == 'automation_package':
             package_fresh = bool(scope.get('requires_fresh_run_confirmation'))
             self.feedback.section('Package execution scope',
@@ -89,8 +95,9 @@ class ApprovalManager:
             ('Source path', arguments.get('source')),
             ('Destination path', arguments.get('destination')),
             ('Resolved S: destination', (preview.get('prepared_code') or {}).get('mapped_s_drive_destination')),
-            (storage_label, (preview.get('prepared_code') or {}).get('storage_path_s') or (preview.get('prepared_code') or {}).get('storage_folder_s_path')),
-            ('Discoveries UNC filesystem path', (preview.get('prepared_code') or {}).get('storage_path_unc') or (preview.get('prepared_code') or {}).get('storage_folder')),
+            ('Storage mode', storage_mode),
+            (storage_label, storage_path),
+            ('Resolved Discoveries filesystem path', resolved_storage_path),
             ('Recovery call ID', arguments.get('call_id')),
             ('Recovery target', (preview.get('prepared_code') or {}).get('uncertain_operation')),
             ('Permissions', arguments.get('permissions')),

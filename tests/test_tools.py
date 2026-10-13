@@ -12,6 +12,7 @@ from copilot_agent.policy import resolve_s_drive_output
 from copilot_agent.state import SessionState
 from copilot_agent.config import Config
 from copilot_agent.approvals import ApprovalManager
+from copilot_agent.local_navigation import SessionNavigationGrant
 
 
 class ToolTests(unittest.TestCase):
@@ -180,6 +181,45 @@ class ToolTests(unittest.TestCase):
         crlf = {'path': 'windows-lines.md', 'text': 'First\r\nSecond\r\n'}
         self.assertFalse(self.run_tool('files.create', crlf)['ok'])
         self.assertFalse((self.root / 'windows-lines.md').exists())
+
+    def test_verified_portable_store_allows_approved_create_and_replace_only_inside_store(self):
+        storage = self.root / 'Discoveries knowledge'
+        storage.mkdir()
+        self.context['config'] = {
+            'allowed_roots': [str(storage)], 'storage_dir': str(storage),
+            'profile_dir': str(storage / 'profile'),
+            '_portable_storage_verified': True, '_s_storage_verified': False,
+        }
+        navigation_grant = SessionNavigationGrant()
+        navigation_grant.confirm()
+        self.context['local_navigation_grant'] = navigation_grant
+
+        created_path = storage / 'report.md'
+        create_args = {'path': str(created_path), 'text': 'new local report'}
+        create_review = self.registry.validate_call('files.create', create_args, self.context)
+        self.assertEqual({'valid': True}, create_review)
+        self.context['approved'] = True
+        created = self.run_tool('files.create', create_args)
+        self.assertTrue(created['ok'], created)
+        self.assertTrue(created['result']['verified'])
+        self.assertEqual('new local report', created_path.read_text(encoding='utf-8'))
+
+        replaced_path = storage / 'existing.md'
+        replaced_path.write_text('before', encoding='utf-8')
+        replace_args = {'path': str(replaced_path),
+                        'expected_sha256': hashlib.sha256(replaced_path.read_bytes()).hexdigest(),
+                        'text': 'after'}
+        replace_review = self.registry.validate_call('files.replace', replace_args, self.context)
+        self.assertEqual({'valid': True}, replace_review)
+        replaced = self.run_tool('files.replace', replace_args)
+        self.assertTrue(replaced['ok'], replaced)
+        self.assertTrue(replaced['result']['verified'])
+        self.assertEqual('after', replaced_path.read_text(encoding='utf-8'))
+
+        sibling_path = self.root / 'outside-store.md'
+        with self.assertRaises(PolicyError):
+            self.registry.validate_call('files.create', {'path': str(sibling_path), 'text': 'outside'}, self.context)
+        self.assertFalse(sibling_path.exists())
 
     def test_replace_requires_approval_and_exact_existing_hash(self):
         self.context['config']['_automation_test_mode'] = True

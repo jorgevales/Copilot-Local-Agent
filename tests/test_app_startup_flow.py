@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 from copilot_agent.app import configure_local_knowledge_test, run
 from copilot_agent.config import Config
+from copilot_agent.policy import PolicyError
 from copilot_agent.state import SessionState, latest_committed_request_id
 from tests.test_protocol_state import make_fixture
 
@@ -91,8 +92,10 @@ class LocalKnowledgeTestStoreTests(unittest.TestCase):
 
 class StartupOrchestrator:
     events = None
+    last_config = None
 
     def __init__(self, config, browser, registry, state, **kwargs):
+        type(self).last_config = config
         self.browser = browser
         self.state = state
         self.feedback = SimpleNamespace(color=False)
@@ -130,7 +133,8 @@ class StartupOrchestrator:
 class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
     async def run_flow(self, answers, explicit_model=None, configured_model='GPT-6 Sol',
                        resume=False, resume_capture=False, resume_unsent=False,
-                       exact_attach=False):
+                       exact_attach=False, portable_storage=None, no_share=False,
+                       remembered_roots=None, capture_config=False):
         root, config, _, _ = make_fixture('app-startup-flow-')
         config.storage_dir = root
         config.model = configured_model
@@ -154,6 +158,7 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
         events = []
         browser = StartupBrowser(events, reconciled_draft if resume_unsent else None)
         StartupOrchestrator.events = events
+        StartupOrchestrator.last_config = None
         replies = iter(answers)
 
         async def answer(prompt):
@@ -166,17 +171,24 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
                                profile=explicit_profile, model=explicit_model, setup_only=False,
                                resume=resume_path, yes_setup=True)
         endpoint_choice = AsyncMock()
+        mapped_patch = {'side_effect': PolicyError('unavailable')} if no_share else {'return_value': root}
+        selected_storage = Path(portable_storage) if portable_storage else root
+        remembered_settings = ({'config': {'allowed_roots': remembered_roots}}
+                               if remembered_roots is not None else {})
         with patch.dict(os.environ), \
              patch('copilot_agent.app._UI_PERMISSION_CONTEXT'), \
              patch('copilot_agent.app.Config.load', return_value=config), \
              patch('copilot_agent.app.validate_user_storage_directory', side_effect=lambda path: Path(path)), \
-             patch('copilot_agent.app.read_user_settings', return_value={}), \
+             patch('copilot_agent.app.read_user_settings', return_value=remembered_settings), \
              patch('copilot_agent.app.save_user_settings'), \
              patch('copilot_agent.app.configure_temp_directory',
                    side_effect=lambda storage_root: events.append('temp:verified') or root / 'verified-temp'), \
-             patch('copilot_agent.storage.discoveries_storage', return_value=root), \
-             patch('copilot_agent.storage.discoveries_storage_paths', return_value={'s_path': r'S:\Discoveries knowledge', 'unc_path': str(root)}), \
-             patch('copilot_agent.app.mapped_s_drive_root', return_value=root), \
+             patch('copilot_agent.app.discoveries_storage', return_value=selected_storage), \
+             patch('copilot_agent.storage.discoveries_storage_paths', return_value={
+                 's_path': str(selected_storage) if no_share else r'S:\Discoveries knowledge',
+                 'unc_path': str(selected_storage)}), \
+             patch('copilot_agent.app.mapped_s_drive_root', **mapped_patch), \
+             patch('copilot_agent.config.mapped_s_drive_root', **mapped_patch), \
              patch('copilot_agent.app.choose_edge', new=AsyncMock(side_effect=lambda *a, **k: events.append('edge:choose'))), \
              patch('copilot_agent.app.choose_browser_endpoint', new=endpoint_choice), \
              patch('copilot_agent.app.BrowserAdapter', return_value=browser), \
@@ -186,6 +198,8 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
             await run(args)
         if exact_attach:
             return events, endpoint_choice.await_args.args[0]
+        if capture_config:
+            return events, StartupOrchestrator.last_config
         return events
 
     async def test_resume_page_binding_uses_last_confirmed_request_not_uncommitted_tail(self):
@@ -219,6 +233,27 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((63741, str(selected_config.profile_dir.resolve())),
                          selected_config._proof_exact_edge_endpoint)
         self.assertIn('edge:choose', events)
+
+    async def test_normal_startup_uses_portable_store_and_discards_stale_remembered_roots(self):
+        root, _, _, _ = make_fixture('app-portable-storage-')
+        portable = root / 'local-app-data' / 'CopilotLocalAgent' / 'Discoveries knowledge'
+        stale = root.parent / (root.name + '-old-laptop-storage')
+        allowed_child = portable / 'operator-workspace'
+        events, config = await self.run_flow(
+            ['', ':exit'], portable_storage=portable, no_share=True,
+            remembered_roots=[str(stale), str(allowed_child)], capture_config=True)
+
+        self.assertTrue(config._portable_storage_verified)
+        self.assertFalse(config._s_storage_verified)
+        self.assertEqual(portable.resolve(), config.storage_dir.resolve())
+        self.assertEqual(portable.resolve(), config.knowledge_directory.resolve())
+        roots = [Path(value).resolve() for value in config.allowed_roots]
+        self.assertIn(portable.resolve(), roots)
+        self.assertIn(allowed_child.resolve(), roots)
+        self.assertTrue(all(path == portable.resolve() or portable.resolve() in path.parents
+                            for path in roots))
+        self.assertFalse(stale.exists())
+        self.assertTrue(allowed_child.exists())
 
     async def test_alternate_choice_changes_model_once_after_default_preselection(self):
         events = await self.run_flow(['2', ':exit'])

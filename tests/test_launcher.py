@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import os
 import sys
+import sysconfig
 
 
 class SharedRuntimeProbeTests(unittest.TestCase):
@@ -24,68 +25,24 @@ class SharedRuntimeProbeTests(unittest.TestCase):
                                                                  for target in node.targets))]
         namespace = {}
         exec(compile(ast.Module(body=definitions,type_ignores=[]),'Launcher.ps1 Python portability probe','exec'),namespace)
-        cls.check = staticmethod(namespace['assert_shared_runtime'])
-        cls.shared_path = staticmethod(namespace['is_shared_path'])
-        cls.mapped_root = staticmethod(namespace['mapped_shared_root'])
+        cls.check = staticmethod(namespace['assert_usable_runtime'])
         cls.valid_prefix = staticmethod(namespace['valid_environment_prefix'])
         cls.dependencies = staticmethod(namespace['assert_dependencies'])
         cls.locked_versions = staticmethod(namespace['locked_versions'])
         cls.source = source
 
-    def test_mapped_s_unc_runtime_and_dependency_paths_accepted(self):
-        def resolve(path, *, strict):
-            self.assertTrue(strict)
-            return '\\' * 2 + r'server\share' if path.casefold() == 's:' + chr(92) else path
-        with patch('os.path.realpath', side_effect=resolve):
-            self.mapped_root.cache_clear()
-            self.check(r'S:\Env\Scripts\python.exe', r'S:\Python',
-                       r'\\server\share\Python\python.exe', r'\\server\share\Python\Lib')
-            self.check(r'\\server\share\Env\Scripts\python.exe', r'\\server\share\Python',
-                       r'\\server\share\Python\python.exe', r'\\server\share\Python\Lib')
-            self.dependencies({'playwright': {'version': '1.55.0',
-                                              'location': r'\\server\share\Env\Lib\site-packages'}},
-                              {'playwright': '1.55.0'}, True)
-        self.mapped_root.cache_clear()
+    def test_accessible_local_python_and_pinned_dependencies_are_valid_on_s_checkout(self):
+        self.check(sys.executable, sys.prefix, getattr(sys, '_base_executable', None),
+                   sysconfig.get_path('stdlib'))
+        self.dependencies({'playwright': {'version': '1.55.0',
+                                          'location': r'C:\Python\Lib\site-packages'}},
+                          {'playwright': '1.55.0'})
 
-    def test_unrelated_unc_share_and_prefix_collision_rejected(self):
-        def resolve(path, *, strict):
-            self.assertTrue(strict)
-            return '\\' * 2 + r'server\share' if path.casefold() == 's:' + chr(92) else path
-        with patch('os.path.realpath', side_effect=resolve):
-            self.mapped_root.cache_clear()
-            for other in (r'\\other\share\Python\python.exe',
-                          r'\\server\share2\Python\python.exe'):
-                with self.subTest(path=other), self.assertRaisesRegex(RuntimeError, 'base executable'):
-                    self.check(r'S:\Env\Scripts\python.exe', r'S:\Python', other, r'S:\Python\Lib')
-                with self.subTest(dependency=other), self.assertRaisesRegex(RuntimeError, 'must be installed on S:'):
-                    self.dependencies({'playwright': {'version': '1.55.0', 'location': other}},
-                                      {'playwright': '1.55.0'}, True)
-        self.mapped_root.cache_clear()
-
-    def test_unc_rejected_when_s_mapping_cannot_be_verified(self):
-        with patch('os.path.realpath', side_effect=OSError('unavailable')):
-            self.mapped_root.cache_clear()
-            with self.assertRaisesRegex(RuntimeError, 'base executable'):
-                self.check(r'S:\Env\Scripts\python.exe', r'S:\Python',
-                           r'\\server\share\Python\python.exe', r'S:\Python\Lib')
-        self.mapped_root.cache_clear()
-
-    def test_extended_unc_resolution_and_redirect_outside_share(self):
-        def resolve(path, *, strict):
-            self.assertTrue(strict)
-            if path.casefold() == 's:' + chr(92):
-                return r'\\?\UNC\server\share'
-            if path == r'\\server\share\redirected\python.exe':
-                return r'C:\outside\python.exe'
-            return path
-        with patch('os.path.realpath', side_effect=resolve):
-            self.mapped_root.cache_clear()
-            self.check(r'S:\Env\Scripts\python.exe', r'S:\Python',
-                       r'\\?\UNC\server\share\Python\python.exe', r'S:\Python\Lib')
-            with self.assertRaisesRegex(RuntimeError, 'base executable'):
-                self.check(r'S:\Env\Scripts\python.exe', r'S:\Python',
-                           r'\\server\share\redirected\python.exe', r'S:\Python\Lib')
-        self.mapped_root.cache_clear()
+    def test_runtime_still_requires_absolute_accessible_python_components(self):
+        with self.assertRaisesRegex(RuntimeError, 'accessible absolute'):
+            self.check('python.exe', sys.prefix, sys.executable, sysconfig.get_path('stdlib'))
+        with self.assertRaisesRegex(RuntimeError, 'unavailable or redirected'):
+            self.check(sys.executable, sys.prefix, r'Z:\Missing\python.exe', sysconfig.get_path('stdlib'))
 
     def test_environment_prefix_uses_directory_identity(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -111,54 +68,18 @@ class SharedRuntimeProbeTests(unittest.TestCase):
             self.assertFalse(self.valid_prefix(r'S:\Env', r'S:\Python',
                                                r'\\server\share\Env'))
 
-    def test_complete_shared_installation_and_shared_venv_accepted(self):
-        self.check(r'S:\Python\python.exe',r'S:\Python',r'S:\Python\python.exe',r'S:\Python\Lib')
-        self.check(r'S:\Env\Scripts\python.exe',r'S:\Python',r'S:\Python\python.exe',r'S:\Python\Lib')
-        self.check(r's:\Python\python.exe',r's:\Python',None,r's:\Python\Lib')
-
-    def test_shared_venv_dependent_on_local_base_rejected(self):
-        with self.assertRaisesRegex(RuntimeError,'base Python prefix.*on S:'):
-            self.check(r'S:\Env\Scripts\python.exe',r'C:\Python',r'C:\Python\python.exe',r'C:\Python\Lib')
-
-    def test_each_actual_runtime_component_must_be_shared(self):
-        valid = [r'S:\Python\python.exe',r'S:\Python',r'S:\Python\python.exe',r'S:\Python\Lib']
-        for index in range(4):
-            with self.subTest(component=index):
-                values = valid.copy()
-                values[index] = values[index].replace('S:', 'C:')
-                with self.assertRaisesRegex(RuntimeError,'complete shared installation'):
-                    self.check(*values)
-
-    def test_drive_relative_unc_and_missing_stdlib_rejected(self):
-        valid = [r'S:\Python\python.exe',r'S:\Python',r'S:\Python\python.exe',r'S:\Python\Lib']
-        for value in ('S:Python\\Lib',r'\\server\Python\Lib',None,''):
-            with self.subTest(stdlib=value):
-                with self.assertRaises(RuntimeError):
-                    self.check(*valid[:3],value)
-
-    def test_shared_dependencies_require_lock_versions_and_s_drive(self):
+    def test_project_dependencies_require_lock_versions_but_allow_local_locations(self):
         lock = (Path(__file__).resolve().parents[1] / 'requirements.lock.txt').read_text(encoding='utf-8-sig')
         expected = self.locked_versions(lock)
-        installed = {name:{'version':version,'location':r'S:\Python\Lib\site-packages'}
+        installed = {name:{'version':version,'location':r'C:\Python\Lib\site-packages'}
                      for name,version in expected.items()}
-        self.dependencies(installed,expected,True)
+        self.dependencies(installed,expected)
         for name in expected:
-            with self.subTest(local_package=name):
-                local = {package:dict(record) for package,record in installed.items()}
-                local[name]['location'] = r'C:\Users\Example\AppData\Roaming\Python\site-packages'
-                with self.assertRaisesRegex(RuntimeError,'must be installed on S:'):
-                    self.dependencies(local,expected,True)
             with self.subTest(wrong_version=name):
                 wrong = {package:dict(record) for package,record in installed.items()}
                 wrong[name]['version'] = '0.0.0'
                 with self.assertRaisesRegex(RuntimeError,'requirements.lock.txt'):
-                    self.dependencies(wrong,expected,True)
-
-    def test_development_keeps_local_playwright_dependency_allowed(self):
-        installed = {'playwright':{'version':'1.55.0','location':r'C:\Local\site-packages'}}
-        self.dependencies(installed,{'playwright':'1.55.0'},False)
-        with self.assertRaises(RuntimeError):
-            self.dependencies(installed,{'playwright':'1.55.0'},True)
+                    self.dependencies(wrong,expected)
 
     def test_dependency_lock_rejects_missing_duplicate_and_unpinned_packages(self):
         for lock in ('playwright==1.55.0','playwright>=1.55.0',
@@ -176,6 +97,10 @@ class SharedRuntimeProbeTests(unittest.TestCase):
         calls = re.findall(r'(?m)^\s*& \$python\s+([^\r\n]+)',self.source)
         self.assertEqual(len(calls),7)  # Probe, setup, start, tests-setup, core tests, and UI tests.
         self.assertTrue(all(call.startswith('@pythonArgs ') for call in calls))
+
+    def test_start_error_from_project_venv_directs_safe_setup_repair(self):
+        self.assertIn("$Mode -eq 'Start' -and $python -and $python -ieq (Join-Path $repoRoot '.venv\\Scripts\\python.exe')", self.source)
+        self.assertIn('Run Setup.cmd to preserve and safely repair it using an accessible Python installation.', self.source)
 
 
 @unittest.skipUnless(os.name == 'nt' and shutil.which('powershell'), 'Windows PowerShell required')
@@ -202,11 +127,22 @@ class PythonSetupChoiceTests(unittest.TestCase):
         output = self.run_helpers("foreach ($value in @('python.exe','S:python.exe','\\python.exe','C:\\missing\\python.exe','C:\\Windows\\System32\\cmd.exe')) { Add-PythonCandidate $value }; if ($candidates.Count -ne 0) { throw 'Unsafe candidate accepted' }; Write-Output 'passed'")
         self.assertIn('passed', output)
 
-    def test_shared_deployment_rejects_pasted_local_installation(self):
+    def test_shared_deployment_accepts_accessible_local_installation(self):
         with tempfile.TemporaryDirectory() as directory:
             (Path(directory) / 'python.exe').write_bytes(b'fixture')
             path = str(Path(directory) / 'python.exe').replace("'", "''")
-            output = self.run_helpers("$productionShare=$true; Add-PythonCandidate '" + path + "'; if ($candidates.Count -ne 0) { throw 'Local executable accepted on shared deployment' }; Write-Output 'passed'")
+            output = self.run_helpers("$productionShare=$true; Add-PythonCandidate '" + path + "'; if ($candidates.Count -ne 1 -or $candidates[0] -ne '" + path + "') { throw 'Accessible local executable was not accepted' }; Write-Output 'passed'")
+            self.assertIn('passed', output)
+
+    def test_shared_deployment_still_rejects_redirected_python_entries(self):
+        output = self.run_helpers("$entry=[pscustomobject]@{Attributes=[IO.FileAttributes]::ReparsePoint; FullName='C:\\redirected\\python.exe'}; $productionShare=$true; if (Test-SafePythonEntry $entry) { throw 'Redirected executable accepted' }; Write-Output 'passed'")
+        self.assertIn('passed', output)
+
+    def test_shared_checkout_ignores_host_remembered_python_for_auto_detection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / 'python.exe').write_bytes(b'fixture')
+            path = str(Path(directory) / 'python.exe').replace("'", "''")
+            output = self.run_helpers("$savedInterpreters=[System.Collections.Generic.List[string]]::new(); $savedInterpreters.Add('" + path + "'); $productionShare=$true; Add-RememberedPythonCandidates $savedInterpreters; if ($candidates.Count -ne 0) { throw 'Host Python leaked into shared checkout auto-detection' }; $productionShare=$false; Add-RememberedPythonCandidates $savedInterpreters; if ($candidates.Count -ne 1) { throw 'Local remembered Python unavailable for local checkout' }; Write-Output 'passed'")
             self.assertIn('passed', output)
 
     def test_choice_and_path_retry_are_bounded_and_literal(self):
@@ -289,7 +225,7 @@ class PythonSetupChoiceTests(unittest.TestCase):
         bootstrap.mkdir()
         shutil.copyfile(Path(__file__).resolve().parents[1] / 'bootstrap' / 'virtualenv.pyz', bootstrap / 'virtualenv.pyz')
         path = str(directory).replace("'", "''")
-        return self.run_helpers("$global:operations=[System.Collections.Generic.List[string]]::new(); function Get-PipConfiguration { return '' }; function Get-WorkingPip { return 'pip fixture' }; function Invoke-SetupPython($Executable,$Arguments) { $global:operations.Add(($Arguments -join '|')); " + fail + " if (($Arguments -join '|') -like '*virtualenv.pyz*') { $envPath=$Arguments[-1]; New-Item -ItemType Directory -Path (Join-Path $envPath 'Scripts') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $envPath 'pyvenv.cfg') -Value 'fixture'; Set-Content -LiteralPath (Join-Path $envPath 'Scripts\\python.exe') -Value 'fixture' } }; " + body.replace('PROJECT', "'"+path+"'"))
+        return self.run_helpers("$global:operations=[System.Collections.Generic.List[string]]::new(); function Get-PythonBaseIdentity($Executable,$PythonFlags) { return 'base-prefix' }; function Get-PipConfiguration { return '' }; function Get-WorkingPip { return 'pip fixture' }; function Invoke-SetupPython($Executable,$Arguments) { $global:operations.Add(($Arguments -join '|')); " + fail + " if (($Arguments -join '|') -like '*virtualenv.pyz*') { $envPath=$Arguments[-1]; New-Item -ItemType Directory -Path (Join-Path $envPath 'Scripts') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $envPath 'pyvenv.cfg') -Value 'fixture'; Set-Content -LiteralPath (Join-Path $envPath 'Scripts\\python.exe') -Value 'fixture' } }; " + body.replace('PROJECT', "'"+path+"'"))
 
     def test_setup_creates_environment_installs_pins_and_retains_lock(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -320,6 +256,18 @@ class PythonSetupChoiceTests(unittest.TestCase):
             (Path(directory) / '.venv').mkdir()
             (Path(directory) / '.venv' / 'old-file.txt').write_text('keep me')
             output = self.environment_fixture(directory, "$result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; $archives=@(Get-ChildItem -LiteralPath PROJECT -Directory -Filter '.venv-incomplete-*'); if ($archives.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $archives[0].FullName 'old-file.txt')) -or $operations.Count -ne 4) { throw 'Incomplete environment not preserved and repaired' }; Write-Output 'passed'")
+            self.assertIn('passed', output)
+
+    def test_setup_preserves_and_rebuilds_environment_from_another_python_installation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = root / '.venv'
+            (env / 'Scripts').mkdir(parents=True)
+            (env / 'Scripts' / 'python.exe').write_bytes(b'fixture')
+            (env / 'pyvenv.cfg').write_text('home = C:\\Laptop\\Python\n', encoding='utf-8')
+            (env / 'old-file.txt').write_text('preserve stale environment')
+            body = r"$productionShare=$true; function Get-PythonBaseIdentity($Executable,$PythonFlags) { if ($Executable -like '*Scripts\python.exe') { return 'old-base-prefix' }; return 'new-base-prefix' }; $result=Initialize-AgentEnvironment 'local-python' @('-B','-E','-s') 'probe' 'shared' PROJECT; $archives=@(Get-ChildItem -LiteralPath PROJECT -Directory -Filter '.venv-incomplete-*'); if ($archives.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $archives[0].FullName 'old-file.txt')) -or $operations.Count -ne 4 -or $result -notlike '*Scripts\python.exe') { throw 'Moved environment was not safely preserved and rebuilt from local Python' }; Write-Output 'passed'"
+            output = self.environment_fixture(directory, body)
             self.assertIn('passed', output)
 
     def test_failed_default_seed_preserves_old_and_partial_environments_then_uses_direct_pip(self):

@@ -21,11 +21,25 @@ class StorageTests(unittest.TestCase):
     def test_config_defaults_to_gpt_6_sol(self):
         self.assertEqual('GPT-6 Sol', Config().model)
 
-    def test_default_storage_fails_closed_without_s_mapping(self):
+    def test_default_storage_uses_current_local_app_data_without_s_mapping(self):
         from copilot_agent.policy import PolicyError
         with patch('copilot_agent.policy.mapped_s_drive_root', side_effect=PolicyError('unmapped')):
-            with self.assertRaisesRegex(ValueError, 'no local C: storage fallback'):
-                default_local_storage({'LOCALAPPDATA': str(self.root / 'LocalAppData')})
+            target = default_local_storage({'LOCALAPPDATA': str(self.root / 'LocalAppData')})
+        self.assertEqual(self.root / 'LocalAppData' / 'CopilotLocalAgent' / 'Discoveries knowledge', target)
+
+    def test_local_checkout_uses_mapped_shared_store_when_available(self):
+        share = self.root / 'share'
+        with patch('copilot_agent.policy.mapped_s_drive_root', return_value=share):
+            target = discoveries_storage(self.root / 'local-checkout')
+        self.assertEqual(share / 'CopilotLocalAgent' / 'Discoveries knowledge', target)
+
+    def test_storage_paths_work_without_a_mapped_drive(self):
+        from copilot_agent.policy import PolicyError
+        with patch('copilot_agent.policy.mapped_s_drive_root', side_effect=PolicyError('unmapped')), \
+             patch.dict(os.environ, {'LOCALAPPDATA': str(self.root / 'LocalAppData')}):
+            paths = discoveries_storage_paths(self.root / 'checkout')
+        self.assertEqual(paths['s_path'], paths['unc_path'])
+        self.assertEqual(str(self.root / 'LocalAppData' / 'CopilotLocalAgent' / 'Discoveries knowledge'), paths['unc_path'])
 
     def test_discoveries_root_is_project_sibling_with_s_and_resolved_unc_paths(self):
         share = self.root / 'share'
@@ -99,13 +113,33 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(local, config.storage_dir)
         self.assertFalse(hasattr(__import__('copilot_agent.config', fromlist=['*']), 'discover_onedrive_accounts'))
 
-    def test_explicit_storage_path_is_respected_without_one_drive_discovery(self):
+    def test_copied_host_paths_are_rebased_to_current_checkout_and_storage(self):
         path = self.root / 'invalid-storage.json'
         selected = self.root / 'explicit-user-storage'
         path.write_text(json.dumps({'root': str(self.root / 'custom-source'),
                                     'storage_dir': str(selected)}), encoding='utf-8')
-        config = Config.load(path)
-        self.assertEqual(selected, config.storage_dir)
+        current_storage = self.root / 'current-host-storage'
+        with patch('copilot_agent.config.default_local_storage', return_value=current_storage):
+            config = Config.load(path)
+        self.assertEqual(PROJECT_ROOT, config.root)
+        self.assertEqual(current_storage, config.storage_dir)
+        self.assertTrue(config.profile_dir.is_relative_to(current_storage))
+
+    def test_copied_sync_destination_is_disabled_and_relative_target_rebased(self):
+        path = self.root / 'copied-sync.json'
+        current = self.root / 'current-store'
+        path.write_text(json.dumps({'created_dir': str(self.root / 'old-host'),
+                                    'created_sync_enabled': True}), encoding='utf-8')
+        with patch('copilot_agent.config.default_local_storage', return_value=current):
+            config = Config.load(path)
+        self.assertIsNone(config.created_dir)
+        self.assertFalse(config.created_sync_enabled)
+        path.write_text(json.dumps({'created_dir': 'Created',
+                                    'created_sync_enabled': True}), encoding='utf-8')
+        with patch('copilot_agent.config.default_local_storage', return_value=current):
+            config = Config.load(path)
+        self.assertEqual(current / 'Created', config.created_dir)
+        self.assertTrue(config.created_sync_enabled)
 
     def test_select_storage_accepts_user_supplied_absolute_path(self):
         config = Config(root=self.root / 'custom-source')

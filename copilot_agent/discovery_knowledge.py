@@ -403,6 +403,23 @@ def prepare_knowledge_tool(name, args, context):
             raise
         fixture_path = str(context.get('knowledge_directory') or context['config'].knowledge_directory)
         paths = {'s_path': fixture_path, 'unc_path': fixture_path}
+    config = context.get('config')
+    local_test_store = bool(getattr(config, '_local_knowledge_test_mode', False))
+    shared_s = bool(getattr(config, '_s_storage_verified', False))
+    if not shared_s:
+        shared_s = str(paths.get('s_path', '')).replace('/', '\\').casefold().startswith('s:\\')
+    if local_test_store:
+        storage_mode = 'local_c_test'
+        save_question = 'Save these exact sanitized evidence-backed navigation categories to the explicit local C: test store?'
+    elif shared_s:
+        storage_mode = 'shared_s'
+        save_question = 'Save these exact sanitized evidence-backed navigation categories to the shared S: Discoveries knowledge folder?'
+    elif str(paths.get('unc_path', '')).startswith('\\\\'):
+        storage_mode = 'portable_unc'
+        save_question = 'Save these exact sanitized evidence-backed navigation categories to the configured UNC Discoveries knowledge folder?'
+    else:
+        storage_mode = 'portable_local'
+        save_question = 'Save these exact sanitized evidence-backed navigation categories to the configured local Discoveries knowledge folder?'
     if name == 'navigation.intent':
         accepted = context.setdefault('discovery_accepted_at', time.time())
         context.setdefault('discovery_accepted_monotonic', time.monotonic())
@@ -423,13 +440,11 @@ def prepare_knowledge_tool(name, args, context):
             _, k = candidate(context, args, store)
             return {'kind': name, 'namespace_id': partition, 'expected_revision': args['expected_revision'],
                     'storage_path_s': paths['s_path'], 'storage_path_unc': paths['unc_path'],
-                    'storage_mode': 'local_c_test' if getattr(context.get('config'), '_local_knowledge_test_mode', False) else 'shared_s',
+                    'storage_mode': storage_mode,
                     'new_revision': k['revision'], 'payload_sha256': digest(k),
                     'categories': ['routes', 'templates', 'actions', 'evidence'],
                     'route_count': len(k['routes']), 'trusted_routes': sum(r['status'] == 'trusted' for r in k['routes']),
-                    'consent_question': ('Save these exact sanitized evidence-backed navigation categories to the explicit local C: test store?'
-                                         if getattr(context.get('config'), '_local_knowledge_test_mode', False)
-                                         else 'Save these exact sanitized evidence-backed navigation categories to the shared S: Discoveries knowledge folder?'),
+                    'consent_question': save_question,
                     'scope_identity': k['scope_identity'], 'origin': k['origin'], 'ttl_seconds': k['revalidation']['ttl_seconds'],
                     'candidate_policy': 'One run is candidate only. Trust requires matching successful observations in two independent approved runs; no generated selectors, permissions or page instructions.'}
         record = store.knowledge(partition)

@@ -12,14 +12,14 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
-import ntpath
 from pathlib import Path
 import re
 import uuid
 from urllib.parse import urlsplit
 
-from .policy import PathPolicy, PolicyError, URLPolicy, mapped_s_drive_root, reject_path_redirection
+from .policy import PathPolicy, PolicyError, URLPolicy, reject_path_redirection
 from .protocol import validate_schema
+from .storage import discoveries_storage, discoveries_storage_paths
 
 SCHEMA_VERSION = 1
 MAX_BYTES = 131072
@@ -201,7 +201,7 @@ def _session(context):
 
 
 def knowledge_directory(context):
-    """Resolve the single durable knowledge root beside the S: project."""
+    """Resolve the canonical durable knowledge root for this checkout and host."""
     # This private context hook exists only for isolated unit fixtures. It is
     # never populated from model arguments or normal runtime configuration.
     selected = context.get("knowledge_directory")
@@ -218,17 +218,12 @@ def knowledge_directory(context):
             return raw
         project = configured.get('root') if isinstance(configured, dict) else getattr(configured, 'root', None)
         project_root = Path(project or Path(__file__).resolve().parents[1]).resolve()
-        try:
-            share = mapped_s_drive_root().resolve()
-        except (PolicyError, OSError) as error:
-            raise PolicyError("The mapped S: share is unavailable; durable knowledge remains in session evidence") from error
-        if project_root != share and share not in project_root.parents:
-            raise PolicyError("The project is not located on the mapped S: share; durable knowledge remains in session evidence")
-        selected = project_root.parent / "Discoveries knowledge"
+        canonical = discoveries_storage(project_root).resolve()
         configured_directory = (configured.get('knowledge_directory') if isinstance(configured, dict)
                                 else getattr(configured, 'knowledge_directory', None))
-        if configured_directory is not None and Path(configured_directory).expanduser().resolve() != selected.resolve():
-            raise PolicyError("Persistent knowledge must use the S: project sibling Discoveries knowledge folder")
+        if configured_directory is not None and Path(configured_directory).expanduser().resolve() != canonical:
+            raise PolicyError("Persistent knowledge must use this environment's canonical Discoveries store")
+        selected = canonical
     raw = Path(selected).expanduser().absolute()
     reject_path_redirection(raw)
     return raw
@@ -454,37 +449,48 @@ def prepare_knowledge(args, context, name=None):
     validate_knowledge(name, args, context)
     scope = _scope(name, args, context)
     local_test_store = getattr(context.get('config'), '_local_knowledge_test_mode', False)
+    private_fixture = context.get('knowledge_directory') is not None
+    directory = knowledge_directory(context).resolve()
+    if local_test_store:
+        storage_mode = 'local_c_test'
+        storage_scope = 'Explicit local C: navigation test store'
+    elif private_fixture:
+        storage_mode = 'portable_unc' if str(directory).startswith('\\\\') else 'portable_local'
+        storage_scope = ('Configured UNC Discoveries knowledge folder' if storage_mode == 'portable_unc'
+                         else 'Configured local Discoveries knowledge folder')
+    else:
+        config = context.get('config')
+        shared_s = (config.get('_s_storage_verified', False) if isinstance(config, dict)
+                    else getattr(config, '_s_storage_verified', False))
+        if not shared_s:
+            project = config.get('root') if isinstance(config, dict) else getattr(config, 'root', None)
+            paths = discoveries_storage_paths(project or Path(__file__).resolve().parents[1])
+            shared_s = str(paths.get('s_path', '')).replace('/', '\\').casefold().startswith('s:\\')
+        if shared_s:
+            storage_mode = 'shared_s'
+            storage_scope = 'Configured S: Discoveries knowledge folder'
+        elif str(directory).startswith('\\\\'):
+            storage_mode = 'portable_unc'
+            storage_scope = 'Configured UNC Discoveries knowledge folder'
+        else:
+            storage_mode = 'portable_local'
+            storage_scope = 'Configured local Discoveries knowledge folder'
     prepared = {"kind": name, "scope": scope, "namespace_id": _hash(scope),
-                "storage_scope": "Explicit local C: navigation test store" if local_test_store else "Configured shared Discoveries knowledge store",
-                "storage_mode": "local_c_test" if local_test_store else "shared_s",
-                "directory": str(knowledge_directory(context)), "excluded_data": list(EXCLUDED_DATA),
+                "storage_scope": storage_scope,
+                "storage_mode": storage_mode,
+                "directory": str(directory), "excluded_data": list(EXCLUDED_DATA),
                 "decline": "Decline this grant; the current task and ephemeral website map can continue."}
-    from .storage import discoveries_storage_paths
     if local_test_store:
         # Explicit C: test mode must preview the actual target even on machines
         # where the production S: mapping is available.
         fixture_path = str(knowledge_directory(context))
         paths = {'s_path': fixture_path, 'unc_path': fixture_path}
+    elif private_fixture:
+        # Direct private fixtures do not have an app-selected environment store.
+        fixture_path = str(directory)
+        paths = {'s_path': fixture_path, 'unc_path': fixture_path}
     else:
-        try:
-            paths = discoveries_storage_paths(getattr(context.get('config'), 'root', Path(__file__).resolve().parents[1]))
-        except (OSError, ValueError):
-            # A caller may have supplied a test mapping resolver while
-            # storage.py still has the platform resolver. Reconstruct the
-            # mapped-drive alias from the already validated canonical path.
-            if context.get('knowledge_directory') is not None:
-                fixture_path = str(knowledge_directory(context))
-                paths = {'s_path': fixture_path, 'unc_path': fixture_path}
-            elif getattr(context.get('config'), '_local_knowledge_test_mode', False):
-                fixture_path = str(knowledge_directory(context))
-                paths = {'s_path': fixture_path, 'unc_path': fixture_path}
-            else:
-                directory = knowledge_directory(context).resolve()
-                share = mapped_s_drive_root().resolve()
-                relative = ntpath.relpath(str(directory), str(share))
-                if relative == '..' or relative.startswith('..\\'):
-                    raise PolicyError('The Discoveries knowledge folder resolved outside the live S: share')
-                paths = {'s_path': str(Path('S:/') / Path(relative)), 'unc_path': str(directory)}
+        paths = discoveries_storage_paths(getattr(context.get('config'), 'root', Path(__file__).resolve().parents[1]))
     prepared.update(storage_path_s=paths['s_path'], storage_path_unc=paths['unc_path'])
     if name == "site_knowledge.save":
         incoming = _sanitize_knowledge(args)

@@ -66,7 +66,7 @@ class KnowledgeRepairTests(unittest.IsolatedAsyncioTestCase):
         config.knowledge_directory = root / 'Discoveries knowledge'
         config.validate()
         config._local_navigation_confirmed = True
-        mapped_share = patch('copilot_agent.site_knowledge.mapped_s_drive_root', return_value=root)
+        mapped_share = patch('copilot_agent.policy.mapped_s_drive_root', return_value=root)
         mapped_share.start()
         self.addCleanup(mapped_share.stop)
         config._knowledge_capability = check_knowledge_health({'config': config})

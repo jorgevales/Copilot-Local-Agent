@@ -112,8 +112,7 @@ class Config:
         # Contract assets belong to the selected source, never a
         # root remembered in a supplied configuration. Direct Config(...)
         # fixture roots remain supported; the actual application uses load().
-        if os.environ.get('COPILOT_AGENT_EXECUTION_MODE') == 'testing':
-            cfg.root = PROJECT_ROOT
+        cfg.root = PROJECT_ROOT
         # Optional operator feature selection in either runtime mode;
         # flags never grant execution approval.
         selected = os.environ.get('COPILOT_AGENT_DISCOVERY_FLAGS', '')
@@ -125,17 +124,30 @@ class Config:
                 raise ValueError('COPILOT_AGENT_DISCOVERY_FLAGS contains an unknown/empty flag')
             for key in flags:
                 setattr(cfg, key, key in requested)
-        cfg._profile_explicit = bool(data.get('profile_dir'))
-        cfg._configured_profile_dir = Path(data['profile_dir']) if data.get('profile_dir') else None
+        # Absolute profile/storage paths copied from another host are not runtime
+        # authority. Relative profile layouts remain portable; CLI overrides are
+        # applied by the app after this environment has selected its storage.
+        relative_profile = bool(data.get('profile_dir')) and not Path(data['profile_dir']).is_absolute()
+        cfg._profile_explicit = relative_profile or (storage_override is not None and bool(data.get('profile_dir')))
+        cfg._configured_profile_dir = Path(data['profile_dir']) if cfg._profile_explicit else None
+        cfg.profile_dir = cfg._configured_profile_dir
         cfg._configured_allowed_roots = list(data.get('allowed_roots', ['workspace', 'deliveries']))
         if storage_override is not None:
             # The app's explicitly scoped isolated proof mode supplies its own
             # storage before normal settings can require a mapped S: drive.
             cfg.storage_dir = validate_user_storage_directory(storage_override)
-        elif cfg.storage_dir is None:
-            cfg.storage_dir = default_local_storage()
         else:
-            cfg.storage_dir = validate_user_storage_directory(cfg.storage_dir)
+            cfg.storage_dir = default_local_storage()
+        if storage_override is None and cfg.created_dir is not None:
+            target = Path(cfg.created_dir)
+            if not target.is_absolute():
+                cfg.created_dir = cfg.storage_dir / target
+            else:
+                try:
+                    target.resolve().relative_to(cfg.storage_dir.resolve())
+                except ValueError:
+                    cfg.created_dir = None
+                    cfg.created_sync_enabled = False
         cfg.validate()
         return cfg
 

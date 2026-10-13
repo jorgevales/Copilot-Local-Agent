@@ -22,7 +22,8 @@ from .attachments import MAX_USER_FILES
 from .diagnostics import DiagnosticReports
 from .protocol import ProtocolError
 from .policy import PolicyError, mapped_s_drive_root
-from .storage import default_local_storage, machine_key, read_user_settings, save_user_settings, validate_user_storage_directory
+from .storage import (default_local_storage, discoveries_storage, machine_key,
+                      read_user_settings, save_user_settings, validate_user_storage_directory)
 from . import reused_browser as edge
 from .setup_resources import choose_edge
 from .temp_storage import configure_temp_directory
@@ -360,6 +361,46 @@ def configure_local_knowledge_test(config, requested_path):
     return target
 
 
+def _normal_storage_boundary(config, storage_root):
+    """Keep normal file roots inside the selected S: share or portable store."""
+    storage_root = Path(storage_root).resolve()
+    try:
+        share_root = mapped_s_drive_root().resolve()
+    except (PolicyError, OSError):
+        share_root = None
+    if share_root is not None and storage_root != share_root and share_root not in storage_root.parents:
+        raise ValueError('The selected Discoveries store is outside the currently mapped S: share.')
+    config._portable_storage_verified = True
+    config._s_storage_verified = bool(
+        share_root is not None and (storage_root == share_root or share_root in storage_root.parents))
+    return share_root or storage_root
+
+
+def _filter_normal_storage_roots(config, storage_root):
+    boundary = _normal_storage_boundary(config, storage_root)
+    roots = []
+    removed = False
+    for value in config.allowed_roots:
+        try:
+            candidate = Path(value).expanduser()
+            if not candidate.is_absolute():
+                candidate = Path(storage_root) / candidate
+            candidate = candidate.resolve()
+        except (OSError, RuntimeError, ValueError):
+            removed = True
+            continue
+        if candidate == boundary or boundary in candidate.parents:
+            rendered = str(candidate)
+            if rendered not in roots:
+                roots.append(rendered)
+        else:
+            removed = True
+    if str(boundary) not in roots:
+        roots.append(str(boundary))
+    config.allowed_roots = roots
+    return boundary, removed
+
+
 async def run(args):
     global _TERMINAL_INPUT, _UI_STEERING_POLL, _UI_TAKE_ATTACHMENTS
     terminal_input = None
@@ -374,29 +415,22 @@ async def run(args):
         local_knowledge_test = configure_local_knowledge_test(config, local_knowledge_test)
         system('Explicit local knowledge test mode: this run uses only ' + str(local_knowledge_test))
     else:
-        from .storage import discoveries_storage
         canonical_storage = discoveries_storage(config.root)
         if config.storage_dir.resolve() != canonical_storage.resolve():
-            system('Configured storage is not the canonical S: project sibling; redirecting agent-owned storage to ' + str(canonical_storage))
+            system('Configured storage is not this environment\'s canonical Discoveries store; redirecting agent-owned storage to ' + str(canonical_storage))
             config.select_storage(canonical_storage)
         config.knowledge_directory = canonical_storage
-        s_root = mapped_s_drive_root().resolve()
-        config._s_storage_verified = True
-        kept_roots = [root for root in config.allowed_roots
-                      if Path(root).resolve() == s_root or s_root in Path(root).resolve().parents]
-        if len(kept_roots) != len(config.allowed_roots):
-            system('Removed configured file roots outside the live S: share; C: and unrelated locations are not agent write targets.')
-        if str(s_root) not in kept_roots:
-            kept_roots.append(str(s_root))
-        config.allowed_roots = kept_roots
+        boundary, removed = _filter_normal_storage_roots(config, canonical_storage)
+        if removed:
+            system('Removed configured file roots outside the selected Discoveries storage boundary: ' + str(boundary))
     if _UI_UPLOAD_ROOT is not None:
         config._ui_upload_root = Path(_UI_UPLOAD_ROOT).resolve()
     if config.visible is not True:
         raise ValueError('Copilot runs require a visible Microsoft Edge window; invisible operation is disabled.')
     if config.storage_dir is None:
         config.select_storage(default_local_storage())
-    # Probe separate directories under the verified S: storage before settings,
-    # Edge, Playwright, or uploads initialize; retry paths stay on that share.
+    # Probe the selected environment storage before Edge, Playwright, or uploads
+    # initialize so normal retries and runtime files stay on the same target.
     temp_directory = configure_temp_directory(config.storage_dir)
     settings = read_runtime_settings(config)
     if args.config is None and isinstance(settings.get('config'), dict):
@@ -408,17 +442,13 @@ async def run(args):
         # response-recovery contract. Explicit operator config files may still
         # choose a lower value when deliberately required.
         config.max_corrections = 12
-    # Remembered settings may predate the S:-only policy. Reapply it after
-    # loading them so persisted C:/OneDrive roots cannot silently return.
+    # Remembered settings may predate the current host's storage policy. Reapply
+    # it after loading them so stale absolute paths cannot silently return.
     if getattr(config, '_local_knowledge_test_mode', False):
         # Runtime settings cannot broaden the one explicitly selected C: test root.
         config.allowed_roots = [str(local_knowledge_test.resolve())]
     elif not getattr(config, '_automation_test_mode', False):
-        s_root = mapped_s_drive_root().resolve()
-        config.allowed_roots = [str(Path(root).resolve()) for root in config.allowed_roots
-                                if Path(root).resolve() == s_root or s_root in Path(root).resolve().parents]
-        if str(s_root) not in config.allowed_roots:
-            config.allowed_roots.append(str(s_root))
+        _filter_normal_storage_roots(config, config.storage_dir)
     if args.attach_existing:
         config.attach_existing = True
     if args.port:
@@ -455,7 +485,7 @@ async def run(args):
     persist_runtime_settings(config, settings)
     if getattr(args, 'setup_only', False):
         system(('Setup verified. Isolated proof storage: ' if getattr(config, '_automation_test_mode', False)
-                else 'Setup verified. S: Discoveries storage: ') + str(config.storage_dir))
+                else 'Setup verified. Discoveries storage: ') + str(config.storage_dir))
         system('Python resource setup verified. Setup.cmd creates the project virtual environment and installs pinned dependencies before this storage step.')
         return
     await choose_browser_endpoint(config, args, settings)
@@ -489,7 +519,7 @@ async def run(args):
     system('Permitted file roots: ' + ', '.join(Path(root).name for root in config.allowed_roots))
     system('Agent-owned writes are restricted to the explicit local C: test store.' if getattr(config, '_local_knowledge_test_mode', False)
            else 'Agent-owned writes are restricted to the isolated proof workspace.' if getattr(config, '_automation_test_mode', False)
-           else 'Agent-owned writes are restricted to the S: share; no C: or OneDrive storage fallback is permitted.')
+           else 'Agent-owned writes are restricted to the selected Discoveries store and its approved file roots.')
     system('Third-party browser domains: ' + ', '.join(config.allowed_domains))
     system('No files will be deleted. Generated-code execution always requires approval.')
     system('Useful Findings are saved on any valid turn; their file is attached every ten messages.')

@@ -15,7 +15,6 @@ function Add-PythonCandidate([string]$Value) {
         return
     }
     if ([System.IO.Path]::GetFileName($candidate) -ine 'python.exe') { return }
-    if ($productionShare -and ([System.IO.Path]::GetPathRoot($candidate) -ine 'S:\')) { return }
     if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { return }
     $entry = Get-Item -LiteralPath $candidate -Force
     if (-not (Test-SafePythonEntry $entry)) { return }
@@ -25,8 +24,14 @@ function Add-PythonCandidate([string]$Value) {
         $parent = $parent.Parent
     }
     $resolved = (Resolve-Path -LiteralPath $candidate).Path
-    if ($productionShare -and ([System.IO.Path]::GetPathRoot($resolved) -ine 'S:\')) { return }
     if ($seen.Add($resolved)) { $candidates.Add($resolved) }
+}
+
+function Add-RememberedPythonCandidates([System.Collections.Generic.List[string]]$Values) {
+    # Absolute settings are host-specific. A checkout moved to an S: VDI must
+    # discover that VDI's installed Python instead of trusting a laptop path.
+    if ($productionShare) { return }
+    foreach ($value in $Values) { Add-PythonCandidate $value }
 }
 
 function Test-AllowedCloudTag([uint64]$Tag) {
@@ -73,7 +78,7 @@ function Read-PythonMethod {
 
 function Read-PythonPath {
     Write-Host 'Paste the full path to python.exe or its installation folder. Surrounding quotes are allowed.'
-    if ($productionShare) { Write-Host 'The complete Python installation must be on S:.' }
+    if ($productionShare) { Write-Host 'Use an accessible Python installation on this VDI; the project environment and pinned dependencies will be checked.' }
     for ($attempt = 0; $attempt -lt 5; $attempt++) {
         Add-PythonCandidate (Read-Host 'Python path')
         if ($candidates.Count -gt 0) { return }
@@ -106,6 +111,15 @@ function Get-WorkingPip([string]$Executable, [string[]]$PythonFlags) {
     & $Executable @PythonFlags -c 'import pip; from importlib.metadata import distribution; assert distribution(pip.__name__).version == pip.__version__' 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) { return $null }
     return ($description -join ' ').Trim()
+}
+
+function Get-PythonBaseIdentity([string]$Executable, [string[]]$PythonFlags) {
+    $ErrorActionPreference = 'Continue'
+    $identity = @(& $Executable @PythonFlags -c 'import os, sys; print(os.path.normcase(os.path.realpath(sys.base_prefix, strict=True)))' 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $identity.Count -eq 0) { return $null }
+    $value = ([string]$identity[-1]).Trim().TrimEnd('\')
+    if ([string]::IsNullOrWhiteSpace($value) -or -not [System.IO.Path]::IsPathRooted($value)) { return $null }
+    return $value
 }
 
 function Get-RecoveryBasePython([string]$SelectedPython, [string[]]$PythonFlags, [string]$EnvironmentPython) {
@@ -154,6 +168,8 @@ function Initialize-AgentEnvironment([string]$BasePython, [string[]]$PythonFlags
             $setupLock = [System.IO.File]::Open((Join-Path $ProjectRoot '.venv-setup.lock'), [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
         } catch { throw 'Another setup is running, or this project is not writable. Retry after setup completes.' }
         $BasePython = Get-RecoveryBasePython $BasePython $PythonFlags $environmentPython
+        $selectedBaseIdentity = Get-PythonBaseIdentity $BasePython $PythonFlags
+        if (-not $selectedBaseIdentity) { throw 'The selected Python installation cannot report an accessible base runtime. Existing files were retained.' }
         Invoke-SetupPython $BasePython ($PythonFlags + @('-c',$Probe,($RuntimeMode + '-bootstrap'),$requirements))
         if (Test-Path -LiteralPath $environmentPath) {
             $environmentEntry = Get-Item -LiteralPath $environmentPath -Force
@@ -161,6 +177,10 @@ function Initialize-AgentEnvironment([string]$BasePython, [string[]]$PythonFlags
             $recoveryReason = $null
             if (-not (Test-Path -LiteralPath (Join-Path $environmentPath 'pyvenv.cfg') -PathType Leaf) -or -not (Test-Path -LiteralPath $environmentPython -PathType Leaf)) {
                 $recoveryReason = 'The existing project Python environment is incomplete.'
+            } elseif (-not ($existingBaseIdentity = Get-PythonBaseIdentity $environmentPython $PythonFlags)) {
+                $recoveryReason = 'The existing project Python environment cannot locate its original base installation.'
+            } elseif ($existingBaseIdentity -ine $selectedBaseIdentity) {
+                $recoveryReason = 'The existing project Python environment was created from a different or moved base installation.'
             } elseif (-not (Get-WorkingPip $environmentPython $PythonFlags)) {
                 $recoveryReason = 'The existing project Python environment has no working pip.'
             }
@@ -231,12 +251,12 @@ try {
     }
     if ($env:COPILOT_PYTHON) {
         Add-PythonCandidate $env:COPILOT_PYTHON
-        if ($candidates.Count -ne 1) { throw 'COPILOT_PYTHON must identify an existing Python executable on S: for a shared-drive deployment.' }
+        if ($candidates.Count -ne 1) { throw 'COPILOT_PYTHON must identify one existing, accessible Python executable.' }
     } else {
         if ($Mode -ne 'Setup') {
             Add-PythonCandidate (Join-Path $repoRoot '.venv\Scripts\python.exe')
-            if ($candidates.Count -eq 0) { foreach ($value in $savedInterpreters) { Add-PythonCandidate $value } }
-            if ($candidates.Count -eq 0) {
+            if ($candidates.Count -eq 0) { Add-RememberedPythonCandidates $savedInterpreters }
+            if ($candidates.Count -eq 0 -and -not $productionShare) {
                 $operatorConfig = Join-Path $repoRoot 'python-launcher.txt'
                 if (Test-Path -LiteralPath $operatorConfig -PathType Leaf) {
                     Add-PythonCandidate ([string](Get-Content -LiteralPath $operatorConfig -Encoding UTF8 -TotalCount 1))
@@ -246,8 +266,8 @@ try {
         $method = if ($candidates.Count -eq 0) { Read-PythonMethod } else { 'saved' }
         if ($method -eq '2') { Read-PythonPath }
         if ($method -eq '1') {
-            foreach ($value in $savedInterpreters) { Add-PythonCandidate $value }
-            if ($candidates.Count -eq 0) {
+            Add-RememberedPythonCandidates $savedInterpreters
+            if ($candidates.Count -eq 0 -and -not $productionShare) {
                 $operatorConfig = Join-Path $repoRoot 'python-launcher.txt'
                 if (Test-Path -LiteralPath $operatorConfig -PathType Leaf) {
                     Add-PythonCandidate ([string](Get-Content -LiteralPath $operatorConfig -Encoding UTF8 -TotalCount 1))
@@ -267,11 +287,9 @@ try {
                 $nearby = [System.Collections.Generic.List[string]]::new()
                 $cursor = [System.IO.DirectoryInfo]::new($repoRoot)
                 for ($depth = 0; $depth -lt 4 -and $cursor; $depth++) {
-                    if (-not $productionShare -or $cursor.Root.FullName -ieq 'S:\') {
-                        $nearby.Add($cursor.FullName)
-                        foreach ($folder in @('Python','python','Shared Python','.venv')) {
-                            $nearby.Add((Join-Path $cursor.FullName $folder))
-                        }
+                    $nearby.Add($cursor.FullName)
+                    foreach ($folder in @('Python','python','Shared Python','.venv')) {
+                        $nearby.Add((Join-Path $cursor.FullName $folder))
                     }
                     $cursor = $cursor.Parent
                 }
@@ -281,7 +299,7 @@ try {
                 }
             }
             if ($candidates.Count -eq 0 -and (Test-Path -LiteralPath 'S:\' -PathType Container)) {
-                Write-Host 'Finding shared Python on S: (bounded directory search, no account or document scanning).'
+                Write-Host 'Finding Python on S: (bounded directory search, no account or document scanning).'
                 $queue = [System.Collections.Generic.Queue[object]]::new()
                 $queue.Enqueue(@{ Path='S:\'; Depth=0 })
                 $visited = 0
@@ -307,7 +325,7 @@ try {
     if ($candidates.Count -eq 1) {
         $python = $candidates[0]
     } else {
-        Write-Host 'Available shared Python interpreters:'
+        Write-Host 'Available Python interpreters:'
         for ($index = 0; $index -lt $candidates.Count; $index++) { Write-Host (('{0}. {1}' -f ($index+1), $candidates[$index])) }
         $selected = 0
         for ($attempt = 0; $attempt -lt 5; $attempt++) {
@@ -325,7 +343,6 @@ import ntpath
 import os
 import sys
 import sysconfig
-from functools import lru_cache
 from importlib.metadata import distribution
 
 WINDOWS_SLASH = chr(92)
@@ -339,30 +356,6 @@ def normalized_final_path(value):
     elif result.startswith(extended):
         result = result[len(extended):]
     return ntpath.normcase(ntpath.normpath(result)).rstrip(WINDOWS_SLASH)
-
-@lru_cache(maxsize=1)
-def mapped_shared_root():
-    try:
-        result = normalized_final_path('S:' + WINDOWS_SLASH)
-    except (OSError, ValueError):
-        return None
-    return result if result.startswith(WINDOWS_SLASH * 2) else None
-
-def is_shared_path(value):
-    if not isinstance(value, str) or not ntpath.isabs(value):
-        return False
-    if ntpath.splitdrive(ntpath.normpath(value))[0].casefold() == 's:':
-        return True
-    if not value.startswith(WINDOWS_SLASH * 2):
-        return False
-    root = mapped_shared_root()
-    if root is None:
-        return False
-    try:
-        resolved = normalized_final_path(value)
-    except (OSError, ValueError):
-        return False
-    return resolved == root or resolved.startswith(root + WINDOWS_SLASH)
 
 def same_directory(left, right):
     identity_match = None
@@ -380,16 +373,20 @@ def same_directory(left, right):
 def valid_environment_prefix(actual, base, expected):
     return same_directory(actual, expected) is True and same_directory(actual, base) is False
 
-def assert_shared_runtime(executable, base_prefix, base_executable, stdlib):
+def assert_usable_runtime(executable, base_prefix, base_executable, stdlib):
     paths = {'running executable': executable, 'base Python prefix': base_prefix,
              'base executable': base_executable or executable, 'standard library': stdlib}
     for label, value in paths.items():
-        if not is_shared_path(value):
-            raise RuntimeError('Shared deployment requires the '+label+' on S: or its mapped UNC share. Reported runtime paths: '+repr(paths)+'. This interpreter depends on a local or unmapped Python runtime; the operator must provide a complete shared installation.')
+        if not isinstance(value, str) or not ntpath.isabs(value):
+            raise RuntimeError('The '+label+' must be an accessible absolute path. Reported runtime paths: '+repr(paths))
+        try:
+            normalized_final_path(value)
+        except (OSError, ValueError):
+            raise RuntimeError('The '+label+' is unavailable or redirected. Reported runtime paths: '+repr(paths))
 
 def locked_versions(text):
     if len(text) > 65536:
-        raise RuntimeError('Shared dependency lock exceeds its size limit.')
+        raise RuntimeError('Project dependency lock exceeds its size limit.')
     result = {}
     for raw in text.splitlines():
         line = raw.strip()
@@ -399,20 +396,17 @@ def locked_versions(text):
         if (not separator or not name or not pinned or name in result
                 or not all(char.isalnum() or char in '._-' for char in name)
                 or not all(char.isalnum() or char in '._+-!' for char in pinned)):
-            raise RuntimeError('Shared dependency lock must contain unique exact package versions.')
+            raise RuntimeError('Project dependency lock must contain unique exact package versions.')
         result[name] = pinned
     if not {'playwright', 'greenlet', 'pyee', 'typing_extensions'}.issubset(result):
-        raise RuntimeError('Shared dependency lock must include Playwright and its required dependencies.')
+        raise RuntimeError('Project dependency lock must include Playwright and its required dependencies.')
     return result
 
-def assert_dependencies(installed, expected, require_shared):
+def assert_dependencies(installed, expected):
     for name, pinned in expected.items():
         record = installed.get(name, {})
         if record.get('version') != pinned:
-            raise RuntimeError('Required dependency '+name+'=='+pinned+' is unavailable. The operator must install requirements.lock.txt for this shared interpreter.')
-        location = record.get('location')
-        if require_shared and not is_shared_path(location):
-            raise RuntimeError('Shared dependency '+name+' must be installed on S: or its mapped UNC share, not in a local or per-user package directory. Reported location: '+repr(location))
+            raise RuntimeError('Required dependency '+name+'=='+pinned+' is unavailable. Install requirements.lock.txt for the selected project environment.')
 
 assert sys.version_info >= (3, 10), 'Python 3.10+ is required'
 if len(sys.argv) > 3:
@@ -420,9 +414,8 @@ if len(sys.argv) > 3:
         raise RuntimeError('Existing project environment is not a valid virtual environment at the expected path. Files were retained.')
 bootstrap = sys.argv[1].endswith('-bootstrap')
 shared = sys.argv[1].startswith('shared')
-if shared:
-    assert_shared_runtime(sys.executable, sys.base_prefix,
-                          getattr(sys, '_base_executable', None), sysconfig.get_path('stdlib'))
+assert_usable_runtime(sys.executable, sys.base_prefix,
+                      getattr(sys, '_base_executable', None), sysconfig.get_path('stdlib'))
 if bootstrap:
     print('Base Python runtime verified.')
     sys.exit(0)
@@ -435,14 +428,14 @@ installed = {}
 for name in expected:
     package = distribution(name)
     installed[name] = {'version':package.version, 'location':str(package.locate_file(''))}
-assert_dependencies(installed, expected, shared)
+assert_dependencies(installed, expected)
 print('Python runtime and Playwright verified.')
 '@
     $runtimeMode = if ($productionShare) { 'shared' } else { 'development' }
     [string[]]$pythonArgs = if ($productionShare) { @('-B','-E','-s') } else { @('-B') }
     if ($Mode -eq 'Setup') { $python = Initialize-AgentEnvironment $python $pythonArgs $pythonProbe $runtimeMode $repoRoot }
     & $python @pythonArgs -c $pythonProbe $runtimeMode (Join-Path $repoRoot 'requirements.lock.txt')
-    if ($LASTEXITCODE -ne 0) { throw 'Python or pinned dependencies are unavailable. Run Setup.cmd to create or repair the project environment; existing files are retained.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Python runtime or pinned dependencies are unavailable; the project .venv may be stale or copied from another machine. Run Setup.cmd to safely repair it using an accessible Python installation; existing files are retained.' }
     Push-Location -LiteralPath $repoRoot
     try {
         if ($Mode -eq 'Setup') {
@@ -467,5 +460,8 @@ print('Python runtime and Playwright verified.')
     exit $result
 } catch {
     Write-Host ('Setup/run stopped: ' + $_.Exception.Message)
+    if ($Mode -eq 'Start' -and $python -and $python -ieq (Join-Path $repoRoot '.venv\Scripts\python.exe')) {
+        Write-Host 'The project .venv may be stale or copied from another machine. Run Setup.cmd to preserve and safely repair it using an accessible Python installation.'
+    }
     exit 1
 }
