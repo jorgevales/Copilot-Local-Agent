@@ -624,6 +624,30 @@ class Orchestrator:
                 digest.update(chunk)
         return resolved, digest.hexdigest()
 
+    def _queue_reviewed_package_run(self, calls, inspection):
+        """Continue a package task locally after inspection, before another chat turn."""
+        if not self._review_passed(inspection):
+            return
+        reviewed = inspection.get('result', {})
+        digest = reviewed.get('archive_sha256')
+        archive = reviewed.get('archive')
+        if not archive or not digest or any(
+                call['name'] == 'automation.run'
+                and call.get('arguments', {}).get('expected_sha256') == digest for call in calls):
+            return
+        resolved, actual = self._local_archive_sha256(archive)
+        if actual != digest:
+            return  # A changed ZIP must be inspected again before proposing execution.
+        call = {'call_id': 'auto-package-run-' + uuid.uuid4().hex,
+                'name': 'automation.run', 'version': self.registry.definition('automation.run')['version'],
+                'arguments': {'archive_path': str(resolved), 'expected_sha256': digest,
+                              'workspace': str(self.config.workspace_dir / 'automation-packages')},
+                'expected_result': 'Run the approved package locally and return final verified stage and output results.'}
+        calls.append(call)
+        self.state.event('package_run_queued', call_id=call['call_id'], archive_sha256=digest,
+                         origin='orchestrator')
+        self.feedback.emit('Orchestrator', 'ZIP review passed. Continuing to local package approval and execution before returning results to Copilot.')
+
     async def _inspect_downloaded_package(self, download_result, source_request_id):
         """Immediately inspect one verified Copilot ZIP and retain the local review result."""
         call = {'call_id': 'auto-package-review-' + uuid.uuid4().hex,
@@ -1383,7 +1407,8 @@ class Orchestrator:
                     ('Status', response.get('completion_status'))])
                 self._schedule_next_turn_preparation()
                 return response
-            plan = {'action_plan': response['action_plan'], 'tool_requests': response['tool_requests'], 'risk_summary': response['risk_summary']}
+            execution_calls = list(response['tool_requests'])
+            plan = {'action_plan': response['action_plan'], 'tool_requests': execution_calls, 'risk_summary': response['risk_summary']}
             prepared_plan = None
             package_local_build_requested = (route.get('route') == 'package' and any(
                 self._package_local_build_rejection(call['name']) is not None
@@ -1399,7 +1424,7 @@ class Orchestrator:
             interrupted_by_steering = None
             parallel_readonly_results = await self._parallel_readonly_group(
                 response['tool_requests'], response['request_id'])
-            for call in response['tool_requests']:
+            for call in execution_calls:
                 if self.cancel_event.is_set():
                     break
                 incoming = await self._take_steering(user_input)
@@ -1436,6 +1461,8 @@ class Orchestrator:
                         if not cached_review.get('ok'):
                             package_review_failure = {'call_id': call['call_id'], **cached_review}
                             break
+                        if route.get('route') == 'package':
+                            self._queue_reviewed_package_run(execution_calls, cached_review)
                         continue
                 if route.get('route') == 'package':
                     rejected = self._package_local_build_rejection(call['name'])
@@ -1773,6 +1800,8 @@ class Orchestrator:
                         'sha256': inspected.get('archive_sha256'),
                         'inspection_call_id': call['call_id'],
                     })
+                    if route.get('route') == 'package':
+                        self._queue_reviewed_package_run(execution_calls, result)
                 if (result.get('ok') and call['name'] == 'copilot.download'
                         and route.get('route') == 'package'):
                     package_review = await self._inspect_downloaded_package(result, response['request_id'])
@@ -1799,6 +1828,7 @@ class Orchestrator:
                                 'path': downloaded['path'], 'sha256': expected_digest,
                                 'inspection_call_id': package_review.get('call_id'),
                             })
+                            self._queue_reviewed_package_run(execution_calls, package_review)
                     else:
                         package_review_failure = package_review
                         break
@@ -1814,7 +1844,7 @@ class Orchestrator:
             turn_call_ids.update(completed_ids)
             not_executed = [{'call_id': call['call_id'], 'name': call['name'],
                              'reason': 'Earlier prerequisite failed or was denied; not executed.'}
-                            for call in response['tool_requests'] if call['call_id'] not in completed_ids]
+                            for call in execution_calls if call['call_id'] not in completed_ids]
             if interrupted_by_steering:
                 kind, content = 'steering', interrupted_by_steering['content']
                 content['completed_tool_results'] = redact(results)
@@ -1843,6 +1873,12 @@ class Orchestrator:
                 if prior_repair:
                     content['instruction'] += '\n\n' + prior_repair
             run_repair = self._package_run_repair_instruction(results)
+            if any(item.get('tool') == 'automation.run'
+                   and item.get('call_id', '').startswith('auto-package-run-')
+                   and item.get('result', {}).get('status') == 'completed' for item in results):
+                content['instruction'] += (
+                    '\n\nThe approved ZIP has already finished executing locally. Use its final stage and output '
+                    'verification results to produce the final answer; do not request another run of this completed package.')
             if run_repair:
                 package_run_failure = next((item for item in reversed(results)
                                             if isinstance(item, dict) and item.get('tool') == 'automation.run'

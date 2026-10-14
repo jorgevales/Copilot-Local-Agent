@@ -320,7 +320,7 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Cloud tests do not replace a user-requested live test', instruction)
 
     async def test_first_copilot_zip_is_reviewed_immediately_and_all_failures_return_for_one_repair(self):
-        from tests.test_automation_packages import package_bytes
+        from tests.test_automation_packages import package_bytes, write_python_package
 
         root, config, state, _ = make_fixture('automatic-package-review-')
         workspace = root / 'workspace'
@@ -335,7 +335,8 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         with zipfile.ZipFile(first, 'w', zipfile.ZIP_DEFLATED) as archive:
             for name, payload in payloads.items():
                 archive.writestr(name, payload)
-        second.write_bytes(package_bytes())
+        write_python_package(second, "import sys\nfrom pathlib import Path\n"
+                             "Path(sys.argv[-1], 'result.txt').write_text('verified')\n")
 
         def download_request(message, label):
             return tool_response(message, call_id='download-' + label,
@@ -369,6 +370,10 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(1, len(inspections), message['content']['results'])
             self.assertTrue(inspections[0]['ok'])
             self.assertEqual('passed', inspections[0]['result']['review']['status'])
+            runs = [item for item in message['content']['results'] if item.get('tool') == 'automation.run']
+            self.assertEqual(1, len(runs))
+            self.assertEqual('completed', runs[0]['result']['status'])
+            self.assertTrue(runs[0]['result']['validation']['ok'])
             return final_response(message, user_response='The revised package passed the local review.')
 
         browser = MockBrowser([
@@ -410,7 +415,7 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         reviews = [call for call in state.data['calls'].values()
                    if call.get('request', {}).get('name') == 'automation.inspect']
         self.assertEqual(2, len(reviews))
-        self.assertEqual(2, len(approvals))
+        self.assertEqual(3, len(approvals))
         self.assertTrue(all(preview['complete_pending_plan']['tool_requests'][0]['name'] == 'copilot.download'
                             for preview in approvals))
 

@@ -124,10 +124,10 @@ class TerminalInputBroker:
 
     async def ask_approval(self, prompt):
         """Read only an explicit approval token; other input remains steering."""
-        self.output(prompt + ' ', end='', flush=True)
         with self._lock:
             self._approval_prompt_active = True
         try:
+            self.output(prompt + ' ', end='', flush=True)
             item = await asyncio.to_thread(self._answers.get)
             return item['text']
         finally:

@@ -65,10 +65,14 @@ _PACKAGE_FRESH_CONFIRMATION_TOOLS = {
 def _package_requires_fresh_confirmation(manifest: dict) -> bool:
     """True when this package exceeds the session grant's reviewed risk class."""
     for stage in manifest.get("stages", []):
-        # Package Python is executable source. It needs complete-code review
-        # and one-run approval even though its worker and outputs are bounded.
+        # Fresh inspection still binds the complete source and worker scope.
+        # Bounded file-only Python may use the user's package session grant.
         if stage.get("kind") == "python":
-            return True
+            permissions = set(stage.get("permissions", []))
+            if (not permissions or not permissions <= {"read_files", "create_files"}
+                    or stage.get("network_destinations")):
+                return True
+            continue
         if stage.get("kind") != "tool":
             continue
         tool_id = stage.get("tool_id")

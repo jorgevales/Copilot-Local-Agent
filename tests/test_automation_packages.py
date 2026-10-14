@@ -198,6 +198,14 @@ class AutomationPackageTests(unittest.TestCase):
                     {"stages": [{"kind": "tool", "tool_id": tool_id, "arguments": arguments}]}))
         self.assertTrue(_package_requires_fresh_confirmation(
             {"stages": [{"kind": "python", "id": "generate", "script": "main.py"}]}))
+        self.assertFalse(_package_requires_fresh_confirmation({"stages": [{
+            "kind": "python", "permissions": ["read_files", "create_files"],
+            "network_destinations": [],
+        }]}))
+        self.assertTrue(_package_requires_fresh_confirmation({"stages": [{
+            "kind": "python", "permissions": ["read_files", "create_files", "network"],
+            "network_destinations": ["https://example.com"],
+        }]}))
 
     def test_result_bound_browser_hosts_reject_private_and_reserved_destinations(self):
         from copilot_agent.automation_packages import _require_public_browser_host
@@ -224,7 +232,7 @@ class AutomationPackageTests(unittest.TestCase):
                                                    "session_dir": session}, ToolRegistry())
 
         reviews = prepared["python_stage_reviews"]
-        self.assertTrue(prepared["requires_fresh_run_confirmation"])
+        self.assertFalse(prepared["requires_fresh_run_confirmation"])
         self.assertEqual(1, len(reviews))
         self.assertEqual("main.py", reviews[0]["path"])
         self.assertEqual(source, reviews[0]["script"])

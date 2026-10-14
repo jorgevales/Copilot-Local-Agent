@@ -46,15 +46,13 @@ class ApprovalManager:
                 ('Resume run', scope.get('resume_run_id')),
                 ('Patch source run', scope.get('prior_run_id')),
                 ('Python stages', scope.get('python_stages')),
-                ('Python source review', ('Complete stage source and SHA-256 are shown below; this run needs fresh approval.'
+                ('Python source review', ('Complete stage source and SHA-256 are shown below and bound to this approval.'
                                           if scope.get('python_stage_reviews') else 'No executable Python stages.')),
                 ('Registered tool stages', scope.get('tool_stages')),
                 ('Declared capabilities', scope.get('capabilities')),
                 ('Configured resource ceilings', scope.get('resource_limits')),
                 ('Expected outputs', scope.get('expected_outputs')),
-                ('Grant lifetime', ('This run requires fresh approval; session grants cannot authorize executable Python stages.'
-                                    if scope.get('python_stage_reviews') else
-                                    'This run requires fresh approval; session grants cannot authorize consequential stages.'
+                ('Grant lifetime', ('Your current decision approves this run; later consequential runs need another user decision.'
                                     if package_fresh else
                                     'This local agent session; fresh automatic inspection remains required for every ZIP run')),
             ])
@@ -71,10 +69,8 @@ class ApprovalManager:
             ])
         if scope.get('approval_scope_type') == 'automation_package':
             if scope.get('requires_fresh_run_confirmation'):
-                reason = ('its executable Python stages.' if scope.get('python_stage_reviews')
-                          else 'its consequential or unbounded stages.')
-                approval_scope = ('This exact package run requires fresh approval; session or reusable plan grants cannot authorize '
-                                  + reason)
+                approval_scope = ('This exact package run requires a user decision. Options 2, 3 and 4 all approve it now; '
+                                  'later consequential runs still need a user decision.')
             else:
                 approval_scope = 'This session grant covers later packages only after their fresh automatic inspection passes.'
         else:
@@ -186,13 +182,13 @@ class ApprovalManager:
                    'choices': ['deny', 'once', 'plan']}
         if package_scope:
             preview['approval_scope'] = (
-                'Fresh confirmation for this exact package run is required because its stages include consequential or '
-                'unbounded actions; session and reusable plan grants cannot authorize it.' if package_fresh else
+                'Fresh confirmation for this exact package run is required. Options 2, 3 and 4 all authorize this run; '
+                'session and reusable plan grants do not automatically authorize later consequential runs.' if package_fresh else
                 'One local session grant covers future packages only after each fresh automatic inspection passes; the current '
                 'package hashes, tools, effects, paths, and resource scope are shown for transparency. Protected-path and '
                 'platform handoffs remain active.')
             preview['approval_scope_type'] = 'automation_package'
-            preview['choices'] = ['deny', 'once'] if package_fresh else ['deny', 'once', 'plan', 'session']
+            preview['choices'] = ['deny', 'once', 'plan', 'session']
         if prepared_plan is not None:
             preview['prepared_pending_plan'] = prepared_plan
         path = self.state.directory / 'approvals' / (call_hash + '.json')
@@ -212,9 +208,7 @@ class ApprovalManager:
             if hasattr(decision, '__await__'):
                 decision = await decision
         else:
-            prompt_text = ('Choose 1 = Deny, 2 = Allow this exact package run once [1/2]: '
-                           if package_fresh else
-                           'Choose 1 = Deny, 2 = Allow this exact execution once, '
+            prompt_text = ('Choose 1 = Deny, 2 = Allow this exact execution once, '
                            '3 = Allow this exact displayed plan, 4 = Allow inspected packages for this agent session [1/2/3/4]: '
                            if package_scope else
                            'Choose 1 = Deny, 2 = Allow this exact execution once, 3 = Allow this exact displayed plan [1/2/3]: ')
@@ -222,8 +216,7 @@ class ApprovalManager:
             decision = await asyncio.to_thread(input, prompt)
         decision = str(decision).strip().lower()
         decision = {'1': 'deny', '2': 'once', '3': 'plan', '4': 'session'}.get(decision, decision)
-        allowed_decisions = ({'deny', 'once'} if package_fresh else
-                             {'deny', 'once', 'plan'} | ({'session'} if package_scope else set()))
+        allowed_decisions = {'deny', 'once', 'plan'} | ({'session'} if package_scope else set())
         if decision not in allowed_decisions:
             decision = 'deny'
         if decision == 'session':

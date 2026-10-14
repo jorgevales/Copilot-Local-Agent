@@ -28,6 +28,21 @@ class RecordingFeedback(QuietFeedback):
 
 
 class AutomationApprovalTests(unittest.TestCase):
+    def test_all_numeric_package_choices_match_the_displayed_terminal_options(self):
+        async def run():
+            for fresh in (False, True):
+                for choice in ('1', '2', '3', '4'):
+                    with self.subTest(fresh=fresh, choice=choice), tempfile.TemporaryDirectory() as temp:
+                        state = SessionState(temp)
+                        manager = ApprovalManager(state, lambda preview: choice, QuietFeedback())
+                        call = {'call_id': 'package', 'name': 'automation.run', 'arguments': {}}
+                        plan = {'tool_requests': [call]}
+                        prepared = {'approval_scope_type': 'automation_package',
+                                    'requires_fresh_run_confirmation': fresh}
+                        allowed, _ = await manager.request(plan, call, prepared)
+                        self.assertEqual(choice != '1', allowed)
+        asyncio.run(run())
+
     def test_session_grant_covers_later_automatically_inspected_package_runs(self):
         async def run():
             with tempfile.TemporaryDirectory() as temp:
@@ -73,6 +88,35 @@ class AutomationApprovalTests(unittest.TestCase):
 
         asyncio.run(run())
 
+    def test_session_grant_covers_freshly_inspected_bounded_python_packages(self):
+        from pathlib import Path
+        from copilot_agent.automation_packages import prepare_package_run
+        from copilot_agent.policy import PathPolicy
+        from copilot_agent.tools import ToolRegistry
+        from tests.test_automation_packages import write_python_package
+
+        async def run():
+            with tempfile.TemporaryDirectory() as temp:
+                root = Path(temp).resolve()
+                state = SessionState(root / 'session')
+                seen = []
+                manager = ApprovalManager(state, lambda preview: seen.append(preview) or '4', QuietFeedback())
+                scopes = []
+                for number in (1, 2):
+                    archive = write_python_package(root / f'package-{number}.zip', f"print({number})\n")
+                    args = {'archive_path': str(archive),
+                            'expected_sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
+                            'workspace': str(root / 'workspace')}
+                    scope = prepare_package_run(args, {'path_policy': PathPolicy([str(root)]),
+                                                      'session_dir': state.directory}, ToolRegistry())
+                    scopes.append(scope)
+                    call = {'call_id': f'run-{number}', 'name': 'automation.run', 'arguments': args}
+                    self.assertFalse(scope['requires_fresh_run_confirmation'])
+                    self.assertTrue((await manager.request({'tool_requests': [call]}, call, scope))[0])
+                self.assertEqual(1, len(seen))
+                self.assertNotEqual(scopes[0]['package_plan_hash'], scopes[1]['package_plan_hash'])
+        asyncio.run(run())
+
     def test_session_grant_cannot_approve_consequential_package_stages(self):
         async def run():
             with tempfile.TemporaryDirectory() as temp:
@@ -105,17 +149,17 @@ class AutomationApprovalTests(unittest.TestCase):
                 self.assertEqual(1, len(seen), "bounded file edits should not require a new package confirmation")
                 self.assertFalse((await request("effect", "browser.click", True))[0])
                 self.assertEqual(2, len(seen), "the session grant must not auto-approve browser.click")
-                self.assertEqual(["deny", "once"], seen[1]["choices"])
+                self.assertEqual(["deny", "once", "plan", "session"], seen[1]["choices"])
                 self.assertIn("Fresh confirmation", seen[1]["approval_scope"])
                 self.assertFalse((await request("submit", "browser.press", True))[0])
                 self.assertEqual(3, len(seen), "the session grant must not auto-approve submit-capable browser.press")
-                self.assertEqual(["deny", "once"], seen[2]["choices"])
+                self.assertEqual(["deny", "once", "plan", "session"], seen[2]["choices"])
                 source = "print('exact package code')\n"
                 digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
                 reviews = [{"stage": "generate", "path": "main.py", "sha256": digest, "script": source}]
                 self.assertFalse((await request("python", "package-python", True, reviews))[0])
                 self.assertEqual(4, len(seen), "the session grant must not authorize package Python")
-                self.assertEqual(["deny", "once"], seen[3]["choices"])
+                self.assertEqual(["deny", "once", "plan", "session"], seen[3]["choices"])
                 emitted = "\n".join(feedback.emitted)
                 self.assertIn("EXACT PACKAGE PYTHON STAGE generate", emitted)
                 self.assertIn(digest, emitted)
