@@ -226,6 +226,8 @@ _MESSAGE_SNAPSHOT = r"""() => {
   });
 }"""
 
+_PICKER_RETRY_INTERVAL = .05
+
 _RADIOS = r"""() => [...document.querySelectorAll('[role="menuitemradio"],[role="radio"],[role="menuitem"]')]
  .filter(n => {
    if (!(n.offsetWidth || n.offsetHeight || n.getClientRects().length)) return false;
@@ -736,9 +738,9 @@ class BrowserAdapter:
             await picker.click(timeout=3000)
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            if await self._evaluate(r"""() => [...document.querySelectorAll('[role="menuitemradio"],[role="radio"],[data-testid^="gptSubMenuModelTrigger-"],[data-test-id^="gptSubMenuModelTrigger-"]')].some(n=>n.offsetWidth||n.offsetHeight)"""):
+            if await self._evaluate(r"""() => [...document.querySelectorAll('[role="menuitemradio"],[role="radio"],[role="menuitem"],[data-testid^="gptSubMenuModelTrigger-"],[data-test-id^="gptSubMenuModelTrigger-"]')].some(n=>(n.offsetWidth||n.offsetHeight||n.getClientRects().length))"""):
                 return
-            await asyncio.sleep(self.config.poll_interval)
+            await asyncio.sleep(_PICKER_RETRY_INTERVAL)
         raise BrowserUIError('The model picker did not render visible options within its bounded wait.')
 
     async def _providers(self):
@@ -750,7 +752,7 @@ class BrowserAdapter:
 
     async def _open_provider(self, trigger, label=None):
         await self._open_picker()
-        opened = await self._evaluate(r"""({id,label}) => {
+        find_and_open = r"""({id,label}) => {
           const norm=n=>(n.innerText||n.getAttribute('aria-label')||'').replace(/\s+/g,' ').trim();
           const n=[...document.querySelectorAll('[data-testid],[data-test-id]')].find(n=>
             (n.getAttribute('data-testid')===id||n.getAttribute('data-test-id')===id)
@@ -758,7 +760,14 @@ class BrowserAdapter:
             && (!label||norm(n)===label));
           if(!n || !(n.offsetWidth||n.offsetHeight)) return false;
           if(n.getAttribute('aria-expanded')!=='true') n.click(); return true;
-        }""", {'id': trigger, 'label': label})
+        }"""
+        deadline = time.monotonic() + 5
+        opened = False
+        while time.monotonic() < deadline:
+            opened = await self._evaluate(find_and_open, {'id': trigger, 'label': label})
+            if opened:
+                break
+            await asyncio.sleep(_PICKER_RETRY_INTERVAL)
         if not opened:
             raise BrowserUIError('The discovered model provider menu is no longer available.')
         deadline = time.monotonic() + 5
@@ -766,15 +775,23 @@ class BrowserAdapter:
             radios = await self._evaluate(_RADIOS)
             if any(item['label'] not in self._top_level_labels for item in radios):
                 return
-            await asyncio.sleep(self.config.poll_interval)
+            await asyncio.sleep(_PICKER_RETRY_INTERVAL)
         raise BrowserUIError('The model provider submenu did not render its options within the bounded wait.')
 
     async def discover_models(self) -> list[dict]:
         try:
             await self._open_picker()
-            providers = await self._providers()
+            providers = []
+            top_level = []
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                providers = await self._providers()
+                top_level = await self._evaluate(_RADIOS)
+                if providers or top_level:
+                    break
+                await asyncio.sleep(_PICKER_RETRY_INTERVAL)
             entries = [{**item, 'provider': 'Copilot', 'provider_trigger': None}
-                       for item in await self._evaluate(_RADIOS)]
+                       for item in top_level]
             self._top_level_labels = {item['label'] for item in entries}
             for provider in providers:
                 await self.page.keyboard.press('Escape')
