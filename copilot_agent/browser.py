@@ -228,9 +228,17 @@ _MESSAGE_SNAPSHOT = r"""() => {
 
 _PICKER_RETRY_INTERVAL = .05
 
-_RADIOS = r"""() => [...document.querySelectorAll('[role="menuitemradio"],[role="radio"],[role="menuitem"]')]
+_RADIOS = r"""provider => [...document.querySelectorAll('[role="menuitemradio"],[role="radio"],[role="menuitem"]')]
  .filter(n => {
    if (!(n.offsetWidth || n.offsetHeight || n.getClientRects().length)) return false;
+   if (provider) {
+     const menu=n.closest('[role="menu"]');
+     const owner=menu&&document.getElementById(menu.getAttribute('aria-labelledby'));
+     for (const candidate of [n,owner].filter(Boolean)) {
+       const id=candidate.getAttribute('data-testid')||candidate.getAttribute('data-test-id')||'';
+       if (id.startsWith('gptSubMenuModelTrigger-')&&id!==provider) return false;
+     }
+   }
    if (n.matches('[role="menuitemradio"],[role="radio"]')) return true;
    const trigger=n.getAttribute('data-testid')||n.getAttribute('data-test-id')||'';
    const marker=[...n.querySelectorAll('[data-testid^="checkmark-"],[data-test-id^="checkmark-"]')]
@@ -731,15 +739,29 @@ class BrowserAdapter:
         return None
 
     async def _open_picker(self):
-        picker = await self._visible(edge.PICKER_SELECTOR)
-        if picker is None:
-            raise BrowserUIError('Copilot model picker is unavailable.')
-        if await picker.get_attribute('aria-expanded') != 'true':
-            await picker.click(timeout=3000)
         deadline = time.monotonic() + 5
+        next_click = 0
+        click_attempts = 0
         while time.monotonic() < deadline:
-            if await self._evaluate(r"""() => [...document.querySelectorAll('[role="menuitemradio"],[role="radio"],[role="menuitem"],[data-testid^="gptSubMenuModelTrigger-"],[data-test-id^="gptSubMenuModelTrigger-"]')].some(n=>(n.offsetWidth||n.offsetHeight||n.getClientRects().length))"""):
+            if await self._evaluate(r"""() => [...document.querySelectorAll('[role="menuitemradio"],[role="radio"],[role="menuitem"][aria-checked],[data-testid^="gptSubMenuModelTrigger-"],[data-test-id^="gptSubMenuModelTrigger-"]')].some(n=>(n.offsetWidth||n.offsetHeight||n.getClientRects().length))"""):
                 return
+            if time.monotonic() >= next_click:
+                # Copilot can expose the button before its click handler hydrates.
+                # Re-find it after rerenders and retry only while options are absent.
+                picker = await self._visible(edge.PICKER_SELECTOR)
+                if picker is not None:
+                    try:
+                        if click_attempts % 3 == 0:
+                            await picker.press('ArrowDown', timeout=1000)
+                        elif click_attempts % 3 == 1:
+                            await picker.click(timeout=1000)
+                        else:
+                            await picker.press('Enter', timeout=1000)
+                    except Exception as exc:
+                        if type(exc).__name__ != 'TimeoutError':
+                            raise
+                    click_attempts += 1
+                next_click = time.monotonic() + .25
             await asyncio.sleep(_PICKER_RETRY_INTERVAL)
         raise BrowserUIError('The model picker did not render visible options within its bounded wait.')
 
@@ -748,16 +770,19 @@ class BrowserAdapter:
           .filter(n=>{
             if (!(n.offsetWidth||n.offsetHeight||n.getClientRects().length)||n.getAttribute('aria-disabled')==='true'||n.disabled) return false;
             return n.getAttribute('aria-haspopup')==='menu'||!n.querySelector('[data-testid^="checkmark-"],[data-test-id^="checkmark-"]');
-          }).map(n=>({id:n.getAttribute('data-testid')||n.getAttribute('data-test-id'), label:(n.innerText||'').replace(/\s+/g,' ').trim()}))""")
+          }).map(n=>({id:n.getAttribute('data-testid')||n.getAttribute('data-test-id'), label:(n.innerText||'').replace(/\s+/g,' ').trim(), submenu:n.getAttribute('aria-haspopup')==='menu'}))""")
 
     async def _open_provider(self, trigger, label=None):
         await self._open_picker()
         find_and_open = r"""({id,label}) => {
           const norm=n=>(n.innerText||n.getAttribute('aria-label')||'').replace(/\s+/g,' ').trim();
-          const n=[...document.querySelectorAll('[data-testid],[data-test-id]')].find(n=>
+          const candidates=[...document.querySelectorAll('[data-testid],[data-test-id]')].filter(n=>
             (n.getAttribute('data-testid')===id||n.getAttribute('data-test-id')===id)
-            && (n.offsetWidth||n.offsetHeight||n.getClientRects().length)
-            && (!label||norm(n)===label));
+            && (n.offsetWidth||n.offsetHeight||n.getClientRects().length));
+          const providers=candidates.filter(n=>n.getAttribute('aria-haspopup')==='menu'
+            || !n.querySelector('[data-testid^="checkmark-"],[data-test-id^="checkmark-"]'));
+          const matches=providers.length?providers:candidates.filter(n=>!label||norm(n)===label);
+          const n=matches.length===1?matches[0]:null;
           if(!n || !(n.offsetWidth||n.offsetHeight)) return false;
           if(n.getAttribute('aria-expanded')!=='true') n.click(); return true;
         }"""
@@ -772,7 +797,7 @@ class BrowserAdapter:
             raise BrowserUIError('The discovered model provider menu is no longer available.')
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            radios = await self._evaluate(_RADIOS)
+            radios = await self._evaluate(_RADIOS, trigger)
             if any(item['label'] not in self._top_level_labels for item in radios):
                 return
             await asyncio.sleep(_PICKER_RETRY_INTERVAL)
@@ -794,13 +819,14 @@ class BrowserAdapter:
                        for item in top_level]
             self._top_level_labels = {item['label'] for item in entries}
             for provider in providers:
-                await self.page.keyboard.press('Escape')
-                await self.page.keyboard.press('Escape')
+                if not provider.get('submenu'):
+                    await self.page.keyboard.press('Escape')
+                    await self.page.keyboard.press('Escape')
                 await self._open_provider(provider['id'], provider['label'])
                 name = provider['id'].split('gptSubMenuModelTrigger-', 1)[-1]
                 entries.extend({**item, 'provider': name, 'provider_trigger': provider['id'],
                                 'provider_label': provider['label']}
-                               for item in await self._evaluate(_RADIOS)
+                               for item in await self._evaluate(_RADIOS, provider['id'])
                                if item['label'] not in self._top_level_labels)
             unique = {}
             for item in entries:
@@ -856,7 +882,7 @@ class BrowserAdapter:
                     await self._open_provider(chosen['provider_trigger'], chosen.get('provider_label'))
                 else:
                     await self._open_picker()
-                radios = await self._evaluate(_RADIOS)
+                radios = await self._evaluate(_RADIOS, chosen['provider_trigger'])
                 if any(item['label'] == label and item['checked'] for item in radios):
                     self.model_label = label
                     observed = next(item for item in radios if item['label'] == label and item['checked'])

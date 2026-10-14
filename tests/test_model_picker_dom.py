@@ -61,6 +61,8 @@ document.querySelectorAll('[role="menu"][aria-labelledby] [role="menuitem"]').fo
     if (n.getAttribute('aria-disabled') === 'true') return;
     document.querySelectorAll('[aria-checked]').forEach(m => m.setAttribute('aria-checked', 'false'));
     n.setAttribute('aria-checked', 'true');
+    const provider = document.getElementById(n.closest('[role="menu"]').getAttribute('aria-labelledby'));
+    provider.lastChild.textContent = n.textContent.trim() + ' Provider';
     closeMenus();
   };
 });
@@ -111,3 +113,16 @@ class ModelPickerDOMTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Future account model', [m['label'] for m in models])
         chosen = await self.adapter.select_model('Future account model')
         self.assertTrue(chosen['verified'])
+
+    async def test_picker_retries_a_click_ignored_while_the_page_hydrates(self):
+        await self.page.locator('#gptModeSwitcher').evaluate('''n => {
+          const open = n.onclick;
+          window.pickerClicks = 0;
+          n.removeAttribute('aria-expanded');
+          n.id = 'hydratingPicker';
+          setTimeout(() => n.id = 'gptModeSwitcher', 80);
+          n.onclick = () => { if (++window.pickerClicks > 1) open(); };
+        }''')
+        models = await self.adapter.discover_models()
+        self.assertEqual(4, len(models))
+        self.assertGreaterEqual(await self.page.evaluate('window.pickerClicks'), 2)
