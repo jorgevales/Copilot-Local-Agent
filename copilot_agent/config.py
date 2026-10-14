@@ -42,6 +42,7 @@ class Config:
     max_corrections: int = 12
     max_context_chars: int = 16000
     max_output_chars: int = 12000
+    max_composer_chars: int = 20000
     tool_timeout: float = 30
     sync_timeout: float = 120
     sync_poll_interval: float = .5
@@ -166,6 +167,8 @@ class Config:
         for key in ('capture_stable_samples', 'max_capture_chars', 'max_context_chars', 'max_output_chars', 'max_attachment_bytes', 'max_download_bytes'):
             if type(getattr(self, key)) is not int or getattr(self, key) < 1:
                 raise ValueError(key + ' must be a positive integer')
+        if type(self.max_composer_chars) is not int or not 1024 <= self.max_composer_chars <= 20000:
+            raise ValueError('max_composer_chars must be from 1024 to 20000')
         if type(self.max_corrections) is not int or not 0 <= self.max_corrections <= 12:
             raise ValueError('max_corrections must be from 0 to 12')
         if type(self.max_delivery_retries) is not int or not 0 <= self.max_delivery_retries <= 5:

@@ -43,6 +43,6 @@ Sources: `copilot_agent/orchestrator.py`, `copilot_agent/browser.py`, `copilot_a
 
 ## Source understanding and packaging decision
 
-The source scan found 205 eligible text files. Project docs and guidance are included verbatim, along with compact launchers, the safe example config, and the response schema. Python modules are represented by their paths, AST-derived imports and symbols, and Graphify relationships; implementation bodies are summarized rather than copied. The repository contains multiple megabytes of source, so a verbatim code mirror would consume the model context without improving the initial architectural map. Exact source remains identifiable by stable repository-relative path and hash in the manifest.
+The source scan found 208 eligible text files. Project docs and guidance are included verbatim, along with compact launchers, the safe example config, and the response schema. Python modules are represented by their paths, AST-derived imports and symbols, and Graphify relationships; implementation bodies are summarized rather than copied. The repository contains multiple megabytes of source, so a verbatim code mirror would consume the model context without improving the initial architectural map. Exact source remains identifiable by stable repository-relative path and hash in the manifest.
 
 No additional project files are needed to understand the package's essential architecture, workflows, security boundaries, configuration, operations or known limits. This statement does not claim the handoff contains full source code.

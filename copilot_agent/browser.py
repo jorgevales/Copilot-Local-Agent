@@ -1097,6 +1097,26 @@ class BrowserAdapter:
             return {'status': 'prepared', 'count': len(signatures),
                     'names': [item[1] for item in signatures]}
 
+    async def composer_character_limit(self):
+        """Read only limits exposed by the actual owned Copilot editor."""
+        editor = await self._editor(required=False)
+        if editor is None:
+            return None
+        return await self._composer_limit_from_editor(editor)
+
+    async def _composer_limit_from_editor(self, editor):
+        try:
+            value = await asyncio.wait_for(editor.evaluate("""element => {
+            for (const name of ['maxlength','data-maxlength','data-max-length','data-character-limit']) {
+                const raw = element.getAttribute(name);
+                if (raw && /^\\d+$/.test(raw) && Number(raw) > 0) return Number(raw);
+            }
+            return null;
+        }"""), 2)
+        except Exception:
+            return None
+        return value if type(value) is int and value > 0 else None
+
     async def _editor_text(self, editor):
         for attempt in range(2):
             try:
@@ -1171,6 +1191,10 @@ class BrowserAdapter:
         return str(await source.text_content() or '')
 
     async def _prepare_submission(self, text, request_id, attachments, *, require_model=True):
+        from .outbound_results import composer_characters, HISTORICAL_COMPOSER_LIMIT
+        character_limit = min(getattr(self.config, 'max_composer_chars', 20000), 20000)
+        if composer_characters(text) > character_limit:
+            raise SubmissionNotSentError('The outbound text exceeds the Copilot composer limit; compile the response into attachments before retrying.')
         if not request_id or request_id not in text:
             raise BrowserUIError('Every outbound message must contain its unique request_id.')
         if require_model and not self.model_label:
@@ -1187,6 +1211,10 @@ class BrowserAdapter:
             raise SubmissionAmbiguousError('This request_id is already present in the chat; refusing duplicate delivery.')
         self.preparation_stage = 'composer_lookup'
         editor = await self._editor()
+        exposed_limit = await self._composer_limit_from_editor(editor)
+        character_limit = min(character_limit, exposed_limit or HISTORICAL_COMPOSER_LIMIT)
+        if composer_characters(text) > character_limit:
+            raise SubmissionNotSentError('The actual Copilot editor limit is smaller than this message; return the response through attachments.')
         self.preparation_stage = 'composer_fill'
         await editor.fill(text, timeout=5000)
         self.preparation_stage = 'composer_verification'

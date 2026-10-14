@@ -12,6 +12,11 @@ Edge startup now isolates native ownership queries and retries failed new-sessio
 launches through direct installed Edge and verified S:/UNC profile spellings.
 See [Edge startup recovery and validation](docs/EDGE_STARTUP_RECOVERY.md).
 
+Long Crawl4AI and other tool responses are now compiled locally into complete,
+sectioned JSON attachments before sending. The chat message stays below the
+editor limit; ordinary batches use one file, with at most 19 total attachments.
+See [large result transport](docs/LARGE_TOOL_RESULTS.md).
+
 Public exploration now defaults to [Crawl4AI](https://github.com/unclecode/crawl4ai)
 through `discovery.manifest`: continuous bounded parallel expansion, up to 1,000
 pages, and reuse of saved unexplored routes. Update dependencies with `Setup.cmd`.

@@ -31,8 +31,29 @@ class MockBrowser:
 
     async def exchange(self, text, request_id, attachments=(), on_submitted=None):
         message = json.loads(text)
-        record = {'message': message, 'attachments': list(attachments),
-                  'attachment_text': {p.name: p.read_text(encoding='utf-8') for p in attachments}}
+        wire_message = message
+        attachment_text = {p.name: p.read_text(encoding='utf-8') for p in attachments}
+        # Model Copilot reading the complete attached response before replying.
+        if message.get('result_attachment_manifest'):
+            parts = []
+            for entry in message['result_attachment_manifest']:
+                raw = attachment_text[entry['name']]
+                if hashlib.sha256(raw.encode('utf-8')).hexdigest() != entry['sha256']:
+                    raise AssertionError('Result attachment changed in transit')
+                part = json.loads(raw)
+                if part['request_id'] != request_id or part['session_id'] != message['session_id']:
+                    raise AssertionError('Result attachment belongs to another exchange')
+                parts.append(part)
+            parts.sort(key=lambda part: part['part'])
+            if [part['part'] for part in parts] != list(range(1, len(parts) + 1)):
+                raise AssertionError('Missing result attachment part')
+            if any(part['part_count'] != len(parts) for part in parts):
+                raise AssertionError('Incomplete result attachment batch')
+            content = (parts[0]['content'] if 'content' in parts[0] else
+                       json.loads(''.join(part['content_segment'] for part in parts)))
+            message = {**parts[0]['response_metadata'], 'content': content}
+        record = {'message': message, 'wire_message': wire_message, 'wire_text': text,
+                  'attachments': list(attachments), 'attachment_text': attachment_text}
         self.sent.append(record)
         response = self.responders.pop(0)
         if isinstance(response, Exception):
@@ -623,9 +644,10 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(0, state.message_count)
         self.assertEqual(1, len(browser.preloads))
         preload = browser.preloads[0]
-        self.assertEqual(8, len(preload['attachments']))
+        self.assertEqual(9, len(preload['attachments']))
+        self.assertEqual(1, sum(path.name.startswith('tool-results-') for path in preload['attachments']))
         self.assertEqual(prepared['request_id'], preload['request_id'])
-        self.assertEqual(8, prepared['attachment_count'])
+        self.assertEqual(9, prepared['attachment_count'])
         self.assertIn(prepared['request_id'], preload['text'])
 
         result = await app.initialize()
@@ -635,7 +657,7 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, len(browser.sent))
         self.assertEqual(preload['request_id'], browser.sent[0]['message']['request_id'])
         self.assertEqual(preload['attachments'], browser.sent[0]['attachments'])
-        self.assertEqual(json.loads(preload['text']), browser.sent[0]['message'])
+        self.assertEqual(json.loads(preload['text']), browser.sent[0]['wire_message'])
 
     @unittest.skipUnless(os.name == 'nt', 'Windows desktop capability')
     async def test_planner_approval_worker_import_display_and_artifact_progress_end_to_end(self):
