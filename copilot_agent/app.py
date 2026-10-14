@@ -11,7 +11,8 @@ from pathlib import Path
 import uuid
 from .browser import (BrowserAdapter, BrowserUIError, CaptureTimeoutError,
                       ExistingEdgeUnavailable,
-                      SubmissionAmbiguousError, SubmissionNotSentError, model_rank)
+                      ModelUnavailableError, SubmissionAmbiguousError,
+                      SubmissionNotSentError, model_rank)
 from .config import Config
 from .knowledge_health import check_knowledge_health
 from .orchestrator import Orchestrator
@@ -620,7 +621,24 @@ async def run(args):
             system('Configured default ' + config.model + ' is unavailable; using the highest-ranked enabled model for this run.')
         system('Version ranking prefers newer versions within a family, then deeper modes. Provider families are not directly comparable.')
         system('Suggested/default: ' + preferred['label'])
-        await browser.select_model(preferred['label'])
+        attempted_models = set()
+        while True:
+            try:
+                await browser.select_model(preferred['label'])
+                break
+            except ModelUnavailableError:
+                attempted_models.add(preferred['label'])
+                models = await browser.discover_models()
+                ranked = model_rank(models)
+                enabled = [m for m in ranked if m.get('enabled', True)]
+                next_model = next((m for m in enabled if m['label'] not in attempted_models), None)
+                if next_model is None:
+                    raise
+                system('The model picker changed while startup was selecting a model. Refreshed enabled choices:')
+                for i, model in enumerate(models, 1):
+                    system(f"{i}. {model['label']}" + (' (unavailable)' if not model.get('enabled', True) else ''))
+                preferred = next_model
+                system('Retrying with the highest-ranked newly available model: ' + preferred['label'])
         if args.model:
             chosen = next((m for m in enabled if m['label'] == args.model), None)
             if chosen is None:

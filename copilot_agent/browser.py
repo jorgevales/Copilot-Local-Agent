@@ -29,6 +29,10 @@ class ModelAccessError(BrowserUIError):
     """The UI reports that the chosen model is unavailable or silently fell back."""
 
 
+class ModelUnavailableError(BrowserUIError):
+    """A discovered model became unavailable or disabled before selection."""
+
+
 def model_access_exhausted(text):
     value = ' '.join(text.lower().split())
     return ('<<<copilot_agent_v1_begin>>>' not in value and len(value) <= 1500 and
@@ -222,8 +226,18 @@ _MESSAGE_SNAPSHOT = r"""() => {
   });
 }"""
 
-_RADIOS = r"""() => [...document.querySelectorAll('[role="menuitemradio"],[role="radio"]')]
- .filter(n => n.offsetWidth || n.offsetHeight || n.getClientRects().length)
+_RADIOS = r"""() => [...document.querySelectorAll('[role="menuitemradio"],[role="radio"],[role="menuitem"]')]
+ .filter(n => {
+   if (!(n.offsetWidth || n.offsetHeight || n.getClientRects().length)) return false;
+   if (n.matches('[role="menuitemradio"],[role="radio"]')) return true;
+   const trigger=n.getAttribute('data-testid')||n.getAttribute('data-test-id')||'';
+   const marker=[...n.querySelectorAll('[data-testid^="checkmark-"],[data-test-id^="checkmark-"]')]
+     .map(s=>s.getAttribute('data-testid')||s.getAttribute('data-test-id'))[0];
+   if (!marker) return false;
+   const triggerName=trigger.split('gptSubMenuModelTrigger-').pop().toLowerCase();
+   const markerName=marker.split('checkmark-').pop().toLowerCase();
+   return triggerName!==markerName;
+ })
  .map(n => ({label:(n.innerText || n.getAttribute('aria-label') || '').replace(/\s+/g,' ').trim(),
  enabled:n.getAttribute('aria-disabled') !== 'true' && !n.disabled,
  checked:n.getAttribute('aria-checked') === 'true',
@@ -729,15 +743,22 @@ class BrowserAdapter:
 
     async def _providers(self):
         return await self._evaluate(r"""() => [...document.querySelectorAll('[data-testid^="gptSubMenuModelTrigger-"],[data-test-id^="gptSubMenuModelTrigger-"]')]
-          .filter(n=>(n.offsetWidth||n.offsetHeight)&&n.getAttribute('aria-disabled')!=='true'&&!n.disabled).map(n=>({id:n.getAttribute('data-testid')||n.getAttribute('data-test-id'), label:(n.innerText||'').trim()}))""")
+          .filter(n=>{
+            if (!(n.offsetWidth||n.offsetHeight||n.getClientRects().length)||n.getAttribute('aria-disabled')==='true'||n.disabled) return false;
+            return !n.querySelector('[data-testid^="checkmark-"],[data-test-id^="checkmark-"]');
+          }).map(n=>({id:n.getAttribute('data-testid')||n.getAttribute('data-test-id'), label:(n.innerText||'').replace(/\s+/g,' ').trim()}))""")
 
-    async def _open_provider(self, trigger):
+    async def _open_provider(self, trigger, label=None):
         await self._open_picker()
-        opened = await self._evaluate(r"""id => {
-          const n=[...document.querySelectorAll('[data-testid],[data-test-id]')].find(n=>n.getAttribute('data-testid')===id||n.getAttribute('data-test-id')===id);
+        opened = await self._evaluate(r"""({id,label}) => {
+          const norm=n=>(n.innerText||n.getAttribute('aria-label')||'').replace(/\s+/g,' ').trim();
+          const n=[...document.querySelectorAll('[data-testid],[data-test-id]')].find(n=>
+            (n.getAttribute('data-testid')===id||n.getAttribute('data-test-id')===id)
+            && (n.offsetWidth||n.offsetHeight||n.getClientRects().length)
+            && (!label||norm(n)===label));
           if(!n || !(n.offsetWidth||n.offsetHeight)) return false;
           if(n.getAttribute('aria-expanded')!=='true') n.click(); return true;
-        }""", trigger)
+        }""", {'id': trigger, 'label': label})
         if not opened:
             raise BrowserUIError('The discovered model provider menu is no longer available.')
         deadline = time.monotonic() + 5
@@ -758,9 +779,10 @@ class BrowserAdapter:
             for provider in providers:
                 await self.page.keyboard.press('Escape')
                 await self.page.keyboard.press('Escape')
-                await self._open_provider(provider['id'])
+                await self._open_provider(provider['id'], provider['label'])
                 name = provider['id'].split('gptSubMenuModelTrigger-', 1)[-1]
-                entries.extend({**item, 'provider': name, 'provider_trigger': provider['id']}
+                entries.extend({**item, 'provider': name, 'provider_trigger': provider['id'],
+                                'provider_label': provider['label']}
                                for item in await self._evaluate(_RADIOS)
                                if item['label'] not in self._top_level_labels)
             unique = {}
@@ -786,25 +808,35 @@ class BrowserAdapter:
     async def select_model(self, label: str):
         matches = [item for item in self.models if item['label'] == label and item['enabled']]
         if len(matches) != 1:
-            raise BrowserUIError('Choose one exact, unambiguous enabled label from the discovered model list.')
+            raise ModelUnavailableError('Choose one exact, unambiguous enabled label from the current discovered model list.')
         chosen = matches[0]
         try:
             if chosen['provider_trigger']:
-                await self._open_provider(chosen['provider_trigger'])
+                if chosen.get('provider_label'):
+                    await self._open_provider(chosen['provider_trigger'], chosen['provider_label'])
+                else:
+                    await self._open_provider(chosen['provider_trigger'])
             else:
                 await self._open_picker()
             clicked = await self._evaluate(r"""label => {
               const norm=n=>(n.innerText||n.getAttribute('aria-label')||'').replace(/\s+/g,' ').trim();
-              const matches=[...document.querySelectorAll('[role="menuitemradio"],[role="radio"]')].filter(n=>norm(n)===label&&(n.offsetWidth||n.offsetHeight));
+              const matches=[...document.querySelectorAll('[role="menuitemradio"],[role="radio"],[role="menuitem"]')].filter(n=>{
+                if(norm(n)!==label||!(n.offsetWidth||n.offsetHeight||n.getClientRects().length)) return false;
+                if(n.matches('[role="menuitemradio"],[role="radio"]')) return true;
+                const trigger=n.getAttribute('data-testid')||n.getAttribute('data-test-id')||'';
+                const marker=[...n.querySelectorAll('[data-testid^="checkmark-"],[data-test-id^="checkmark-"]')]
+                  .map(s=>s.getAttribute('data-testid')||s.getAttribute('data-test-id'))[0];
+                return marker&&trigger.split('gptSubMenuModelTrigger-').pop().toLowerCase()!==marker.split('checkmark-').pop().toLowerCase();
+              });
               if(matches.length!==1||matches[0].getAttribute('aria-disabled')==='true'||matches[0].disabled) return false;
               if(matches[0].getAttribute('aria-checked')!=='true') matches[0].click(); return true;
             }""", label)
             if not clicked:
-                raise BrowserUIError('The exact discovered model radio could not be selected.')
+                raise ModelUnavailableError('The discovered model became unavailable before it could be selected.')
             deadline = time.monotonic() + min(10, self.config.startup_timeout)
             while time.monotonic() < deadline:
                 if chosen['provider_trigger']:
-                    await self._open_provider(chosen['provider_trigger'])
+                    await self._open_provider(chosen['provider_trigger'], chosen.get('provider_label'))
                 else:
                     await self._open_picker()
                 radios = await self._evaluate(_RADIOS)
@@ -815,7 +847,7 @@ class BrowserAdapter:
                     self.models = [chosen if item['label'] == label and item['provider'] == chosen['provider'] else item for item in self.models]
                     return chosen
                 await asyncio.sleep(self.config.poll_interval)
-            raise BrowserUIError('The selected model never showed a checked exact radio.')
+            raise ModelUnavailableError('The selected model became unavailable before its checked state could be verified.')
         except Exception:
             await self.diagnostics('model_selection')
             raise
