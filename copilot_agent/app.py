@@ -179,6 +179,8 @@ async def choose_browser_endpoint(config, args, settings, *, interactive=False,
     """
     if not hasattr(config, '_new_session_profile_dir'):
         config._new_session_profile_dir = config.profile_dir
+    if force_new:
+        config.attach_existing = False
     if config.attach_existing and not force_new:
         return config
     debug_ports = settings.get('debug_ports', {})
@@ -254,6 +256,7 @@ async def choose_browser_endpoint(config, args, settings, *, interactive=False,
     if selected_existing is not None:
         selected = selected_existing['port']
         config.attach_existing = True
+        config._new_edge_session = False
         if selected_existing['discovered']:
             config._discovered_edge_endpoint = True
             if selected_existing['profile'] is not None:
@@ -292,6 +295,19 @@ async def choose_browser_endpoint(config, args, settings, *, interactive=False,
     config.debug_port = selected
     settings['debug_ports'] = dict(debug_ports, **{key: selected})
     if not config.attach_existing:
+        config._new_edge_session = True
+        config._user_selected_existing = False
+        if hasattr(config, '_discovered_edge_endpoint'):
+            delattr(config, '_discovered_edge_endpoint')
+        profile = Path(config._new_session_profile_dir).expanduser().resolve()
+        profile_key = os.path.normcase(str(profile))
+        known_busy = any(item.get('profile') is not None
+                         and os.path.normcase(str(Path(item['profile']).resolve())) == profile_key
+                         for item in discovered)
+        if known_busy or await asyncio.to_thread(edge.profile_in_use, profile):
+            profile = profile.with_name(profile.name + '-session-' + uuid.uuid4().hex[:12])
+            system('The saved Edge profile is already open. Using a separate persistent profile for the new Edge session; sign in there if prompted.')
+        config.profile_dir = profile
         system('Using an available local debugging port: ' + str(selected))
     return config
 

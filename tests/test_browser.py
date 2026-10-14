@@ -131,6 +131,30 @@ class InteractionReadinessTests(unittest.IsolatedAsyncioTestCase):
 
 
 class StartupRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_new_session_connection_failure_never_attaches_an_existing_session(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = SimpleNamespace(visible=True, copilot_url='https://m365.cloud.microsoft/',
+                profile_dir=Path(temporary), debug_port=63742, attach_existing=False,
+                edge_executable='', startup_timeout=1, _new_edge_session=True)
+            adapter = BrowserAdapter(config)
+            adapter._acquire_controller = lambda: None
+            adapter.diagnostics = AsyncMock()
+            adapter.close = AsyncMock()
+            adapter._connect_running_edge_fallback = AsyncMock(
+                side_effect=AssertionError('Existing Edge fallback must not run after New port'))
+            manager = SimpleNamespace(start=AsyncMock(return_value=object()))
+            with patch.object(browser_module.edge, 'get_cdp_version', return_value=None), \
+                 patch.object(browser_module.edge, 'find_edge_executable', return_value=Path('msedge.exe')), \
+                 patch.object(browser_module.edge, 'launch_edge'), \
+                 patch.object(browser_module.edge, 'connect_bounded',
+                              new=AsyncMock(side_effect=EndpointError('synthetic fresh launch failure'))), \
+                 patch('playwright.async_api.async_playwright', return_value=manager):
+                with self.assertRaisesRegex(BrowserUIError, 'new Edge session'):
+                    await adapter.start()
+            adapter._connect_running_edge_fallback.assert_not_awaited()
+            self.assertFalse(config.attach_existing)
+            self.assertEqual(63742, config.debug_port)
+
     async def test_exact_proof_endpoint_never_falls_back_after_connection_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
             profile = Path(temporary)

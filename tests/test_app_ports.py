@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import threading
 import unittest
-from unittest.mock import call, patch
+from unittest.mock import AsyncMock, call, patch
 
 from copilot_agent.app import choose_browser_endpoint
 from copilot_agent.reused_browser import EndpointError
@@ -37,7 +37,8 @@ class BrowserEndpointTests(unittest.IsolatedAsyncioTestCase):
                                profile_dir=Path('synthetic-owned-profile'))
 
     async def exercise(self, config, settings, *, explicit_port=None, busy=(), payload=None,
-                       ownership_error=None, discovered=()):
+                       ownership_error=None, discovered=(), interactive=False,
+                       prompt=None, profile_busy=False):
         sockets = FakeSockets(busy)
         with patch('copilot_agent.app.machine_key', return_value='vdi-synthetic'), \
              patch('copilot_agent.app.system'), \
@@ -47,9 +48,39 @@ class BrowserEndpointTests(unittest.IsolatedAsyncioTestCase):
                    return_value=None if callable(payload) else payload) as get_version, \
              patch('copilot_agent.app.edge.validate_endpoint') as validate_endpoint, \
              patch('copilot_agent.app.edge.validate_edge_listener'), \
+             patch('copilot_agent.app.edge.profile_in_use', return_value=profile_busy), \
              patch('copilot_agent.app.edge.validate_profile_ownership', side_effect=ownership_error) as validate_owner:
-            result = await choose_browser_endpoint(config, SimpleNamespace(port=explicit_port), settings)
+            kwargs = {'interactive': interactive}
+            if prompt is not None:
+                kwargs['prompt'] = prompt
+            result = await choose_browser_endpoint(config, SimpleNamespace(port=explicit_port), settings, **kwargs)
         return result, sockets, get_version, validate_endpoint, validate_owner
+
+    async def test_new_choice_uses_separate_profile_when_two_sessions_are_running(self):
+        config = self.config()
+        original = config.profile_dir.resolve()
+        discovered = [{'port': 9222, 'profile': original},
+                      {'port': 9333, 'profile': Path('other-running-profile').resolve()}]
+        result, *_ = await self.exercise(config, {}, busy=[9222, 9333],
+            discovered=discovered, interactive=True, prompt=AsyncMock(return_value='3'),
+            payload=lambda url: {'Browser': 'Edg/synthetic'} if url.endswith((':9222', ':9333')) else None,
+            profile_busy=True)
+        self.assertFalse(result.attach_existing)
+        self.assertTrue(result._new_edge_session)
+        self.assertNotIn(result.debug_port, {9222, 9333})
+        self.assertNotEqual(original, result.profile_dir.resolve())
+        self.assertEqual(original.parent, result.profile_dir.resolve().parent)
+
+    async def test_new_choice_reuses_saved_profile_when_no_process_owns_it(self):
+        config = self.config()
+        original = config.profile_dir.resolve()
+        result, *_ = await self.exercise(config, {}, busy=[9222],
+            discovered=[{'port': 9222, 'profile': Path('other-running-profile')}],
+            interactive=True, prompt=AsyncMock(return_value='new'),
+            payload=lambda url: {'Browser': 'Edg/synthetic'} if url.endswith(':9222') else None)
+        self.assertFalse(result.attach_existing)
+        self.assertTrue(result._new_edge_session)
+        self.assertEqual(original, result.profile_dir.resolve())
 
     async def test_running_edge_on_discovered_nondefault_port_wins_over_free_9222(self):
         profile = Path('normal-edge-profile')

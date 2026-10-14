@@ -436,6 +436,8 @@ class BrowserAdapter:
 
     async def _connect_running_edge_fallback(self):
         """Retry verified running Edge endpoints after a failed selected route."""
+        if getattr(self.config, '_new_edge_session', False):
+            return None
         attempts = set()
         for round_index in range(3):
             discovered = await asyncio.to_thread(edge.discover_edge_debugging_endpoints)
@@ -536,6 +538,8 @@ class BrowserAdapter:
             except edge.EndpointError as exc:
                 if exact_endpoint is not None:
                     raise BrowserUIError('The exact dedicated Edge listener could not be attached; no fallback port or profile was used.') from exc
+                if getattr(self.config, '_new_edge_session', False):
+                    raise BrowserUIError('The new Edge session could not be attached. Existing Edge sessions were not reused; retry startup.') from exc
                 if getattr(self.config, '_user_selected_existing', False):
                     raise ExistingEdgeUnavailable('The selected existing Edge session could not be attached.') from exc
                 self.browser = await self._connect_running_edge_fallback()
