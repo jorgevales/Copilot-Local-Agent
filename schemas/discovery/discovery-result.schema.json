@@ -169,7 +169,7 @@
         "additionalProperties": false
       },
       "minItems": 0,
-      "maxItems": 1000
+      "maxItems": 6000
     },
     "gaps": {
       "type": "array",

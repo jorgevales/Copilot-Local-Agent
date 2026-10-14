@@ -13,6 +13,7 @@ import time
 from .discovery_contracts import DiscoveryError, canonical
 from .policy import PathPolicy, reject_path_redirection
 from .site_knowledge import knowledge_directory
+from .persistence import io_path
 
 TERMINAL = frozenset({'SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'SKIPPED', 'CANCELLED'})
 TRANSITIONS = {
@@ -21,8 +22,9 @@ TRANSITIONS = {
     'RUNNING': {'SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'RETRY_DELAY', 'CANCELLED'},
     'RETRY_DELAY': {'READY', 'FAILED', 'CANCELLED'},
 }
-MAX_DATABASE_BYTES = 32 * 1024 * 1024
-MAX_ARTIFACT_BYTES = 256 * 1024
+MAX_DATABASE_BYTES = 256 * 1024 * 1024
+MAX_ARTIFACT_BYTES = 2 * 1024 * 1024
+MAX_KNOWLEDGE_BYTES = 8 * 1024 * 1024
 
 
 def digest(value):
@@ -77,7 +79,8 @@ class Store:
                 reject_path_redirection(Path(str(path) + suffix))
             if path.exists() and path.stat().st_size > MAX_DATABASE_BYTES:
                 raise DiscoveryError('resource_limit')
-            target = path.as_uri() + '?mode=ro' if readonly else str(path)
+            selected = io_path(path)
+            target = selected.as_uri() + '?mode=ro' if readonly else str(selected)
             self.db = sqlite3.connect(target, timeout=2, isolation_level=None, check_same_thread=False, uri=readonly)
         else:
             self.db = sqlite3.connect(':memory:', isolation_level=None, check_same_thread=False)
@@ -107,7 +110,7 @@ class Store:
         self.db.execute('PRAGMA synchronous=FULL')
         self.db.execute('PRAGMA secure_delete=ON')
         self.db.execute('PRAGMA journal_mode=DELETE')
-        self.db.execute('PRAGMA max_page_count=8192')
+        self.db.execute('PRAGMA max_page_count=' + str(MAX_DATABASE_BYTES // 4096))
         version = self.db.execute('PRAGMA user_version').fetchone()[0]
         if version not in (0, 1):
             self.db.close()
@@ -551,7 +554,7 @@ class Store:
             if current != expected or payload['revision'] != expected + 1:
                 raise DiscoveryError('stale_knowledge_revision')
             encoded = canonical(payload)
-            if len(encoded.encode()) > MAX_ARTIFACT_BYTES:
+            if len(encoded.encode()) > MAX_KNOWLEDGE_BYTES:
                 raise DiscoveryError('resource_limit')
             db.execute('INSERT INTO knowledge VALUES(?,?,?,?,?,?,0)',
                        (partition, current + 1, encoded, digest(payload), canonical(consent), time.time()))

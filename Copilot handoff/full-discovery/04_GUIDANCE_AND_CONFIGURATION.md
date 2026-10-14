@@ -174,6 +174,18 @@ On correction, preserve the intended decision but fix the listed validation erro
 
 # Tools and selection rules
 
+For broad public website exploration, use `discovery.manifest` as the main tool.
+Crawl4AI is the default extractor; observed links expand in a continuous local
+loop without a model round trip per page. Bind the exact namespace and read
+`discovery.knowledge_lookup` first; offset/limit pagination exposes every saved
+route. Deep manifests may request 1000 pages, depth 10, eight reads (four per
+origin), 5000 requests/tasks and 512 MiB. Set finite deadlines and rates, and
+expand_urls=true on HTTP workers. Exact manifest approval and separate save
+consent remain required. A new approved run can prioritize the unvisited frontier
+in matching saved knowledge. The loop stops on exhaustion, cancellation, budgets
+or safety boundaries. Use visible browser tools for rendered/authenticated pages;
+Crawl4AI extraction does not prove UI transitions or authorize website actions.
+
 Guidance version: 1.0.
 
 A locally reviewed direct browser approval also grants continued navigation

@@ -51,6 +51,7 @@ class Config:
     created_sync_enabled: bool = False
     model: str = 'GPT-6 Sol'
     manifest_path: bool = True
+    discovery_extractor: str = 'crawl4ai'
     persistent_graph: bool = True
     bounded_parallelism: bool = True
     local_recovery: bool = True
@@ -140,6 +141,8 @@ class Config:
         return cfg
 
     def validate(self) -> None:
+        if self.discovery_extractor not in {'crawl4ai', 'structure'}:
+            raise ValueError('discovery_extractor must be crawl4ai or the explicit structure fallback')
         if type(self.debug_port) is not int or not 1024 <= self.debug_port <= 65535:
             raise ValueError('debug_port must be an integer from 1024 to 65535')
         for key in ('visible', 'attach_existing', 'created_sync_enabled', 'manifest_path',

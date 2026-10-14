@@ -217,18 +217,28 @@ def knowledge_directory(context):
             reject_path_redirection(raw)
             return raw
         project = configured.get('root') if isinstance(configured, dict) else getattr(configured, 'root', None)
-        project_root = Path(project or Path(__file__).resolve().parents[1]).resolve()
+        project_root = Path(project or Path(__file__).resolve().parents[1]).expanduser()
         try:
             share = mapped_s_drive_root().resolve()
         except (PolicyError, OSError) as error:
             raise PolicyError("The mapped S: share is unavailable; durable knowledge remains in session evidence") from error
+        from .policy import is_s_drive_path
+        if is_s_drive_path(project_root):
+            project_root = share / Path(ntpath.relpath(str(project_root), 'S:\\'))
+        reject_path_redirection(project_root)
+        project_root = project_root.resolve()
         if project_root != share and share not in project_root.parents:
             raise PolicyError("The project is not located on the mapped S: share; durable knowledge remains in session evidence")
         selected = project_root.parent / "Discoveries knowledge"
         configured_directory = (configured.get('knowledge_directory') if isinstance(configured, dict)
                                 else getattr(configured, 'knowledge_directory', None))
-        if configured_directory is not None and Path(configured_directory).expanduser().resolve() != selected.resolve():
-            raise PolicyError("Persistent knowledge must use the S: project sibling Discoveries knowledge folder")
+        if configured_directory is not None:
+            configured_path = Path(configured_directory).expanduser()
+            if is_s_drive_path(configured_path):
+                configured_path = share / Path(ntpath.relpath(str(configured_path), 'S:\\'))
+            reject_path_redirection(configured_path)
+            if configured_path.resolve() != selected.resolve():
+                raise PolicyError("Persistent knowledge must use the S: project sibling Discoveries knowledge folder")
     raw = Path(selected).expanduser().absolute()
     reject_path_redirection(raw)
     return raw
@@ -460,7 +470,7 @@ def prepare_knowledge(args, context, name=None):
                 "directory": str(knowledge_directory(context)), "excluded_data": list(EXCLUDED_DATA),
                 "decline": "Decline this grant; the current task and ephemeral website map can continue."}
     from .storage import discoveries_storage_paths
-    if local_test_store:
+    if local_test_store or context.get('knowledge_directory') is not None:
         # Explicit C: test mode must preview the actual target even on machines
         # where the production S: mapping is available.
         fixture_path = str(knowledge_directory(context))

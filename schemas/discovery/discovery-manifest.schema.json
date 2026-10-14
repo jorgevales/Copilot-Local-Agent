@@ -155,7 +155,7 @@
         "task_seconds": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 300
+          "maximum": 1800
         },
         "branch_seconds": {
           "type": "integer",

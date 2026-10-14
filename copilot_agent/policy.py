@@ -118,10 +118,57 @@ def mapped_s_drive_root():
     """Return the share currently mapped as S:, or fail closed."""
     if os.name != 'nt':
         raise PolicyError('S: is available only on Windows')
-    share = _final_s_path('S:\\')
+    try:
+        share = _final_s_path('S:\\')
+    except PolicyError:
+        share = _mapped_s_provider_root()
     if not share.startswith('\\\\'):
         raise PolicyError('S: must currently resolve to a UNC share')
     return Path(share)
+
+
+def _mapped_s_provider_root():
+    """Read the same current mapping providers used by the launcher.
+
+    Commands are fixed, read-only, bounded and hidden. Only a live provider's
+    UNC destination is accepted, and its final directory must be accessible.
+    No saved mapping, guessed share or local directory is a fallback.
+    """
+    import json
+    import subprocess
+    script = """
+$ErrorActionPreference='Continue'
+$candidates=@()
+$drive=Get-PSDrive -Name S -ErrorAction SilentlyContinue
+if ($drive -and $drive.DisplayRoot -like '\\\\*') { $candidates += [string]$drive.DisplayRoot }
+$disk=Get-CimInstance Win32_LogicalDisk -Filter \"DeviceID='S:'\" -ErrorAction SilentlyContinue
+if ($disk -and $disk.ProviderName -like '\\\\*') { $candidates += [string]$disk.ProviderName }
+$map=Get-SmbMapping -LocalPath 'S:' -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($map -and $map.RemotePath -like '\\\\*') { $candidates += [string]$map.RemotePath }
+ConvertTo-Json -Compress -InputObject @($candidates | Select-Object -Unique)
+"""
+    try:
+        result = subprocess.run(['powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+                                capture_output=True, text=True, timeout=10,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        values = json.loads(result.stdout) if result.returncode == 0 and len(result.stdout) <= 8192 else None
+        if type(values) is not list or not 1 <= len(values) <= 3:
+            raise ValueError()
+        for value in values:
+            if (type(value) is not str or not value.startswith('\\\\')
+                    or value.startswith(('\\\\?\\', '\\\\.\\')) or not ntpath.isabs(value)):
+                continue
+            try:
+                share = _final_s_path(value)
+                if not share.startswith('\\\\') or not Path(share).is_dir():
+                    continue
+                reject_path_redirection(Path(share))
+                return share
+            except (PolicyError, OSError, ValueError):
+                continue
+        raise ValueError()
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        raise PolicyError('The live S: mapping and its provider UNC fallbacks are unavailable') from error
 
 
 def resolve_s_drive_output(path, excluded_roots=(), *, must_exist=False):
@@ -142,7 +189,12 @@ def resolve_s_drive_output(path, excluded_roots=(), *, must_exist=False):
     checked_parent = (ntpath.join(share, ntpath.relpath(parent_raw, 'S:\\'))
                       if is_s_drive_path(raw) else parent_raw)
     reject_path_redirection(Path(checked_parent))
-    parent = _final_s_path(parent_raw)
+    try:
+        parent = _final_s_path(parent_raw)
+    except PolicyError:
+        if not is_s_drive_path(raw):
+            raise
+        parent = _final_s_path(checked_parent)
     if parent != share and not parent.startswith(share + '\\'):
         raise PolicyError('The destination is outside the share currently mapped to S:')
     target = Path(parent) / name

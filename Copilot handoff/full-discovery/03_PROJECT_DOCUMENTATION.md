@@ -22,6 +22,7 @@ The launcher asks which project version to run, then starts an authenticated loc
 
 ## Implemented
 - A compact Start agent card appears at the single local-navigation and knowledge-saving confirmation prompt. Start and Cancel submit the same `y` and `n` replies through `/api/submit`, the prompt broker and `app.run`; no terminal command or launch configuration is rebuilt. The card waits for backend feedback, prevents duplicate confirmation, preserves the first-request draft and reports local submission errors inline.
+- During regular startup, verified existing Edge sessions are offered through the normal backend prompt. Choose a listed port, start a new isolated Edge session, or cancel startup; if no verified session exists, a new one starts directly.
 - A cohesive light workspace palette and compact display mode.
 - Collapsible navigation and context panels; responsive layout.
 - Safe Markdown subset, code copy, basic tables and lists; raw HTML is inert.
@@ -617,6 +618,35 @@ After reproducing the original failure and verifying the fix in the real target 
 
 ---
 
+<!-- BEGIN VERBATIM SOURCE: docs/CRAWL4AI_VALIDATION.md -->
+## Source: `docs/CRAWL4AI_VALIDATION.md` (verbatim text; line endings normalized to LF)
+
+# Crawl4AI integration validation — 14 October 2026
+
+Windows Python 3.14.2; actual Crawl4AI 0.9.5 offline extraction, synthetic HTTPS
+transport fixtures. This is not a live VDI, authenticated-site or S:/UNC proof.
+
+- Core discovery/contracts/knowledge/transport/storage/persistence: 66 tests passed.
+- Tools/site knowledge/repair/health/startup: 89 tests completed, 87 passed and two
+  existing platform checks skipped.
+- After adding explicit S: alias normalization, targeted mapping/tools/site
+  checks completed: 70 tests, 68 passed and the same two checks skipped.
+- A 126-page crawl used real Crawl4AI extraction, overlapped bounded page reads,
+  saved all routes and read every route through pagination. An interrupted
+  frontier was reused only from an approved bound map; cancellation stopped all
+  child reads. Password pages, secret values and unapproved origins were excluded.
+- Existing independent-run route trust and static navigation tests passed.
+- Dependency installation and `pip check` passed; compilation and Git whitespace
+  checks passed. The full repository suite was not run.
+
+Run `Setup.cmd` in the target shared deployment before using the new extractor.
+Verify a real approved discovery, cancellation, knowledge save/readback and a
+long redirected UNC ledger read in that environment before claiming live success.
+<!-- END SOURCE: docs/CRAWL4AI_VALIDATION.md -->
+
+
+---
+
 <!-- BEGIN VERBATIM SOURCE: docs/DIAGNOSTICS.md -->
 ## Source: `docs/DIAGNOSTICS.md` (verbatim text; line endings normalized to LF)
 
@@ -641,6 +671,39 @@ Diagnostics intentionally omit prompts, document contents, environment values, c
 ## Source: `docs/DISCOVERY_NAVIGATION.md` (verbatim text; line endings normalized to LF)
 
 # Live discovery and navigation
+
+Crawl4AI 0.9.5 ([upstream](https://github.com/unclecode/crawl4ai)) is the default
+navigation extractor for `discovery.manifest`. Run `Setup.cmd` to install the
+updated pinned dependencies. No extra crawler browser installation is needed.
+The adapter uses Crawl4AI's LXML scraping tools on sanitized observed navigation
+HTML; the existing public-IP-pinned HTTPS reader owns all network access. Page
+text, values, scripts, media and credentials never enter the reusable map.
+Evidence remains static; use approved visible Edge tools for JavaScript rendering
+or manual sign-in.
+
+For broad exploration, prefer one manifest with `expand_urls: true` over one
+Copilot turn per page. The local loop investigates successive frontiers with
+up to eight concurrent reads and four per origin. Suggested deep budgets are
+1,000 pages, depth 10, 5,000 tasks/requests, 512 MiB, 1,800 run seconds, 1,500
+task/branch seconds, 30-second reads, three attempts and two requests per second
+per origin. See `docs/examples/deep-discovery.json`; replace the exact origin,
+seeds and nested request ID. Each full manifest is reviewed locally. Queue
+exhaustion, resource limits, cancellation and safety boundaries end the loop.
+
+Bind the exact namespace and look up saved knowledge first. Expansion prioritizes
+previously observed unexplored links from a separately consented map with matching
+scope, intact evidence and unexpired provenance. Each reused candidate receives
+a fresh approved GET. Another run needs its own approval and budgets. Save useful
+runs with `discovery.knowledge_save`; maps are never silently promoted or saved.
+`discovery.knowledge_lookup` accepts `offset` and `limit` (1–40), returns
+`next_offset`, and retrieves all 1,000 saved routes without recrawling. Missing,
+invalidated or stale maps require discovery; integrity failures stop reuse.
+
+Deep runs retain full sanitized results up to 8 MiB while Copilot receives a
+compact projection. The shared SQLite ledger is bounded at 256 MiB and individual
+structural artifacts at 2 MiB. Oversized maps are explicitly partial. Operators
+can select `discovery_extractor: "structure"` for the legacy parser; missing
+Crawl4AI dependencies stop preparation without silently changing engines.
 
 The bounded public-site discovery and static navigation tools are installed in the live agent. The supported flags (`manifest_path`, `persistent_graph`, `bounded_parallelism`, `local_recovery`, `knowledge_write`, `knowledge_reuse`) are enabled by default. `targeted_repair` stays unavailable because no safe browser repair adapter exists. An operator can set these booleans in an explicit configuration file or select a smaller set with `COPILOT_AGENT_DISCOVERY_FLAGS`. Flags expose tools; they never approve a request.
 
@@ -809,6 +872,18 @@ Edge settings are read through its actual settings UI before link selection. The
 ## Source: `docs/KNOWLEDGE_PERSISTENCE.md` (verbatim text; line endings normalized to LF)
 
 # Local navigation and Discoveries persistence
+
+Runtime S: resolution preserves the direct path first, then tries live PowerShell
+drive DisplayRoot, CIM ProviderName and SMB RemotePath providers when strict Python
+resolution fails. Accessible destinations are validated as UNC directories.
+Knowledge and SQLite use the same canonical store; extended UNC I/O spelling is
+applied after logical path validation for long redirected paths. No provider
+permits automatic local C: or OneDrive fallback. Provider lookup is a fixed,
+hidden, read-only command with a ten-second timeout.
+
+Read saved routes directly with `discovery.knowledge_lookup` and offset/limit
+pagination. Reads validate the exact bound namespace, hashes, evidence and
+freshness. Broad discovery can reuse its consented unexplored frontier.
 
 Each visible run asks once for local filesystem navigation and verified knowledge
 saving. This in-memory grant expires with the process; it does not authorize code
@@ -1392,6 +1467,14 @@ Browser downloads and semantic locator handling follow the existing pinned Playw
 
 # Copilot Local Agent
 
+Public exploration now defaults to [Crawl4AI](https://github.com/unclecode/crawl4ai)
+through `discovery.manifest`: continuous bounded parallel expansion, up to 1,000
+pages, and reuse of saved unexplored routes. Update dependencies with `Setup.cmd`.
+Read all saved routes through paginated `discovery.knowledge_lookup` in the shared
+S:/UNC store. See [operation](docs/DISCOVERY_NAVIGATION.md) and the
+[deep manifest example](docs/examples/deep-discovery.json). Existing approvals,
+public-address checks and cancellation remain active.
+
 A Windows/VDI repository with continuous conversation, Microsoft 365 Copilot web UI reasoning, strictly validated responses, controlled tools, explicit code approval, retained session state and Useful Findings. The original CDD workflow is preserved. No reasoning API is used.
 
 Actionable failures create separate internal and sanitized reports with an explicit review step before external sharing. See [diagnostics and report handling](docs/DIAGNOSTICS.md).
@@ -1399,6 +1482,8 @@ Actionable failures create separate internal and sanitized reports with an expli
 The Copilot Chat project map and handoff files are kept in [Copilot handoff/full-discovery](Copilot%20handoff/full-discovery/README.md) and are included when this repository is pulled.
 
 For the graphical workspace, run **Start Agent UI.cmd**; it asks whether to use the live repository or the Copilot testing environment. **Start Agent.cmd** remains the terminal fallback. The UI shares the same agent session and approval policies. See [the UI guide](agent_ui/README.md).
+
+At normal agent startup, verified running Edge sessions are listed so you can reuse one or launch a new isolated Edge session. Reuse is the default when a verified session is available; if none is available, a new session starts without another prompt. The choice is requested on each startup; canceling stops startup, and a selected session that fails attachment verification falls back to a new isolated session. Explicit `--port` and `--attach-existing` options keep their direct targeting behavior, and `--resume` does not show the selector.
 
 ## Setup and run
 

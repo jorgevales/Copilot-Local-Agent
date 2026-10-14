@@ -51,7 +51,7 @@ def input_object(properties):
 MANIFEST_SCHEMA = input_object({'manifest': schema('discovery_manifest')})
 DISCOVERY_SPECS = {
     'discovery.manifest': (MANIFEST_SCHEMA, 'user_approval',
-        'One exact approved public read-only manifest, locally compiled DAG, bounded HTTPS GET/HEAD, evidence and aggregate. No browser/auth/network observers/generated code. Feature flags and local approval remain authoritative. Nested request_id is d + current envelope request_id.'),
+        'Main exploration tool: Crawl4AI extraction, continuous bounded parallel link expansion, saved bound knowledge frontier reuse, pinned public HTTPS GET/HEAD, evidence and aggregate. Up to 1000 pages, depth 10, eight reads/four per origin; exact manifest approval and separate knowledge-save consent. No browser/auth/generated code. Nested request_id is d + current envelope request_id.'),
     'discovery.shadow': (MANIFEST_SCHEMA, 'read_only',
         'Manifest shape/scope/capability/DAG compilation, zero network or persistence; never grants execution authority.'),
 }
@@ -72,6 +72,12 @@ def validate_discovery(name, args, context=None):
 def prepare_discovery(args, context):
     graph = validate_discovery('discovery.manifest', args, context)
     m = graph.manifest
+    extractor = config_value(context.get('config', {}), 'discovery_extractor', 'crawl4ai')
+    if extractor not in {'crawl4ai', 'structure'}:
+        raise DiscoveryError('capability_unavailable')
+    if extractor == 'crawl4ai':
+        from .crawl4ai_adapter import strategy_type
+        strategy_type()
     accepted = context.setdefault('discovery_accepted_at', time.time())
     context.setdefault('discovery_accepted_monotonic', time.monotonic())
     if time.time() >= accepted + m['budgets']['run_seconds'] - 1:
@@ -82,6 +88,7 @@ def prepare_discovery(args, context):
         directory(context)
         storage = 'sanitised shared S: Discoveries knowledge ledger; seven-day evidence; separate from per-user runtime storage'
     return {'kind': 'discovery.manifest', 'manifest_sha256': graph.digest,
+            'extractor': extractor,
             'request_id': m['request_id'], 'accepted_at': accepted,
             'scope': deepcopy(m['scope']),
             'effective_origins': list(Scope(m['scope']).origins),
@@ -116,7 +123,7 @@ class StructureParser(HTMLParser):
             self.authentication_boundary = True
         if tag != 'a':
             return
-        if len(attrs) > 50 or len(self.links) >= 100:
+        if len(attrs) > 50 or len(self.links) >= 500:
             self.suppressed += 1
             return
         hrefs = [value for name, value in attrs if name == 'href']
@@ -139,7 +146,7 @@ class StructureParser(HTMLParser):
                 'values_text_headers_omitted': True}
 
 
-def extract(response, scope):
+def extract(response, scope, extractor='structure'):
     try:
         text = response.body.decode('utf-8', errors='strict')
     except UnicodeError as error:
@@ -151,6 +158,10 @@ def extract(response, scope):
     if parser.authentication_boundary:
         raise ReadFailure('authentication_required')
     snapshot = parser.snapshot()
+    if extractor == 'crawl4ai' and response.content_type in {'text/html', 'application/xhtml+xml'}:
+        from .crawl4ai_adapter import extract_links
+        snapshot['links'], snapshot['blocked_links'], snapshot['suppressed_links'] = extract_links(response.url, text, scope)
+    snapshot['extractor'] = extractor
     snapshot.update(status=response.status, content_type=response.content_type,
                     redirects=list(response.redirects), body_sha256=hashlib.sha256(response.body).hexdigest(),
                     text_extraction='not_retained')
@@ -167,7 +178,10 @@ class Engine:
         self.tasks = {t['id']: t for t in self.m['tasks']}
         self.states, self.outputs, self.reasons, self.task_evidence = {}, {}, {}, {}
         self.page_cache, self.url_locks, self.families = {}, {}, Counter()
+        self.page_slots = asyncio.Semaphore(self.m['budgets']['concurrency'])
+        self.extractor = config_value(context.get('config', {}), 'discovery_extractor', 'crawl4ai')
         self.gaps, self.evidence = [], []
+        self.persisted_evidence = set()
         self.diagnostics = {}
         self.stop_reason = None
         self.features, self.windows, self.window_features = set(), [], set()
@@ -246,7 +260,7 @@ class Engine:
             if method == 'GET':
                 self.store.reserve(self.run_id, 'pages', 1, self.m['budgets']['pages'])
                 family = scoped.origin + '/' + '/'.join(scoped.path.split('/')[1:2])
-                if self.families[family] >= 20:
+                if self.families[family] >= self.m['budgets']['pages']:
                     self.gap('Route-family cap suppressed expansion.', [task['id']])
                     self.store.reserve(self.run_id, 'suppressed', 1, 100000)
                     return None
@@ -260,7 +274,7 @@ class Engine:
                     response = await self.reader.fetch(scoped.url, min(deadline, time.time() + task['timeout_seconds']), method)
                     result = ({'url': response.url, 'status': response.status, 'redirects': list(response.redirects),
                                'public': True, 'boundary_assessed': True, 'observed_access_restriction': False}
-                              if method == 'HEAD' else extract(response, self.scope))
+                              if method == 'HEAD' else extract(response, self.scope, self.extractor))
                     if method == 'GET':
                         predicate = self.context.get('discovery_page_validator')
                         if callable(predicate):
@@ -338,9 +352,39 @@ class Engine:
 
     def checkpoint(self, task, outputs, artifacts):
         row = self.store.task(self.run_id, task['id'])
-        self.store.checkpoint(self.run_id, task['id'], self.owner, row['fence'], outputs, artifacts)
+        added = [pair for pair in artifacts if pair[0]['id'] not in self.persisted_evidence]
+        self.store.checkpoint(self.run_id, task['id'], self.owner, row['fence'], outputs, added)
+        self.persisted_evidence.update(meta['id'] for meta, _ in added)
         self.outputs[task['id']] = deepcopy(outputs)
         self.task_evidence[task['id']] = [meta['id'] for meta, _ in artifacts]
+
+    def saved_frontier(self):
+        if not self.binding_partition or not enabled(self.context, 'knowledge_reuse'):
+            return []
+        from .discovery_knowledge import lookup, _proofs
+        try:
+            _, knowledge = lookup(self.context, self.scope.origins[0], self.scope)
+            proofs = _proofs(self.store, knowledge, self.binding_partition)
+        except DiscoveryError as error:
+            if error.code in {'knowledge_missing', 'knowledge_stale', 'knowledge_invalidated', 'evidence_unavailable', 'knowledge_partition'}:
+                return []
+            raise
+        known = {route['url'] for route in knowledge['routes'] if route['status'] != 'invalid'}
+        pending = {}
+        for proof in proofs.values():
+            artifact = proof['artifact']
+            for link in artifact.get('links', []):
+                checked = self.scope.resolve(link).url
+                if checked not in known:
+                    pending.setdefault(checked, (checked, 1, artifact['url']))
+        # Known routes are rediscovered from fresh seed links so their source
+        # traversal provenance is preserved for independent navigation proofs.
+        return list(pending.values())[:max(0, self.m['budgets']['pages'] - len(self.m['seed_urls']))]
+
+    async def bounded_read(self, task, item, deadline):
+        async with self.page_slots:
+            url, depth, source = item
+            return await self.read_url(task, url, depth, source, deadline)
 
     async def worker(self, task, deadline, outputs, artifacts):
         worker = task['worker']
@@ -358,45 +402,56 @@ class Engine:
                     {'assessed': True, 'public_read_usable': False, 'no_bypass': True}, confidence=1))
         elif worker == 'http':
             pending = deque((u, 0, None) for u in task['inputs']['urls'])
+            if task['expand_urls']:
+                pending.extend(self.saved_frontier())
             admitted = set()
+            queued = {item[0] for item in pending}
             while pending:
                 self.reader.check(deadline)
-                url, depth, source = pending.popleft()
-                if url in admitted:
-                    self.store.reserve(self.run_id, 'duplicates_avoided', 1, 100000)
-                    continue
-                admitted.add(url)
-                result = await self.read_url(task, url, depth, source, deadline)
+                batch = []
+                while pending and len(batch) < self.m['budgets']['concurrency']:
+                    item = pending.popleft()
+                    if item[0] in admitted:
+                        self.store.reserve(self.run_id, 'duplicates_avoided', 1, 100000)
+                        continue
+                    admitted.add(item[0])
+                    batch.append(item)
+                results = await asyncio.gather(*(self.bounded_read(task, item, deadline) for item in batch), return_exceptions=True)
                 artifacts.extend(self.diagnostics.pop(task['id'], []))
-                if not result:
-                    if artifacts:
-                        self.checkpoint(task, outputs, artifacts)
-                    continue
-                result['discovery_source'] = source
-                outputs.append(result)
-                artifacts.append(self.evidence_pair(task['id'], 'page', result, result['url']))
-                self.update_plateau(result)
-                self.checkpoint(task, outputs, artifacts)
-                if result['dynamic_gap']:
-                    self.gap('App-shell signals require rendered evidence; autonomous browser capability is unavailable.', [task['id']], area='rendering')
-                if result['blocked_links'] or result['suppressed_links']:
-                    self.gap('Out-of-scope, sensitive or excess link candidates were suppressed without visiting.', [task['id']], severity='minor', area='coverage')
+                failure = next((r for r in results if isinstance(r, BaseException)), None)
+                for (_, depth, source), result in zip(batch, results):
+                    if not result or isinstance(result, BaseException):
+                        continue
+                    result['discovery_source'] = source
+                    outputs.append(result)
+                    artifacts.append(self.evidence_pair(task['id'], 'page', result, result['url']))
+                    self.update_plateau(result)
+                    if result['dynamic_gap']:
+                        self.gap('App-shell signals require rendered evidence; use the approved visible browser tools.', [task['id']], area='rendering')
+                    if result['blocked_links'] or result['suppressed_links']:
+                        self.gap('Out-of-scope, sensitive or excess link candidates were suppressed without visiting.', [task['id']], severity='minor', area='coverage')
+                    if task['expand_urls']:
+                        for link in result['links']:
+                            if link in queued:
+                                continue
+                            if depth + 1 > self.m['budgets']['depth']:
+                                self.gap('Depth limit suppressed observed links.', [task['id']], area='coverage')
+                                continue
+                            if len(queued) >= self.m['budgets']['pages']:
+                                self.gap('Queue watermark suppressed further URL producers.', [task['id']], area='coverage')
+                                break
+                            queued.add(link)
+                            pending.append((link, depth + 1, result['url']))
+                if artifacts:
+                    self.checkpoint(task, outputs, artifacts)
+                if failure:
+                    raise failure
                 plateau_reason = self.can_plateau(task)
                 if plateau_reason:
                     self.plateau = plateau_reason == 'coverage_plateau'
                     self.stop_reason = plateau_reason
                     self.gap('Low-priority expansion stopped only after configured novelty/duplicate windows and all known high-priority branches completed.', [task['id']], area='coverage')
                     break
-                if task['expand_urls']:
-                    for link in result['links']:
-                        if link not in admitted:
-                            if depth + 1 > self.m['budgets']['depth']:
-                                self.gap('Depth limit suppressed observed links.', [task['id']], area='coverage')
-                                continue
-                            if len(pending) + len(admitted) >= self.m['budgets']['pages']:
-                                self.gap('Queue watermark suppressed further URL producers.', [task['id']], area='coverage')
-                                break
-                            pending.append((link, depth + 1, result['url']))
             # The inline expansion coordinator closes only after every admitted
             # child read is terminal. Downstream tasks cannot outrun this barrier.
         elif worker == 'structure':
@@ -408,6 +463,11 @@ class Engine:
                              'edges': sorted({(p['url'], link) for p in pages for link in p.get('links', [])}),
                              'candidate_only': True, 'scope_only': not pages,
                              'rendered_navigation_verified': False}
+                from .discovery_store import MAX_ARTIFACT_BYTES
+                while len(canonical(structure).encode()) > MAX_ARTIFACT_BYTES:
+                    field = 'edges' if structure['edges'] else 'routes'
+                    structure[field] = structure[field][:len(structure[field]) // 2]
+                    self.gap('Structural map exceeded its retained artifact budget; page evidence remains available.', [task['id']], area='coverage')
                 outputs.append(structure)
                 artifacts.append(self.evidence_pair(task['id'], 'structure', structure))
         elif worker == 'validate':

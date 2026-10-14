@@ -29,12 +29,17 @@ KNOWLEDGE_SPECS = {
     'discovery.knowledge_save': (input_object({'run_id': ID, 'origin': ORIGIN, 'expected_revision': REVISION}),
         'user_approval', 'Testing-only: separately consent to save locally sanitised evidence-backed navigation candidates from one current approved run. Fresh site_knowledge.bind required. CAS revision; no model supplied knowledge or automatic trust.'),
     'discovery.knowledge_lookup': (input_object({'origin': ORIGIN}), 'read_only',
-        'Testing-only: bounded fresh scoped knowledge summary from the separately consented local v1 namespace; binding and knowledge_reuse flag required. Knowledge never authorises a browser action.'),
+        'Direct paginated scoped knowledge from the shared S:/UNC ledger; bind the exact namespace first. Optional offset and limit (1-40) retrieve every saved route without recrawling. Integrity/freshness checked; knowledge never authorises a browser action.'),
     'discovery.knowledge_invalidate': (input_object({'origin': ORIGIN, 'expected_revision': REVISION}),
         'user_approval', 'Testing-only: invalidate the exact selected local v1 knowledge namespace/revision after local review; existing website memory is separate and unchanged.'),
     'navigation.intent': (input_object({'intent': schema('navigation_intent')}), 'user_approval',
         'Testing-only: compile read intent locally against bound pinned fresh trusted public knowledge; execute bounded GET fingerprint verification, not browser interaction. Nested request_id is d + current envelope request_id. Unknown/stale maps require a separately approved discovery run.'),
 }
+
+KNOWLEDGE_SPECS['discovery.knowledge_lookup'][0]['properties'].update({
+    'offset': {'type': 'integer', 'minimum': 0, 'maximum': 1000},
+    'limit': {'type': 'integer', 'minimum': 1, 'maximum': 40},
+})
 
 STOP_ON = ['scope_mismatch', 'approval_missing', 'ambiguous_control', 'unexpected_transition',
            'auth_expired', 'budget_exhausted', 'cancelled']
@@ -198,7 +203,7 @@ def candidate(context, args, store):
                      'fingerprint': meta['structural_fingerprint'], 'auth_requirement': 'public',
                      'confidence': .8, 'evidence_ids': ids, 'first_seen': first,
                      'last_verified': verified_at, 'status': 'candidate'}
-    if len(routes) > 100:
+    if len(routes) > 1000:
         raise DiscoveryError('knowledge_limit')
     used = {i for r in routes.values() for i in r['evidence_ids']}
     retained = {i: e for i, e in retained.items() if i in used}
@@ -396,7 +401,11 @@ def prepare_knowledge_tool(name, args, context):
     validate_knowledge_tool(name, args, context)
     from .storage import discoveries_storage_paths
     try:
-        paths = discoveries_storage_paths(getattr(context.get('config'), 'root', None) or Path(__file__).resolve().parents[1])
+        if context.get('knowledge_directory') is not None or getattr(context.get('config'), '_local_knowledge_test_mode', False):
+            fixture_path = str(context.get('knowledge_directory') or context['config'].knowledge_directory)
+            paths = {'s_path': fixture_path, 'unc_path': fixture_path}
+        else:
+            paths = discoveries_storage_paths(getattr(context.get('config'), 'root', None) or Path(__file__).resolve().parents[1])
     except (OSError, ValueError):
         if (context.get('knowledge_directory') is None
                 and not getattr(context.get('config'), '_local_knowledge_test_mode', False)):
@@ -464,7 +473,8 @@ async def execute_knowledge_tool(name, args, context):
             raise DiscoveryError('knowledge_stale')
         summaries = []
         rule = k['revalidation']
-        for route in k['routes'][:40]:
+        offset, limit = args.get('offset', 0), args.get('limit', 40)
+        for route in k['routes'][offset:offset + limit]:
             item = {f: route[f] for f in ('id', 'url', 'purpose', 'status', 'confidence', 'last_verified')}
             age = max(0, time.time() - stamp(route['last_verified']))
             item['confidence'] *= math.exp(-math.log(2) * age / rule['half_life_seconds'])
@@ -474,7 +484,10 @@ async def execute_knowledge_tool(name, args, context):
         return {'status': 'candidate_or_current', 'knowledge_id': k['knowledge_id'], 'revision': record['revision'],
                 'scope_identity': k['scope_identity'], 'origin': k['origin'],
                 'routes': summaries,
-                'omitted_routes': max(0, len(k['routes']) - 40), 'requires_fresh_public_get_verification': True,
+                'omitted_routes': max(0, len(k['routes']) - len(summaries)),
+                'total_routes': len(k['routes']),
+                'next_offset': offset + len(summaries) if offset + len(summaries) < len(k['routes']) else None,
+                'requires_fresh_public_get_verification': True,
                 'browser_execution_available': False}
     reviewed = prepare_knowledge_tool(name, args, context)
     if (context.get('approved') is not True or not context.get('approval_hash')

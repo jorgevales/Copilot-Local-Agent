@@ -64,7 +64,7 @@ class ContractTests(unittest.TestCase):
         m = manifest(); m['tasks'][1]['approval_requirement'] = 'none'; self.assert_rejected(m, 'approval_required')
 
     def test_nested_budget_and_capability_limits(self):
-        for change in ({'task_seconds': 50}, {'concurrency': 5}, {'browser_contexts': 1}, {'replans': 1}):
+        for change in ({'task_seconds': 50}, {'concurrency': 9}, {'browser_contexts': 1}, {'replans': 1}):
             m = manifest(); m['budgets'].update(change); self.assert_rejected(m)
 
     def test_segment_scope_exclusions_win_and_no_subdomains(self):

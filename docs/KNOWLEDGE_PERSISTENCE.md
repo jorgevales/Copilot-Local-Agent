@@ -1,5 +1,17 @@
 # Local navigation and Discoveries persistence
 
+Runtime S: resolution preserves the direct path first, then tries live PowerShell
+drive DisplayRoot, CIM ProviderName and SMB RemotePath providers when strict Python
+resolution fails. Accessible destinations are validated as UNC directories.
+Knowledge and SQLite use the same canonical store; extended UNC I/O spelling is
+applied after logical path validation for long redirected paths. No provider
+permits automatic local C: or OneDrive fallback. Provider lookup is a fixed,
+hidden, read-only command with a ten-second timeout.
+
+Read saved routes directly with `discovery.knowledge_lookup` and offset/limit
+pagination. Reads validate the exact bound namespace, hashes, evidence and
+freshness. Broad discovery can reuse its consented unexplored frontier.
+
 Each visible run asks once for local filesystem navigation and verified knowledge
 saving. This in-memory grant expires with the process; it does not authorize code
 execution, authentication bypass, website transactions or arbitrary file changes.

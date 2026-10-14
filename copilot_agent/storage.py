@@ -21,12 +21,18 @@ def machine_key(hostname=None) -> str:
 
 def discoveries_storage(project_root: Path) -> Path:
     """Return the verified S: project sibling used for all durable agent data."""
-    from .policy import PolicyError, mapped_s_drive_root
-    root = Path(project_root).expanduser().resolve()
+    from .policy import PolicyError, mapped_s_drive_root, is_s_drive_path, reject_path_redirection
+    raw = Path(project_root).expanduser()
     try:
         share = mapped_s_drive_root().resolve()
     except (PolicyError, OSError) as error:
         raise ValueError('S: must be mapped to its UNC share before the agent can start; no local C: storage fallback is permitted') from error
+    # Use the verified provider identity when Python cannot resolve the S:
+    # alias directly. Never interpret a different absolute/local root as S:.
+    if is_s_drive_path(raw):
+        raw = share / Path(ntpath.relpath(str(raw), 'S:\\'))
+    reject_path_redirection(raw)
+    root = raw.resolve()
     if root != share and share not in root.parents:
         raise ValueError('The project is not under the live S: UNC mapping; place/run the project from S: to enable persistent storage')
     target = root.parent / 'Discoveries knowledge'

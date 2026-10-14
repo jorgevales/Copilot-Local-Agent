@@ -1,5 +1,13 @@
 # Copilot Local Agent
 
+Public exploration now defaults to [Crawl4AI](https://github.com/unclecode/crawl4ai)
+through `discovery.manifest`: continuous bounded parallel expansion, up to 1,000
+pages, and reuse of saved unexplored routes. Update dependencies with `Setup.cmd`.
+Read all saved routes through paginated `discovery.knowledge_lookup` in the shared
+S:/UNC store. See [operation](docs/DISCOVERY_NAVIGATION.md) and the
+[deep manifest example](docs/examples/deep-discovery.json). Existing approvals,
+public-address checks and cancellation remain active.
+
 A Windows/VDI repository with continuous conversation, Microsoft 365 Copilot web UI reasoning, strictly validated responses, controlled tools, explicit code approval, retained session state and Useful Findings. The original CDD workflow is preserved. No reasoning API is used.
 
 Actionable failures create separate internal and sanitized reports with an explicit review step before external sharing. See [diagnostics and report handling](docs/DIAGNOSTICS.md).

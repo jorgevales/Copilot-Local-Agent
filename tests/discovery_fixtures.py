@@ -60,6 +60,7 @@ def workspace():
     with tempfile.TemporaryDirectory(prefix='copilot-discovery-') as temporary:
         root = Path(temporary)
         config = dict(root=root / 'source', storage_dir=root / 'onedrive', manifest_path=True,
+                      discovery_extractor='structure',
                       persistent_graph=True, bounded_parallelism=False, local_recovery=False,
                       knowledge_write=True, knowledge_reuse=True, targeted_repair=False, max_output_chars=12000)
         owned = SimpleNamespace()

@@ -176,7 +176,8 @@ def format_valid(value, name):
 
 def validate_contract(value, kind, request_id=None):
     bounded_shape(value)
-    if len(canonical(value).encode('utf-8')) > MAX_INPUT_BYTES:
+    ceiling = 8 * 1024 * 1024 if kind in {'discovery_result', 'website_knowledge'} else MAX_INPUT_BYTES
+    if len(canonical(value).encode('utf-8')) > ceiling:
         raise DiscoveryError('input_limit')
     from .protocol import validate_schema
     errors = validate_schema(value, _schema(kind))
@@ -195,10 +196,10 @@ def validate_budgets(b):
         raise DiscoveryError('budget_nesting', '$.budgets')
     if b['run_seconds'] < 3:
         raise DiscoveryError('finalisation_reserve', '$.budgets.run_seconds', 'At least three seconds are required including local finalisation')
-    if b['pages'] > 100 or b['tasks'] > 200 or b['requests'] > 500 or b['bytes'] > 20 * 1024 * 1024:
-        raise DiscoveryError('local_ceiling', '$.budgets', 'Testing v1 caps are 100 pages, 200 tasks, 500 requests and 20 MiB')
-    if b['concurrency'] > 4 or b['per_origin_concurrency'] > 2 or b['attempts'] > 3:
-        raise DiscoveryError('local_ceiling', '$.budgets', 'Testing v1 permits at most four workers, two per origin and three attempts')
+    if b['pages'] > 1000 or b['tasks'] > 5000 or b['requests'] > 5000 or b['bytes'] > 512 * 1024 * 1024:
+        raise DiscoveryError('local_ceiling', '$.budgets', 'Deep exploration caps are 1000 pages, 5000 tasks/requests and 512 MiB')
+    if b['concurrency'] > 8 or b['per_origin_concurrency'] > 4 or b['attempts'] > 3:
+        raise DiscoveryError('local_ceiling', '$.budgets', 'Deep exploration permits at most eight reads, four per origin and three attempts')
     if b['browser_contexts'] or b['browser_restarts'] or b['replans']:
         raise DiscoveryError('capability_unavailable', '$.budgets', 'Browser/authentication and autonomous replanning are unavailable in this adapter')
 

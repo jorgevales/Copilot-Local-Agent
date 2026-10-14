@@ -170,7 +170,7 @@
         "additionalProperties": false
       },
       "minItems": 1,
-      "maxItems": 100
+      "maxItems": 1000
     },
     "actions": {
       "type": "array",
@@ -669,7 +669,7 @@
         "additionalProperties": false
       },
       "minItems": 1,
-      "maxItems": 1000
+      "maxItems": 6000
     },
     "first_seen": {
       "type": "string",

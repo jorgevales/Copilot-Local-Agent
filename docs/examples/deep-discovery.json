@@ -1,0 +1,215 @@
+{
+  "version": "1.0",
+  "kind": "discovery_manifest",
+  "request_id": "dREPLACE_CURRENT_REQUEST_ID",
+  "objective": "Deep public navigation exploration using Crawl4AI",
+  "seed_urls": [
+    "https://example.com/"
+  ],
+  "scope": {
+    "origins": [
+      "https://example.com"
+    ],
+    "allow_paths": [
+      "/"
+    ],
+    "exclude_paths": [],
+    "query_keys": [],
+    "max_query_variants": 3,
+    "allow_private_network": false,
+    "redirect_limit": 3
+  },
+  "authentication": {
+    "mode": "public",
+    "context_ref": null
+  },
+  "permitted_workers": [
+    "bootstrap",
+    "http",
+    "structure",
+    "validate",
+    "aggregate"
+  ],
+  "budgets": {
+    "run_seconds": 1800,
+    "task_seconds": 1500,
+    "branch_seconds": 1500,
+    "pages": 1000,
+    "tasks": 5000,
+    "requests": 5000,
+    "bytes": 536870912,
+    "concurrency": 8,
+    "per_origin_concurrency": 4,
+    "attempts": 3,
+    "depth": 10,
+    "browser_contexts": 0,
+    "per_origin_rps": 2,
+    "backoff_seconds": 120,
+    "browser_restarts": 0,
+    "replans": 0,
+    "output_repairs": 0
+  },
+  "tasks": [
+    {
+      "id": "bootstrap",
+      "worker": "bootstrap",
+      "operation": "bootstrap",
+      "branch": "bootstrap",
+      "depends_on": [],
+      "inputs": {
+        "urls": [],
+        "evidence_from": [],
+        "route_ids": []
+      },
+      "output_type": "scope_evidence",
+      "priority": 90,
+      "critical": true,
+      "timeout_seconds": 30,
+      "max_attempts": 3,
+      "recovery_policy": "read_only_v1",
+      "auth_requirement": "public",
+      "approval_requirement": "existing_read_approval",
+      "expand_urls": false
+    },
+    {
+      "id": "pages",
+      "worker": "http",
+      "operation": "fetch",
+      "branch": "pages",
+      "depends_on": [
+        {
+          "task_id": "bootstrap",
+          "accept": "usable"
+        }
+      ],
+      "inputs": {
+        "urls": [
+          "https://example.com/"
+        ],
+        "evidence_from": [
+          "bootstrap"
+        ],
+        "route_ids": []
+      },
+      "output_type": "page_evidence",
+      "priority": 90,
+      "critical": false,
+      "timeout_seconds": 30,
+      "max_attempts": 3,
+      "recovery_policy": "read_only_v1",
+      "auth_requirement": "public",
+      "approval_requirement": "existing_read_approval",
+      "expand_urls": true
+    },
+    {
+      "id": "structure",
+      "worker": "structure",
+      "operation": "map_structure",
+      "branch": "structure",
+      "depends_on": [
+        {
+          "task_id": "pages",
+          "accept": "usable"
+        }
+      ],
+      "inputs": {
+        "urls": [],
+        "evidence_from": [
+          "pages"
+        ],
+        "route_ids": []
+      },
+      "output_type": "structure_evidence",
+      "priority": 90,
+      "critical": false,
+      "timeout_seconds": 30,
+      "max_attempts": 3,
+      "recovery_policy": "read_only_v1",
+      "auth_requirement": "public",
+      "approval_requirement": "none",
+      "expand_urls": false
+    },
+    {
+      "id": "validate",
+      "worker": "validate",
+      "operation": "validate_evidence",
+      "branch": "validate",
+      "depends_on": [
+        {
+          "task_id": "structure",
+          "accept": "usable"
+        }
+      ],
+      "inputs": {
+        "urls": [],
+        "evidence_from": [
+          "structure",
+          "pages"
+        ],
+        "route_ids": []
+      },
+      "output_type": "validated_evidence",
+      "priority": 90,
+      "critical": false,
+      "timeout_seconds": 30,
+      "max_attempts": 3,
+      "recovery_policy": "read_only_v1",
+      "auth_requirement": "public",
+      "approval_requirement": "none",
+      "expand_urls": false
+    },
+    {
+      "id": "aggregate",
+      "worker": "aggregate",
+      "operation": "aggregate_evidence",
+      "branch": "aggregate",
+      "depends_on": [
+        {
+          "task_id": "validate",
+          "accept": "terminal"
+        }
+      ],
+      "inputs": {
+        "urls": [],
+        "evidence_from": [
+          "validate"
+        ],
+        "route_ids": []
+      },
+      "output_type": "result",
+      "priority": 90,
+      "critical": false,
+      "timeout_seconds": 30,
+      "max_attempts": 3,
+      "recovery_policy": "read_only_v1",
+      "auth_requirement": "public",
+      "approval_requirement": "none",
+      "expand_urls": false
+    }
+  ],
+  "evidence_requirements": {
+    "required_types": [
+      "scope",
+      "page",
+      "structure",
+      "boundary"
+    ],
+    "freshness_seconds": 3600,
+    "minimum_confidence": 0.8,
+    "retain_screenshots": false
+  },
+  "stop": {
+    "plateau_window_pages": 10,
+    "plateau_windows": 3,
+    "minimum_gain": 0.01,
+    "duplicate_ratio": 0.9,
+    "required_high_priority_coverage": 0.95
+  },
+  "replanning_triggers": [],
+  "redaction_profile": "strict_v1",
+  "final_requirements": {
+    "max_model_bytes": 10000,
+    "include_gaps": true,
+    "include_evidence_refs": true
+  }
+}

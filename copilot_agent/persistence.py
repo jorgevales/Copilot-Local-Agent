@@ -7,7 +7,8 @@ import time
 import uuid
 
 
-def write_preserving(path: Path, text: str) -> None:
+def io_path(path: Path) -> Path:
+    """Use extended Windows I/O spelling only after logical path validation."""
     path = Path(path)
     # Approval hashes and the atomic-write suffix can push a redirected UNC
     # filename beyond legacy Windows limits even when its folder exists.
@@ -18,6 +19,11 @@ def write_preserving(path: Path, text: str) -> None:
             absolute = ('\\\\?\\UNC\\' + absolute[2:] if absolute.startswith('\\\\')
                         else '\\\\?\\' + absolute)
         path = Path(absolute)
+    return path
+
+
+def write_preserving(path: Path, text: str) -> None:
+    path = io_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         history = path.parent / '.history' / path.name
