@@ -1036,6 +1036,83 @@ Production storage remains S:-anchored in VDI. This proof used only the explicit
 
 ---
 
+<!-- BEGIN VERBATIM SOURCE: docs/LOCAL_WEBSITE_DISCOVERY.md -->
+## Source: `docs/LOCAL_WEBSITE_DISCOVERY.md` (verbatim text; line endings normalized to LF)
+
+# Local website discovery and session package mode
+
+Start **Start Agent UI.cmd** (or **Start Agent.cmd**). At startup choose whether
+to review packages before running them or skip the optional quality review and
+run continuously. The immediate choice authorizes package downloads and runs,
+including package Python, for **this session only**. Closing or restarting the
+agent resets it. Basic ZIP safety, file identity, runnable manifest declarations,
+file access boundaries and output checks remain required. This is deliberately
+labelled “skip review”, not a promise to execute malformed or unsafe archives.
+
+The startup guide then offers local Crawl4AI discovery:
+
+1. Choose Yes and paste a website address.
+2. Give that website knowledge a title.
+3. In the Edge tab that opens, sign in yourself if needed, including MFA. Open the
+   starting page you want explored, then continue the guide.
+4. Choose one exploration or repeated refresh. Press Enter to stop a repeated
+   crawl. Completed pages and unfinished routes remain saved.
+5. Add another website, or finish the guide to start the agent conversation.
+
+The guide uses the installed Crawl4AI `AsyncWebCrawler` with a custom navigation
+strategy backed by the **already connected Edge context**. It shares the site's
+existing sign-in, opens its own tabs and closes only those tabs. It never launches
+a second crawler browser, copies cookies to files or automates sign-in. The
+normal public static `discovery.manifest` path remains available separately.
+
+Each collection lives in the authoritative **Discoveries knowledge/websites**
+folder, with the chosen title and a stable identifier. `index.json` records URLs,
+page file paths, depth, hashes, remaining routes, capture errors and status. Page
+JSON files contain rendered HTML, markdown, links and metadata. Saved HTML
+omits scripts, hidden inputs, field values and credential-named attributes;
+obvious sign-out or destructive navigation links are excluded. These filters
+are not a guarantee that all sensitive content has been removed. Saves are
+incremental atomic writes with retained history and extended Windows I/O paths;
+the existing S: mapping, provider/UNC resolution and shared-storage rules apply.
+There is no local knowledge-storage fallback. An inaccessible share is an error.
+
+The agent receives collection titles and index paths in its startup contract.
+It can call `crawl4ai.read` on indexes and page files as needed, following
+`next_offset` to read every window without gaps. It can request more discovery
+through `crawl4ai.crawl`; the orchestrator supplies the connected browser,
+knowledge destination, session directory and Stop event. In immediate mode,
+startup session authorization also covers subsequent crawler requests. In normal
+mode the crawler asks for local authorization.
+
+The crawl tool accepts multiple starting `urls`, a `title`, `concurrency`,
+`max_pages`, `max_depth`, `cycles`, `refresh_seconds`,
+`page_timeout_seconds`, and `follow_external`. Defaults are four concurrent
+pages, unlimited pages/depth, one cycle, a 30-second refresh interval and a
+60-second page timeout. Zero page/depth budgets mean unlimited; zero cycles
+means keep refreshing until Stop. There is no global domain allowlist or public-IP
+restriction, so internal websites can be explored. Links stay within the starting
+origins unless `follow_external` is explicitly selected. Failed pages, challenges,
+expired sign-ins and disconnected browsers remain gaps, never completion proof.
+
+This discovers rendered pages and reachable links. It cannot promise every
+hidden route, account, interaction or downloadable document on a website.
+It does not submit forms or fill passwords. Authentication remains manual.
+
+Crawl4AI runs locally, with its page cache disabled and no cloud crawler or LLM
+extraction configured. Website content is saved on the shared store; access follows
+the company's folder permissions. The agent receives file paths initially. Content
+the agent later reads is returned to **Microsoft Copilot**, so “local crawling” does
+not mean the entire agent workflow is local-only. Use only websites/content you
+are authorized to collect and use with the organization's Copilot environment.
+
+For supplied terminal settings, `--yes-setup` keeps the reviewed default and skips
+the guide. `--package-mode immediate` explicitly selects the session fast mode;
+`--discover-first` shows the guide even with `--yes-setup`.
+<!-- END SOURCE: docs/LOCAL_WEBSITE_DISCOVERY.md -->
+
+
+---
+
 <!-- BEGIN VERBATIM SOURCE: docs/REUSE_MAPPING.md -->
 ## Source: `docs/REUSE_MAPPING.md` (verbatim text; line endings normalized to LF)
 
@@ -1084,6 +1161,59 @@ Offline tests exercise stale-response exclusion, correlation ordering, disabled 
 
 Current response transport (2026-10-08): Copilot is instructed to emit plain chat-text JSON between the marker lines. Current-turn DOM text is captured without Copy code; finished malformed text is passed to protocol correction after a few stable samples. Historical fenced-code observations above document earlier behavior only.
 <!-- END SOURCE: docs/REUSE_MAPPING.md -->
+
+
+---
+
+<!-- BEGIN VERBATIM SOURCE: docs/SESSION_CRAWLER_VALIDATION.md -->
+## Source: `docs/SESSION_CRAWLER_VALIDATION.md` (verbatim text; line endings normalized to LF)
+
+# Session package mode and local crawler validation — 14 October 2026
+
+Windows Python 3.14.2, pinned Crawl4AI 0.9.5 and Playwright 1.55.0.
+
+203 focused tests passed in the final combined run: ZIP delivery, orchestrator,
+automation packages, approval lifetime, startup flow, protocol/state and the new
+local crawler. The separate nine-test existing Crawl4AI discovery/mapping suite
+also passed. This is 212 distinct tests; the full repository suite was not run.
+
+The reproduced delivery failures now have regression tests: an inspection that
+omits the optional expected hash, reused review receipts, and identical ZIPs
+downloaded to a different path. Each completes without another link request.
+Changed files, contradictory hashes, mismatched names and Office archives still
+fail the delivery gate. The old automatic-run fixture was corrected to actually
+create the output its manifest promises, using the runner-provided outputs root.
+
+Immediate mode executed a real package Python stage and produced its promised
+output. The optional quality reviewer was patched to fail if called, and the
+approval callback would deny any prompt; the package still ran successfully.
+Separate tests verify that session authority expires on close and does not
+authorize unrelated path-grant tools. Normal reviewed execution remains covered.
+
+Crawler tests call the actual installed AsyncWebCrawler processing pipeline,
+save titled HTML/markdown/links/metadata, read escaped content without pagination
+gaps, resume the pending frontier, refresh across cycles, and reject login-page
+content. A Stop cancels an in-flight page promptly and preserves remaining routes.
+Long local knowledge/runtime paths over 260 characters passed save/readback.
+
+A real Edge/Playwright test used intercepted synthetic HTTPS pages with a seeded
+synthetic session cookie. Both signed-in fixture pages were captured; the existing
+chat tab remained open and unchanged, and the context retained its session cookie.
+The browser was headless only for this isolated test; production uses the connected
+visible Edge session. No real customer site, account, sign-in or Copilot service
+was exercised. A local orchestrator integration issued crawl4ai.crawl through the
+normal tool envelope and received saved knowledge paths. The startup guide is
+tested for manual-login readiness, titles, multiple sites and continuous Stop.
+
+No live company VDI, S: share or redirected UNC deployment was available for this
+proof. Their existing resolver/storage contracts remain active. Verify the actual
+company website sign-in and shared-store readback after deployment. A crawl only
+proves the rendered reachable pages it observed, not complete website coverage.
+
+The handoff documentation, current AST index and source hashes were refreshed;
+the existing Graphify graph is retained as an older graph snapshot rather than
+reported as a new runtime or graph-analysis proof.
+<!-- END SOURCE: docs/SESSION_CRAWLER_VALIDATION.md -->
 
 
 ---
@@ -1503,6 +1633,14 @@ Browser downloads and semantic locator handling follow the existing pinned Playw
 ## Source: `README.md` (verbatim text; line endings normalized to LF)
 
 # Copilot Local Agent
+
+Startup now offers **review packages** or **skip quality review and run
+continuously for this session**, followed by a plain-language local Crawl4AI
+website guide. Sign in manually, title each website's knowledge, explore once
+or keep refreshing, then pass saved shared-storage paths to the agent. See the
+[local discovery guide](docs/LOCAL_WEBSITE_DISCOVERY.md). Crawl4AI is also directly
+callable through `crawl4ai.crawl` and `crawl4ai.read`, using the connected Edge
+session for public or internal websites without fixed page/depth ceilings.
 
 Public exploration now defaults to [Crawl4AI](https://github.com/unclecode/crawl4ai)
 through `discovery.manifest`: continuous bounded parallel expansion, up to 1,000

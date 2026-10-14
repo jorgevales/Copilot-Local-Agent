@@ -1,5 +1,13 @@
 # Copilot Local Agent
 
+Startup now offers **review packages** or **skip quality review and run
+continuously for this session**, followed by a plain-language local Crawl4AI
+website guide. Sign in manually, title each website's knowledge, explore once
+or keep refreshing, then pass saved shared-storage paths to the agent. See the
+[local discovery guide](docs/LOCAL_WEBSITE_DISCOVERY.md). Crawl4AI is also directly
+callable through `crawl4ai.crawl` and `crawl4ai.read`, using the connected Edge
+session for public or internal websites without fixed page/depth ceilings.
+
 Public exploration now defaults to [Crawl4AI](https://github.com/unclecode/crawl4ai)
 through `discovery.manifest`: continuous bounded parallel expansion, up to 1,000
 pages, and reuse of saved unexplored routes. Update dependencies with `Setup.cmd`.

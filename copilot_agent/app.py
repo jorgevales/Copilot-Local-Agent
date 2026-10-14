@@ -559,10 +559,14 @@ async def run(args):
            else 'Agent-owned writes are restricted to the isolated proof workspace.' if getattr(config, '_automation_test_mode', False)
            else 'Agent-owned writes are restricted to the S: share; no C: or OneDrive storage fallback is permitted.')
     system('Third-party browser domains: ' + ', '.join(config.allowed_domains))
-    system('No files will be deleted. Generated-code execution always requires approval.')
+    system('Package code follows your session choice below. Other generated-code execution requires approval.')
     system('Useful Findings are saved on any valid turn; their file is attached every ten messages.')
     system('File delivery: actual Copilot UI downloads and verified ZIP extraction; no Created-folder monitoring.')
     isolated_proof = getattr(config, '_automation_test_mode', False)
+    from .session_setup import choose_package_mode, guided_discovery
+    await choose_package_mode(config, ask, system,
+        supplied=getattr(args, 'package_mode', None) or
+                 ('reviewed' if isolated_proof or args.yes_setup and _UI_ASK is None else None))
     confirmed = False if isolated_proof else bool(args.yes_setup) or (await ask('Allow local navigation and verified knowledge saving for this run [Y/n]? ')).strip().lower() in {'', 'y', 'yes'}
     config._local_navigation_confirmed = confirmed
     state.data['visible'] = True
@@ -606,6 +610,9 @@ async def run(args):
             persist_runtime_settings(config, settings)
             browser = BrowserAdapter(config)
             await browser.start(resume_request_id=resume_request_id)
+        if not isolated_proof and (not args.yes_setup or _UI_ASK is not None or getattr(args, 'discover_first', False)):
+            config._guided_knowledge_paths = await guided_discovery(
+                config, browser, state.directory, ask, system, _UI_CANCEL_EVENT)
         if _UI_ASK is None:
             from .terminal_input import TerminalInputBroker
             terminal_input = TerminalInputBroker()
@@ -852,6 +859,10 @@ def main():
     parser.add_argument('--model', help='Exact currently displayed UI label')
     parser.add_argument('--yes-setup', action='store_true', help='Accept supplied browser settings; does not approve tools or scripts')
     parser.add_argument('--setup-only', action='store_true', help='Verify configured per-user storage and Edge without opening Copilot')
+    parser.add_argument('--package-mode', choices=['reviewed', 'immediate'],
+                        help='Session-only package review choice; immediate authorizes continuous downloads and package runs')
+    parser.add_argument('--discover-first', action='store_true',
+                        help='Show the guided local Crawl4AI website discovery even with --yes-setup')
     parser.add_argument('--isolated-test-workspace', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--local-knowledge-test-directory', type=Path,
                         help='Explicitly use an empty C: LocalAppData directory for a live navigation-knowledge test; normal production storage remains S:-only.')

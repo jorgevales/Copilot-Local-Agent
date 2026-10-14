@@ -28,6 +28,33 @@ class RecordingFeedback(QuietFeedback):
 
 
 class AutomationApprovalTests(unittest.TestCase):
+    def test_immediate_startup_grant_covers_code_packages_but_expires_on_close(self):
+        async def run():
+            with tempfile.TemporaryDirectory() as temp:
+                state = SessionState(temp)
+                calls = []
+                manager = ApprovalManager(state, lambda preview: calls.append(preview) or 'deny', QuietFeedback())
+                manager.fast_package_session = True
+                call = {'call_id': 'fast-code', 'name': 'automation.run', 'arguments': {}}
+                plan = {'tool_requests': [call]}
+                prepared = {'approval_scope_type': 'automation_package', 'requires_fresh_run_confirmation': True}
+                self.assertTrue((await manager.request(plan, call, prepared))[0])
+                self.assertEqual([], calls)
+                manager.revoke_session_grants()
+                self.assertFalse((await manager.request(plan, call, prepared))[0])
+                self.assertEqual(1, len(calls))
+                self.assertFalse(ApprovalManager(state, feedback=QuietFeedback()).fast_package_session)
+        asyncio.run(run())
+
+    def test_immediate_startup_does_not_authorize_unrelated_tools(self):
+        async def run():
+            with tempfile.TemporaryDirectory() as temp:
+                manager = ApprovalManager(SessionState(temp), lambda _: 'deny', QuietFeedback())
+                manager.fast_package_session = True
+                call = {'call_id': 'outside', 'name': 'files.grant_path', 'arguments': {}}
+                self.assertFalse((await manager.request({'tool_requests': [call]}, call))[0])
+        asyncio.run(run())
+
     def test_all_numeric_package_choices_match_the_displayed_terminal_options(self):
         async def run():
             for fresh in (False, True):

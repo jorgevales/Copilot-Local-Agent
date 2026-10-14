@@ -16,9 +16,17 @@ from tests.test_protocol_state import make_fixture
 
 class DeliveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_automatically_inspected_unnamed_automation_zip_satisfies_zip_delivery(self):
+        await self._automatic_package_delivery()
+
+    async def test_immediate_session_downloads_and_runs_without_quality_review_or_prompts(self):
+        with patch('copilot_agent.automation_packages._preflight_package_review',
+                   side_effect=AssertionError('Quality reviewer must not run in immediate mode')):
+            await self._automatic_package_delivery(immediate=True)
+
+    async def _automatic_package_delivery(self, immediate=False):
         from copilot_agent.tools import ToolRegistry
         from copilot_agent.delivery import delivery_requirements
-        from tests.test_automation_packages import package_bytes
+        from tests.test_automation_packages import write_python_package
 
         prompt = ('Create and deliver a NEW executable automation ZIP that performs a fresh multi-tab '
                   'GOV.UK navigation proof and stores the navigation knowledge.')
@@ -30,8 +38,10 @@ class DeliveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         root, config, state, _ = make_fixture('delivery-inspected-package-')
         config.max_delivery_retries = 1
         config.automation_package_score = 1
+        config._continuous_package_session = immediate
+        config._package_review_enabled = not immediate
         archive = root / 'workspace' / 'govuk-package.zip'
-        archive.write_bytes(package_bytes())
+        write_python_package(archive, "from pathlib import Path\nimport sys\nPath(sys.argv[-1]).joinpath('result.txt').write_text('verified', encoding='utf-8')\n")
 
         def download_request(message):
             return tool_response(message, call_id='download-package', name='copilot.download',
@@ -40,8 +50,12 @@ class DeliveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         browser = MockBrowser([final_response, download_request, *([final_response] * 4)])
         registry = ToolRegistry()
+        approvals = []
+        def decide(preview):
+            approvals.append(preview)
+            return 'deny' if immediate else 'once'
         agent = Orchestrator(config, browser, registry, state,
-                             approval_decider=lambda preview: 'once', display=lambda text: None)
+                             approval_decider=decide, display=lambda text: None)
 
         class DownloadStub:
             async def prepare(self, arguments, request_id):
@@ -63,17 +77,19 @@ class DeliveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
             result = await agent.turn(prompt)
 
         self.assertEqual('complete', result['completion_status'])
+        if immediate:
+            self.assertEqual([], approvals)
         self.assertNotIn('delivery_retry', [entry['message']['kind'] for entry in browser.sent])
         inspections = [record for record in state.data['calls'].values()
                        if record.get('request', {}).get('name') == 'automation.inspect']
         self.assertEqual(1, len(inspections))
-        self.assertEqual('validated', inspections[0]['result']['result']['status'])
+        self.assertEqual('ready_unreviewed' if immediate else 'validated', inspections[0]['result']['result']['status'])
         inspection_id = next(call_id for call_id, record in state.data['calls'].items()
                              if record is inspections[0])
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
         download_report = {'tool': 'copilot.download', 'status': 'downloaded',
                            'path': str(archive), 'sha256': digest}
-        receipt = {'tool': 'automation.inspect', 'status': 'verified', 'review_status': 'passed',
+        receipt = {'tool': 'automation.inspect', 'status': 'verified', 'review_status': 'skipped' if immediate else 'passed',
                    'path': str(archive), 'sha256': digest, 'inspection_call_id': inspection_id}
         self.assertTrue(agent._delivery_verified(requirement, [download_report, receipt]))
         self.assertFalse(agent._delivery_verified(
@@ -86,7 +102,34 @@ class DeliveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
             {'mode': 'zip', 'reason': requirement['reason'], 'expected_names': ['different.zip']},
             [download_report, receipt]))
 
+        recorded_args = state.data['calls'][inspection_id]['request']['arguments']
+        original_hash = recorded_args.get('expected_sha256')
+        recorded_args['expected_sha256'] = '0' * 64
+        self.assertFalse(agent._delivery_verified(requirement, [download_report, receipt]))
+        if original_hash is None:
+            recorded_args.pop('expected_sha256')
+        else:
+            recorded_args['expected_sha256'] = original_hash
+        with archive.open('ab') as stream:
+            stream.write(b'changed after verification')
+        self.assertFalse(agent._delivery_verified(requirement, [download_report, receipt]))
+
     async def test_explicit_inspection_satisfies_delivery_without_a_new_link(self):
+        await self._explicit_inspection_delivery()
+
+    async def test_explicit_inspection_without_optional_hash_finishes_delivery(self):
+        await self._explicit_inspection_delivery(include_expected_hash=False)
+
+    async def test_reused_explicit_review_updates_delivery_evidence(self):
+        await self._explicit_inspection_delivery(reuse_review=True)
+
+    async def test_reused_review_without_optional_hash_finishes_delivery(self):
+        await self._explicit_inspection_delivery(include_expected_hash=False, reuse_review=True)
+
+    async def test_reused_review_binds_current_download_copy(self):
+        await self._explicit_inspection_delivery(reuse_review=True, review_copy=True)
+
+    async def _explicit_inspection_delivery(self, include_expected_hash=True, reuse_review=False, review_copy=False):
         from copilot_agent.tools import ToolRegistry
         from copilot_agent.delivery import delivery_requirements
         from tests.test_automation_packages import package_bytes
@@ -110,9 +153,11 @@ class DeliveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
                                             'link_text': 'Download ' + archive.name})
 
         def inspect_request(message):
+            arguments = {'path': str(archive)}
+            if include_expected_hash:
+                arguments['expected_sha256'] = hashlib.sha256(archive.read_bytes()).hexdigest()
             return tool_response(message, call_id='inspect-package', name='automation.inspect',
-                                 arguments={'path': str(archive),
-                                            'expected_sha256': hashlib.sha256(archive.read_bytes()).hexdigest()})
+                                 arguments=arguments)
 
         browser = MockBrowser([final_response, download_request, inspect_request, *([final_response] * 4)])
         registry = ToolRegistry()
@@ -125,6 +170,17 @@ class DeliveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         agent.download_service = DownloadStub()
         original_execute = registry.execute
+
+        if reuse_review:
+            prior_archive = archive
+            if review_copy:
+                prior_archive = archive.with_name('prior-package.zip')
+                prior_archive.write_bytes(archive.read_bytes())
+            prior = {'call_id': 'prior-package-inspection', 'name': 'automation.inspect', 'version': '1.0',
+                     'arguments': {'path': str(prior_archive),
+                                   'expected_sha256': hashlib.sha256(archive.read_bytes()).hexdigest()}}
+            state.begin_call(prior, state_changing=False)
+            state.finish_call(prior['call_id'], await original_execute('automation.inspect', prior['arguments'], agent.base_context))
 
         async def execute(name, arguments, context):
             if name == 'copilot.download':
@@ -142,10 +198,9 @@ class DeliveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('delivery_retry', [entry['message']['kind'] for entry in browser.sent])
         inspections = [record for record in state.data['calls'].values()
                        if record.get('request', {}).get('name') == 'automation.inspect']
-        self.assertEqual(1, len(inspections))
+        self.assertEqual(2 if reuse_review else 1, len(inspections))
         self.assertEqual('validated', inspections[0]['result']['result']['status'])
-        inspection_id = next(call_id for call_id, record in state.data['calls'].items()
-                             if record is inspections[0])
+        inspection_id = 'inspect-package'
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
         download_report = {'tool': 'copilot.download', 'status': 'downloaded',
                            'path': str(archive), 'sha256': digest}

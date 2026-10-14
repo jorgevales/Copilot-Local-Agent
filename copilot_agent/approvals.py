@@ -18,10 +18,12 @@ class ApprovalManager:
         # (one local agent session). It is never written to SessionState, so a
         # resumed conversation or new agent process must obtain fresh consent.
         self._package_session_grant = False
+        self.fast_package_session = False
 
     def revoke_session_grants(self):
         """Drop ephemeral package authority when the owning agent session ends."""
         self._package_session_grant = False
+        self.fast_package_session = False
 
     def _show(self, preview, path):
         prepared = list((preview.get('prepared_pending_plan') or {}).values())
@@ -165,6 +167,9 @@ class ApprovalManager:
         grant = self.state.data['approvals'].get(plan_hash)
         package_scope = bool((prepared or {}).get('approval_scope_type') == 'automation_package')
         package_fresh = package_scope and bool((prepared or {}).get('requires_fresh_run_confirmation'))
+        if self.fast_package_session and (package_scope or call.get('name') in {'copilot.download', 'crawl4ai.crawl'}):
+            self.state.event('startup_session_authorization_used', tool=call['name'], plan_hash=plan_hash)
+            return True, plan_hash
         if package_scope and not package_fresh and self._package_session_grant:
             return True, plan_hash
         if grant and grant.get('decision') == 'plan' and package_scope:

@@ -48,6 +48,7 @@ class Orchestrator:
         self._active_turn_run_id = None
         self.feedback = Feedback(display, state)
         self.approvals = ApprovalManager(state, approval_decider, self.feedback)
+        self.approvals.fast_package_session = bool(getattr(config, '_continuous_package_session', False))
         self.process_registry = ManagedProcessRegistry(state.directory)
         self.live_seen = {}
         self.navigation_domains = set()  # Fresh local browser approval only; never inherited on restart.
@@ -509,14 +510,28 @@ class Orchestrator:
             return {**candidate, 'route': 'package', 'recovered_package_workflow': True}
         return prior if isinstance(prior, dict) else candidate
 
-    @staticmethod
-    def _review_passed(result):
+    def _review_passed(self, result):
         if not isinstance(result, dict) or result.get('ok') is not True:
             return False
         payload = result.get('result', {})
         review = payload.get('review', {}) if isinstance(payload, dict) else {}
-        return (payload.get('status') in {'validated', 'passed'}
-                and isinstance(review, dict) and review.get('status') == 'passed')
+        if not isinstance(review, dict):
+            return False
+        return ((payload.get('status') in {'validated', 'passed'} and review.get('status') == 'passed')
+                or (getattr(self.config, '_package_review_enabled', True) is False
+                    and payload.get('status') == 'ready_unreviewed' and review.get('status') == 'skipped'))
+
+    def _record_package_delivery(self, reports, inspection_call_id, outcome):
+        """Keep fresh and reused inspections on the same delivery-state path."""
+        if not self._review_passed(outcome):
+            return
+        inspected = outcome['result']
+        reports.append({
+            'tool': 'automation.inspect', 'status': 'verified',
+            'review_status': inspected.get('review', {}).get('status'),
+            'path': inspected.get('archive'), 'sha256': inspected.get('archive_sha256'),
+            'inspection_call_id': inspection_call_id,
+        })
 
     def _prior_package_review(self, archive_sha256):
         """Find a complete local review for these exact immutable ZIP bytes."""
@@ -533,6 +548,9 @@ class Orchestrator:
             observed = (review.get('archive_sha256') if isinstance(review, dict) else None) or (
                 payload.get('archive_sha256') if isinstance(payload, dict) else None)
             if observed == archive_sha256:
+                skipped = isinstance(review, dict) and review.get('status') == 'skipped'
+                if skipped != (getattr(self.config, '_package_review_enabled', True) is False):
+                    continue  # A startup choice cannot inherit authority from another mode.
                 return deepcopy(result)
         return None
 
@@ -566,10 +584,11 @@ class Orchestrator:
                           'error': {'code': 'package_review_failed',
                                     'message': 'The ZIP changed after the run request was prepared.'}}
             else:
-                self.feedback.section('Orchestrator', 'AUTOMATIC ZIP REVIEW', [
-                    ('Status', 'Restoring the exact ZIP review with a fresh local check'),
+                immediate = getattr(self.config, '_package_review_enabled', True) is False
+                self.feedback.section('Orchestrator', 'PACKAGE LOAD' if immediate else 'AUTOMATIC ZIP REVIEW', [
+                    ('Status', 'Quality review skipped for this session' if immediate else 'Restoring the exact ZIP review with a fresh local check'),
                     ('File', archive.name), ('SHA-256', actual),
-                    ('Local execution', 'Not started; the run still requires its separate approval')])
+                    ('Local execution', 'Session startup authorization is active' if immediate else 'Not started; the run still requires its separate approval')])
                 self.state.begin_call(review_call, state_changing=False)
                 definition = self.registry.definition('automation.inspect')
                 review_context = dict(context, source_request_id=context.get('source_request_id'))
@@ -646,7 +665,10 @@ class Orchestrator:
         calls.append(call)
         self.state.event('package_run_queued', call_id=call['call_id'], archive_sha256=digest,
                          origin='orchestrator')
-        self.feedback.emit('Orchestrator', 'ZIP review passed. Continuing to local package approval and execution before returning results to Copilot.')
+        self.feedback.emit('Orchestrator',
+            'ZIP loaded without quality review. Starting the session-authorized package run.'
+            if reviewed.get('review', {}).get('status') == 'skipped' else
+            'ZIP review passed. Continuing to local package approval and execution before returning results to Copilot.')
 
     async def _inspect_downloaded_package(self, download_result, source_request_id):
         """Immediately inspect one verified Copilot ZIP and retain the local review result."""
@@ -672,6 +694,9 @@ class Orchestrator:
             previous = self._prior_package_review(digest)
             if previous is not None:
                 result = previous
+                # Review authority is bound to ZIP bytes; delivery provenance
+                # must describe this freshly verified local copy of those bytes.
+                result['result']['archive'] = str(path)
                 result['review_reused'] = True
                 self.state.begin_call(call, state_changing=False)
                 self.state.finish_call(call['call_id'], result)
@@ -679,10 +704,11 @@ class Orchestrator:
             else:
                 context = dict(self.base_context)
                 context['source_request_id'] = source_request_id
-                self.feedback.section('Orchestrator', 'AUTOMATIC ZIP REVIEW', [
-                    ('Status', 'Starting local read-only review'),
+                immediate = getattr(self.config, '_package_review_enabled', True) is False
+                self.feedback.section('Orchestrator', 'PACKAGE LOAD' if immediate else 'AUTOMATIC ZIP REVIEW', [
+                    ('Status', 'Quality review skipped for this session' if immediate else 'Starting local read-only review'),
                     ('File', path.name), ('SHA-256', digest),
-                    ('Local execution', 'Not started; package run approval remains separate')])
+                    ('Local execution', 'Session startup authorization is active' if immediate else 'Not started; package run approval remains separate')])
                 self.state.begin_call(call, state_changing=False)
                 definition = self.registry.definition('automation.inspect')
                 try:
@@ -1452,12 +1478,14 @@ class Orchestrator:
                     except (OSError, PolicyError, ValueError, KeyError):
                         cached_review = None
                     if cached_review is not None:
+                        cached_review['result']['archive'] = str(archive)
                         cached_review['review_reused'] = True
                         self.state.begin_call(call, state_changing=False)
                         self.state.finish_call(call['call_id'], cached_review)
                         self.feedback.emit('Orchestrator', 'This exact ZIP fingerprint already has a local review; returning the recorded checks without repeating them.')
                         self._emit_tool_result(call['name'], cached_review)
                         results.append({'call_id': call['call_id'], **cached_review})
+                        self._record_package_delivery(delivery_reports, call['call_id'], cached_review)
                         if not cached_review.get('ok'):
                             package_review_failure = {'call_id': call['call_id'], **cached_review}
                             break
@@ -1793,13 +1821,7 @@ class Orchestrator:
                     # Explicit inspection is the same local evidence as the
                     # automatic download handoff. The delivery gate rechecks
                     # its recorded call, exact archive path and current hash.
-                    inspected = result.get('result', {})
-                    delivery_reports.append({
-                        'tool': 'automation.inspect', 'status': 'verified', 'review_status': 'passed',
-                        'path': inspected.get('archive'),
-                        'sha256': inspected.get('archive_sha256'),
-                        'inspection_call_id': call['call_id'],
-                    })
+                    self._record_package_delivery(delivery_reports, call['call_id'], result)
                     if route.get('route') == 'package':
                         self._queue_reviewed_package_run(execution_calls, result)
                 if (result.get('ok') and call['name'] == 'copilot.download'
@@ -1823,11 +1845,7 @@ class Orchestrator:
                         if (self._review_passed(package_review) and isinstance(expected_digest, str)
                                 and len(expected_digest) == 64 and inspected_digest == expected_digest
                                 and inspected.get('archive_sha256') == expected_digest and same_path):
-                            delivery_reports.append({
-                                'tool': 'automation.inspect', 'status': 'verified', 'review_status': 'passed',
-                                'path': downloaded['path'], 'sha256': expected_digest,
-                                'inspection_call_id': package_review.get('call_id'),
-                            })
+                            self._record_package_delivery(delivery_reports, package_review.get('call_id'), package_review)
                             self._queue_reviewed_package_run(execution_calls, package_review)
                     else:
                         package_review_failure = package_review
@@ -2105,7 +2123,8 @@ class Orchestrator:
                 for receipt in reports:
                     if (receipt.get('tool') != 'automation.inspect'
                             or receipt.get('status') != 'verified'
-                            or receipt.get('review_status') != 'passed'):
+                            or receipt.get('review_status') not in (
+                                {'passed', 'skipped'} if getattr(self.config, '_package_review_enabled', True) is False else {'passed'})):
                         continue
                     inspection_id = receipt.get('inspection_call_id')
                     inspection = self.state.data.get('calls', {}).get(inspection_id, {})
@@ -2117,7 +2136,7 @@ class Orchestrator:
                     digest = receipt.get('sha256')
                     if (request_record.get('name') != 'automation.inspect'
                             or not self._review_passed(outcome)
-                            or arguments.get('expected_sha256') != digest
+                            or arguments.get('expected_sha256') not in (None, digest)
                             or review.get('archive_sha256') != digest
                             or inspected.get('archive_sha256') != digest):
                         continue

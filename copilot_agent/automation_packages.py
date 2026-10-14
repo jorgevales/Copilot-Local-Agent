@@ -734,7 +734,7 @@ def _parallel_read_tab_ids(wave, tool_results, binding_declarations, registry, c
 
 
 def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=None,
-                      *, limits=None, python_version=None) -> dict:
+                      *, limits=None, python_version=None, quality_review=True) -> dict:
     limits = {**DEFAULT_THRESHOLDS, **(limits or {})}
     top = {"schema_version", "package_id", "package_version", "task_id", "correlation_id", "description",
            "entrypoint", "files", "dependencies", "tools", "capabilities", "stages", "validation",
@@ -907,7 +907,8 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
             if script not in normalized_files or not script.endswith(".py"):
                 raise PackageError("Python stage script must be a declared .py payload")
             source = archive_files[script].decode("utf-8", errors="strict")
-            compile(source, script, "exec")
+            if quality_review:
+                compile(source, script, "exec")
             imports = stage.get("imports", [])
             if not set(imports) <= set(caps["imports"]):
                 raise PackageError("Stage imports exceed package capabilities")
@@ -1029,7 +1030,10 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
 
 
 def inspect_package(path: Path, expected_sha256: str | None = None, registry=None,
-                    *, limits=None, python_version=None) -> dict:
+                    *, limits=None, python_version=None, review_enabled=True) -> dict:
+    if not review_enabled:
+        return load_package_without_review(path, expected_sha256, registry,
+                                           limits=limits, python_version=python_version)
     path = Path(path)
     checks = []
     try:
@@ -1106,6 +1110,33 @@ def inspect_package(path: Path, expected_sha256: str | None = None, registry=Non
                         "script_sha256": normalized["files"].get(stage.get("script"))}
                        for stage in normalized["stages"]],
             "capabilities": normalized["capabilities"], "expected_outputs": normalized["expected_outputs"]}
+
+
+def load_package_without_review(path, expected_sha256=None, registry=None, *, limits=None, python_version=None):
+    """Parse the execution contract without the optional quality-review pass.
+
+    ZIP traversal/bomb protection, payload identity and runnable declarations
+    remain necessary for the runner. A skipped review is never reported passed.
+    """
+    inspected = inspect_zip(Path(path))
+    if expected_sha256 is not None and inspected['archive_sha256'] != expected_sha256:
+        raise PackageError('The ZIP changed since its download.')
+    with zipfile.ZipFile(path) as archive:
+        payloads = {item['path']: archive.read(item['path'])
+                    for item in inspected['entries'] if not item['directory']}
+    if 'manifest.json' not in payloads:
+        raise PackageError('This ZIP has no manifest.json execution instructions.')
+    manifest = json.loads(payloads['manifest.json'].decode('utf-8'))
+    normalized = validate_manifest(manifest, payloads, registry, limits=limits,
+                                   python_version=python_version, quality_review=False)
+    return {'status': 'ready_unreviewed', 'archive': str(path),
+            'archive_sha256': inspected['archive_sha256'], 'archive_bytes': inspected['archive_bytes'],
+            'manifest': normalized, 'manifest_sha256': normalized['manifest_sha256'],
+            'file_count': len(payloads), 'capabilities': normalized['capabilities'],
+            'expected_outputs': normalized['expected_outputs'],
+            'review': {'status': 'skipped', 'archive_sha256': inspected['archive_sha256'],
+                       'summary': 'Package quality review was skipped by the startup choice for this session.',
+                       'checks': [], 'failures': []}}
 
 
 def plan_patch(previous: dict, current: dict) -> dict:
@@ -1208,6 +1239,7 @@ def prepare_package_run(args: dict, context: dict, registry) -> dict:
     archive = policy.resolve(args["archive_path"], must_exist=True)
     workspace = _assert_workspace(Path(args["workspace"]).expanduser(), policy)
     inspection = inspect_package(archive, args["expected_sha256"], registry,
+                                 review_enabled=getattr(context.get('config'), '_package_review_enabled', True),
                                  limits={"max_runtime_seconds": getattr(context.get("config"), "automation_max_runtime_seconds", 1800),
                                          "max_stages": getattr(context.get("config"), "automation_max_stages", 100),
                                          "max_parallel_stages": getattr(context.get("config"), "automation_max_parallel_stages", 4),
