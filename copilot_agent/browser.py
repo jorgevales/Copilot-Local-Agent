@@ -747,7 +747,7 @@ class BrowserAdapter:
         return await self._evaluate(r"""() => [...document.querySelectorAll('[data-testid^="gptSubMenuModelTrigger-"],[data-test-id^="gptSubMenuModelTrigger-"]')]
           .filter(n=>{
             if (!(n.offsetWidth||n.offsetHeight||n.getClientRects().length)||n.getAttribute('aria-disabled')==='true'||n.disabled) return false;
-            return !n.querySelector('[data-testid^="checkmark-"],[data-test-id^="checkmark-"]');
+            return n.getAttribute('aria-haspopup')==='menu'||!n.querySelector('[data-testid^="checkmark-"],[data-test-id^="checkmark-"]');
           }).map(n=>({id:n.getAttribute('data-testid')||n.getAttribute('data-test-id'), label:(n.innerText||'').replace(/\s+/g,' ').trim()}))""")
 
     async def _open_provider(self, trigger, label=None):
