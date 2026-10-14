@@ -1,9 +1,22 @@
-# Copilot Local Agent project handoff
+# Copilot Local Agent full-discovery handoff
 
-This folder contains the project overview and the complete local Graphify output. Open `00_READ_FIRST.md` first.
+Read **all six attached files in the listed order before drawing conclusions or proposing changes**. The files form one self-contained project context package; no additional project attachment is required to understand its essential architecture, workflows, contracts, configuration, operations, or known limits.
 
-For a normal Copilot Chat handoff, attach the 12 numbered files in this folder and the 8 source/schema files listed in `09_EXTERNAL_FILES_TO_ATTACH.txt` (20 files total). `08_GRAPHIFY_FINDINGS.md` already summarizes the graph. Raw `graphify/` files are included in the repo for reference; do not attach them unless Copilot asks.
+## Reading order
 
-For a bug fix, send the internal report only to authorized company Copilot. Use its **FILES TO PROVIDE TO AUTHORIZED COPILOT** list. Replace lower-priority numbered context files or standard source attachments with the report and exact source/test files; never exceed 20 files. Review every source file before uploading.
+1. `README.md` — this guide and evidence boundary.
+2. `01_PROJECT_BRIEFING.md` — purpose, entry points, runtime flow, trust boundaries and assumptions.
+3. `02_CODE_AND_GRAPH_INDEX.md` — source modules, symbols, imports, interface summary and Graphify relationships.
+4. `03_PROJECT_DOCUMENTATION.md` — project documentation embedded with source paths.
+5. `04_GUIDANCE_AND_CONFIGURATION.md` — behavioral guidance and safety contracts embedded with source paths.
+6. `05_HANDOFF_MANIFEST.json` — attachment inventory, complete eligible-text source inventory, hashes, file sizes and content treatment.
 
-Never send an internal report to an external service. The sanitized report is for external review only after you have read and approved it.
+## Evidence labels
+
+- **Verbatim source text**: content copied from the named project documentation/guidance file; line endings normalized to LF.
+- **Generated source summary**: generated from current paths, Python AST symbols/imports, configuration/schema fields, or Graphify output. It is not a verbatim copy of implementation code.
+- **Graphify AST relationship**: a static source-derived relation; it is navigation evidence, not proof of runtime behavior.
+- **Inferred relationship**: a hypothesis; confirm it in implementation before relying on it.
+- **Live/unverified**: current Copilot UI, VDI, shared-drive, production and physical-desktop outcomes require target-environment evidence.
+
+The package was built from source revision `1b98bd2d41ba0019f6f823b2385b8bdc8a77d211` and includes 189 eligible text source files in the manifest. Project documentation and behavioral guidance are embedded verbatim; compact launchers, the example config and response schema are also embedded. Broader implementation code and the large tool catalogue are represented by structured summaries and source hashes. Binary files, local environments, runtime state, generated handoff output, and private machine/user state are excluded. Raw Graphify JSON and cache files are not attachments.

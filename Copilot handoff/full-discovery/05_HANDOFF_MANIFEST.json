@@ -1,0 +1,1650 @@
+{
+  "analysis_inputs": [
+    {
+      "bytes": 4946253,
+      "content_treatment": "generated local analysis input; selected relationships and metrics summarized in 02_CODE_AND_GRAPH_INDEX.md; raw graph omitted",
+      "path": "Graphify output/graph.json",
+      "sha256": "cc03f50eb9efb4a72a455b2641a0b479fdf65fbf97ae119f43cab91a8707ec07"
+    }
+  ],
+  "attachments": [
+    {
+      "bytes": 2267,
+      "content_category": "generated reading guide",
+      "content_treatment": "verbatim sections are source-bounded; generated analysis and summaries are explicitly labeled",
+      "exclusions_or_summarization": "See package-level exclusions and per-source treatment records.",
+      "filename": "README.md",
+      "optional": false,
+      "purpose": "Reading guide, scope, evidence labels and completeness boundary.",
+      "recommended_reading_order": 1,
+      "required": true,
+      "sha256": "7d616be2cc2894b1737480f48e50c7cb1e1948faf4b7a6f219d91df5391b8c48",
+      "source_files_represented": [
+        "README.md"
+      ]
+    },
+    {
+      "bytes": 5111,
+      "content_category": "generated architecture and execution summary",
+      "content_treatment": "verbatim sections are source-bounded; generated analysis and summaries are explicitly labeled",
+      "exclusions_or_summarization": "See package-level exclusions and per-source treatment records.",
+      "filename": "01_PROJECT_BRIEFING.md",
+      "optional": false,
+      "purpose": "Self-contained purpose, architecture, execution path, trust boundaries and operational assumptions.",
+      "recommended_reading_order": 2,
+      "required": true,
+      "sha256": "15620ca430776c7e732038e7b8f2862d2ce93c748ae6a06f49bec697a419ca37",
+      "source_files_represented": [
+        "Launcher.ps1",
+        "README.md",
+        "Run Tests.cmd",
+        "Setup.cmd",
+        "Start Agent UI.cmd",
+        "Start Agent.cmd",
+        "agent_ui/runtime.py",
+        "agent_ui/workspace.py",
+        "copilot_agent/app.py",
+        "copilot_agent/browser.py",
+        "copilot_agent/config.py",
+        "copilot_agent/orchestrator.py",
+        "copilot_agent/policy.py",
+        "copilot_agent/protocol.py",
+        "copilot_agent/storage.py",
+        "copilot_agent/tools.py",
+        "docs/KNOWN_LIMITATIONS.md",
+        "docs/THREAT_MODEL.md"
+      ]
+    },
+    {
+      "bytes": 138227,
+      "content_category": "generated source-symbol and Graphify summary",
+      "content_treatment": "verbatim sections are source-bounded; generated analysis and summaries are explicitly labeled",
+      "exclusions_or_summarization": "See package-level exclusions and per-source treatment records.",
+      "filename": "02_CODE_AND_GRAPH_INDEX.md",
+      "optional": false,
+      "purpose": "Python module/symbol/import inventory, summarized contracts and traceable Graphify relationship evidence.",
+      "recommended_reading_order": 3,
+      "required": true,
+      "sha256": "d83517064095b650ad7c36821f51fb0166dc236efab8e610d2292fec87207b52",
+      "source_files_represented": [
+        "Launcher.ps1",
+        "Run Tests.cmd",
+        "Setup.cmd",
+        "Start Agent UI.cmd",
+        "Start Agent.cmd",
+        "agent_ui/runtime.py",
+        "agent_ui/tests/test_launch_ui.py",
+        "agent_ui/tests/test_runtime.py",
+        "agent_ui/tests/test_uploads.py",
+        "agent_ui/tests/test_workspace.py",
+        "agent_ui/uploads.py",
+        "agent_ui/workspace.py",
+        "app.py",
+        "config.example.json",
+        "copilot_agent/__init__.py",
+        "copilot_agent/app.py",
+        "copilot_agent/approvals.py",
+        "copilot_agent/archives.py",
+        "copilot_agent/attachments.py",
+        "copilot_agent/automation_packages.py",
+        "copilot_agent/browser.py",
+        "copilot_agent/bundle.py",
+        "copilot_agent/code_runner.py",
+        "copilot_agent/config.py",
+        "copilot_agent/delivery.py",
+        "copilot_agent/desktop.py",
+        "copilot_agent/diagnostics.py",
+        "copilot_agent/discovery_contracts.py",
+        "copilot_agent/discovery_engine.py",
+        "copilot_agent/discovery_http.py",
+        "copilot_agent/discovery_knowledge.py",
+        "copilot_agent/discovery_scope.py",
+        "copilot_agent/discovery_store.py",
+        "copilot_agent/document_catalogue.py",
+        "copilot_agent/downloads.py",
+        "copilot_agent/edge_owner.py",
+        "copilot_agent/feedback.py",
+        "copilot_agent/file_picker.py",
+        "copilot_agent/findings.py",
+        "copilot_agent/image_viewer.py",
+        "copilot_agent/knowledge_health.py",
+        "copilot_agent/knowledge_notes.py",
+        "copilot_agent/local_navigation.py",
+        "copilot_agent/local_python_runner.py",
+        "copilot_agent/local_python_worker.py",
+        "copilot_agent/logging_utils.py",
+        "copilot_agent/orchestrator.py",
+        "copilot_agent/persistence.py",
+        "copilot_agent/policy.py",
+        "copilot_agent/presentation.py",
+        "copilot_agent/prompts.py",
+        "copilot_agent/protocol.py",
+        "copilot_agent/reconciliation.py",
+        "copilot_agent/research_permissions.py",
+        "copilot_agent/reused_browser.py",
+        "copilot_agent/setup_resources.py",
+        "copilot_agent/site_knowledge.py",
+        "copilot_agent/state.py",
+        "copilot_agent/storage.py",
+        "copilot_agent/sync.py",
+        "copilot_agent/temp_storage.py",
+        "copilot_agent/terminal_input.py",
+        "copilot_agent/tools.py",
+        "copilot_agent/web_documents.py",
+        "copilot_agent/web_navigation.py",
+        "copilot_agent/web_operations.py",
+        "copilot_agent/web_privacy.py",
+        "requirements.lock.txt",
+        "requirements.txt",
+        "schemas/response-v1.schema.json",
+        "schemas/tool-catalogue-v1.json",
+        "tests/discovery_fixtures.py",
+        "tests/inspect_download_settings.py",
+        "tests/live_acceptance.py",
+        "tests/live_attachments.py",
+        "tests/live_delivery.py",
+        "tests/live_download_run.py",
+        "tests/live_new_session.py",
+        "tests/live_package_run.py",
+        "tests/live_probe.py",
+        "tests/live_verify_completed_run.py",
+        "tests/manual_live_copy_probe.py",
+        "tests/test_agent_ui_runtime.py",
+        "tests/test_app_ports.py",
+        "tests/test_app_sessions.py",
+        "tests/test_app_startup_flow.py",
+        "tests/test_archives.py",
+        "tests/test_attachment_capacity.py",
+        "tests/test_attachments.py",
+        "tests/test_automation_approval.py",
+        "tests/test_automation_packages.py",
+        "tests/test_browser.py",
+        "tests/test_browser_plan_extensions.py",
+        "tests/test_bug_handoff.py",
+        "tests/test_bundle.py",
+        "tests/test_code_runner.py",
+        "tests/test_delivery.py",
+        "tests/test_delivery_integration.py",
+        "tests/test_diagnostics.py",
+        "tests/test_discovery_contracts.py",
+        "tests/test_discovery_engine.py",
+        "tests/test_discovery_knowledge.py",
+        "tests/test_discovery_transport.py",
+        "tests/test_document_catalogue.py",
+        "tests/test_downloads.py",
+        "tests/test_edge_startup.py",
+        "tests/test_feedback.py",
+        "tests/test_file_picker.py",
+        "tests/test_isolated_proof_mode.py",
+        "tests/test_knowledge_health.py",
+        "tests/test_knowledge_repair.py",
+        "tests/test_launcher.py",
+        "tests/test_local_navigation.py",
+        "tests/test_orchestrator.py",
+        "tests/test_persistence.py",
+        "tests/test_protocol_state.py",
+        "tests/test_reconciliation.py",
+        "tests/test_setup_resources.py",
+        "tests/test_site_knowledge.py",
+        "tests/test_storage.py",
+        "tests/test_sync.py",
+        "tests/test_temp_storage.py",
+        "tests/test_terminal_input.py",
+        "tests/test_tools.py",
+        "tests/test_version_launcher.py",
+        "tests/test_web_documents.py",
+        "tests/test_web_navigation.py",
+        "tests/test_web_operations.py",
+        "tests/test_web_privacy.py",
+        "tests/test_web_transport.py",
+        "tests/test_website_integration.py",
+        "version_launcher.py"
+      ]
+    },
+    {
+      "bytes": 190170,
+      "content_category": "verbatim source documentation bundle",
+      "content_treatment": "verbatim sections are source-bounded; generated analysis and summaries are explicitly labeled",
+      "exclusions_or_summarization": "See package-level exclusions and per-source treatment records.",
+      "filename": "03_PROJECT_DOCUMENTATION.md",
+      "optional": false,
+      "purpose": "Verbatim project README and docs sources with explicit source boundaries.",
+      "recommended_reading_order": 4,
+      "required": true,
+      "sha256": "08ae5d5765ce25d15c8b43f78105014f4eb30bf15178caf74014239e5c50e768",
+      "source_files_represented": [
+        "README.md",
+        "agent_ui/README.md",
+        "bootstrap/README.md",
+        "docs/API_ANYTHING_INTEGRATION.md",
+        "docs/ARCHITECTURE.md",
+        "docs/ATTACHMENTS.md",
+        "docs/AUTOMATION_PACKAGE_ARCHITECTURE.md",
+        "docs/BROWSER_RECOVERY.md",
+        "docs/COPILOT_TESTING.md",
+        "docs/DIAGNOSTICS.md",
+        "docs/DISCOVERY_NAVIGATION.md",
+        "docs/FEEDBACK.md",
+        "docs/FILE_DELIVERY.md",
+        "docs/KNOWLEDGE_PERSISTENCE.md",
+        "docs/KNOWN_LIMITATIONS.md",
+        "docs/LIVE_GOVUK_PACKAGE_ACCEPTANCE_20261013.md",
+        "docs/REUSE_MAPPING.md",
+        "docs/SHARED_VDI.md",
+        "docs/TEST_REPORT.md",
+        "docs/THREAT_MODEL.md",
+        "docs/TOOL_CATALOGUE.md",
+        "docs/TROUBLESHOOTING.md",
+        "docs/VISUAL_ACCEPTANCE.md",
+        "docs/WEBSITE_UPGRADE_REPORT.md"
+      ]
+    },
+    {
+      "bytes": 78585,
+      "content_category": "verbatim guidance with generated contract summaries",
+      "content_treatment": "verbatim sections are source-bounded; generated analysis and summaries are explicitly labeled",
+      "exclusions_or_summarization": "See package-level exclusions and per-source treatment records.",
+      "filename": "04_GUIDANCE_AND_CONFIGURATION.md",
+      "optional": false,
+      "purpose": "Verbatim behavioral guidance plus generated configuration, schema and tool summaries.",
+      "recommended_reading_order": 5,
+      "required": true,
+      "sha256": "0881ae5b5512f183eb758beb7f472e04e6edb6fc034fc324f129f4c45f7daf4e",
+      "source_files_represented": [
+        "config.example.json",
+        "guidance/01-copilot-orchestrator-contract.md",
+        "guidance/02-response-protocol.md",
+        "guidance/03-tools-and-selection.md",
+        "guidance/04-code-runner-approval-security.md",
+        "guidance/05-useful-findings.md",
+        "guidance/06-session-memory-context.md",
+        "guidance/07-errors-recovery-retries.md",
+        "guidance/08-files-attachments-synchronization.md",
+        "guidance/09-testing-acceptance.md",
+        "guidance/website/customers.md",
+        "guidance/website/documents.md",
+        "guidance/website/index.md",
+        "guidance/website/memory.md",
+        "guidance/website/plans.md",
+        "guidance/website/privacy.md",
+        "guidance/website/reconnaissance.md",
+        "guidance/website/recovery.md",
+        "guidance/website/tabs.md",
+        "guidance/website/testing.md",
+        "requirements.lock.txt",
+        "requirements.txt",
+        "schemas/response-v1.schema.json",
+        "schemas/tool-catalogue-v1.json"
+      ]
+    },
+    {
+      "bytes": 66514,
+      "content_category": "generated manifest",
+      "content_treatment": "generated metadata; SHA-256 is omitted for the manifest itself because it would be self-referential",
+      "exclusions_or_summarization": "Self size is recorded; self hash is omitted.",
+      "filename": "05_HANDOFF_MANIFEST.json",
+      "optional": false,
+      "purpose": "Complete inventory of final attachments and represented source inputs.",
+      "recommended_reading_order": 6,
+      "required": true,
+      "source_files_represented": []
+    }
+  ],
+  "exclusions": [
+    {
+      "item": "Python/PowerShell/JavaScript implementation bodies",
+      "treatment": "summarized by repository-relative path, AST-derived public symbols/imports, and selected source-derived Graphify relationships; not verbatim"
+    },
+    {
+      "item": "schemas/tool-catalogue-v1.json (333 KB)",
+      "treatment": "all tool entries summarized with purpose, risk, approval, required arguments, and side effects; source path and SHA-256 retained"
+    },
+    {
+      "item": "Raw graph.json, Graphify analysis cache, marker files, raw Graphify report",
+      "treatment": "omitted as attachment; metrics, selected extracted relationships, source paths, and inferred-edge caveat retained"
+    },
+    {
+      "item": "Binary assets, local environments, runtime/session files, browser profiles, and machine/user settings",
+      "treatment": "excluded from eligible-text source scan; they are not needed for essential architectural understanding"
+    }
+  ],
+  "generation_method": "local Graphify code-only AST plus deterministic Python source/documentation/configuration inspection",
+  "manifest_version": 1,
+  "project": "Copilot Local Agent",
+  "project_path_in_workspace": "Scripts and projects/Copilot Local Agent",
+  "source_coverage": {
+    "eligible_text_source_count": 189,
+    "summarized_or_catalogued_sources": [
+      "agent_ui/runtime.py",
+      "agent_ui/tests/test_launch_ui.py",
+      "agent_ui/tests/test_runtime.py",
+      "agent_ui/tests/test_uploads.py",
+      "agent_ui/tests/test_workspace.py",
+      "agent_ui/uploads.py",
+      "agent_ui/web/app.js",
+      "agent_ui/web/index.html",
+      "agent_ui/web/styles.css",
+      "agent_ui/workspace.py",
+      "app.py",
+      "copilot_agent/__init__.py",
+      "copilot_agent/app.py",
+      "copilot_agent/approvals.py",
+      "copilot_agent/archives.py",
+      "copilot_agent/attachments.py",
+      "copilot_agent/automation_packages.py",
+      "copilot_agent/browser.py",
+      "copilot_agent/bundle.py",
+      "copilot_agent/code_runner.py",
+      "copilot_agent/config.py",
+      "copilot_agent/delivery.py",
+      "copilot_agent/desktop.py",
+      "copilot_agent/diagnostics.py",
+      "copilot_agent/discovery_contracts.py",
+      "copilot_agent/discovery_engine.py",
+      "copilot_agent/discovery_http.py",
+      "copilot_agent/discovery_knowledge.py",
+      "copilot_agent/discovery_scope.py",
+      "copilot_agent/discovery_store.py",
+      "copilot_agent/document_catalogue.py",
+      "copilot_agent/downloads.py",
+      "copilot_agent/edge_owner.py",
+      "copilot_agent/feedback.py",
+      "copilot_agent/file_picker.py",
+      "copilot_agent/findings.py",
+      "copilot_agent/image_viewer.py",
+      "copilot_agent/knowledge_health.py",
+      "copilot_agent/knowledge_notes.py",
+      "copilot_agent/local_navigation.py",
+      "copilot_agent/local_python_runner.py",
+      "copilot_agent/local_python_worker.py",
+      "copilot_agent/logging_utils.py",
+      "copilot_agent/orchestrator.py",
+      "copilot_agent/persistence.py",
+      "copilot_agent/policy.py",
+      "copilot_agent/presentation.py",
+      "copilot_agent/prompts.py",
+      "copilot_agent/protocol.py",
+      "copilot_agent/reconciliation.py",
+      "copilot_agent/research_permissions.py",
+      "copilot_agent/reused_browser.py",
+      "copilot_agent/setup_resources.py",
+      "copilot_agent/site_knowledge.py",
+      "copilot_agent/state.py",
+      "copilot_agent/storage.py",
+      "copilot_agent/sync.py",
+      "copilot_agent/temp_storage.py",
+      "copilot_agent/terminal_input.py",
+      "copilot_agent/tools.py",
+      "copilot_agent/web_documents.py",
+      "copilot_agent/web_navigation.py",
+      "copilot_agent/web_operations.py",
+      "copilot_agent/web_privacy.py",
+      "schemas/automation-package-v1.1.schema.json",
+      "schemas/automation-package-v1.schema.json",
+      "schemas/discovery/discovery-manifest.schema.json",
+      "schemas/discovery/discovery-result.schema.json",
+      "schemas/discovery/graph-amendment.schema.json",
+      "schemas/discovery/navigation-intent.schema.json",
+      "schemas/discovery/navigation-plan.schema.json",
+      "schemas/discovery/replanning-checkpoint.schema.json",
+      "schemas/discovery/website-knowledge.schema.json",
+      "schemas/tool-catalogue-v1.json",
+      "tests/discovery_fixtures.py",
+      "tests/fixtures/code_preview.html",
+      "tests/inspect_download_settings.py",
+      "tests/live_acceptance.py",
+      "tests/live_attachments.py",
+      "tests/live_delivery.py",
+      "tests/live_download_run.py",
+      "tests/live_new_session.py",
+      "tests/live_package_run.py",
+      "tests/live_probe.py",
+      "tests/live_verify_completed_run.py",
+      "tests/manual_live_copy_probe.py",
+      "tests/test_agent_ui_runtime.py",
+      "tests/test_app_ports.py",
+      "tests/test_app_sessions.py",
+      "tests/test_app_startup_flow.py",
+      "tests/test_archives.py",
+      "tests/test_attachment_capacity.py",
+      "tests/test_attachments.py",
+      "tests/test_automation_approval.py",
+      "tests/test_automation_packages.py",
+      "tests/test_browser.py",
+      "tests/test_browser_plan_extensions.py",
+      "tests/test_bug_handoff.py",
+      "tests/test_bundle.py",
+      "tests/test_code_runner.py",
+      "tests/test_delivery.py",
+      "tests/test_delivery_integration.py",
+      "tests/test_diagnostics.py",
+      "tests/test_discovery_contracts.py",
+      "tests/test_discovery_engine.py",
+      "tests/test_discovery_knowledge.py",
+      "tests/test_discovery_transport.py",
+      "tests/test_document_catalogue.py",
+      "tests/test_downloads.py",
+      "tests/test_edge_startup.py",
+      "tests/test_feedback.py",
+      "tests/test_file_picker.py",
+      "tests/test_isolated_proof_mode.py",
+      "tests/test_knowledge_health.py",
+      "tests/test_knowledge_repair.py",
+      "tests/test_launcher.py",
+      "tests/test_local_navigation.py",
+      "tests/test_orchestrator.py",
+      "tests/test_persistence.py",
+      "tests/test_protocol_state.py",
+      "tests/test_reconciliation.py",
+      "tests/test_setup_resources.py",
+      "tests/test_site_knowledge.py",
+      "tests/test_storage.py",
+      "tests/test_sync.py",
+      "tests/test_temp_storage.py",
+      "tests/test_terminal_input.py",
+      "tests/test_tools.py",
+      "tests/test_version_launcher.py",
+      "tests/test_web_documents.py",
+      "tests/test_web_navigation.py",
+      "tests/test_web_operations.py",
+      "tests/test_web_privacy.py",
+      "tests/test_web_transport.py",
+      "tests/test_website_integration.py",
+      "tools/vdi-bridge/VDI-Test-Bridge.ps1",
+      "version_launcher.py"
+    ],
+    "unrepresented_essential_context": [],
+    "verbatim_documentation_sources": [
+      "agent_ui/README.md",
+      "bootstrap/README.md",
+      "docs/API_ANYTHING_INTEGRATION.md",
+      "docs/ARCHITECTURE.md",
+      "docs/ATTACHMENTS.md",
+      "docs/AUTOMATION_PACKAGE_ARCHITECTURE.md",
+      "docs/BROWSER_RECOVERY.md",
+      "docs/COPILOT_TESTING.md",
+      "docs/DIAGNOSTICS.md",
+      "docs/DISCOVERY_NAVIGATION.md",
+      "docs/FEEDBACK.md",
+      "docs/FILE_DELIVERY.md",
+      "docs/KNOWLEDGE_PERSISTENCE.md",
+      "docs/KNOWN_LIMITATIONS.md",
+      "docs/LIVE_GOVUK_PACKAGE_ACCEPTANCE_20261013.md",
+      "docs/REUSE_MAPPING.md",
+      "docs/SHARED_VDI.md",
+      "docs/TEST_REPORT.md",
+      "docs/THREAT_MODEL.md",
+      "docs/TOOL_CATALOGUE.md",
+      "docs/TROUBLESHOOTING.md",
+      "docs/VISUAL_ACCEPTANCE.md",
+      "docs/WEBSITE_UPGRADE_REPORT.md",
+      "README.md"
+    ],
+    "verbatim_guidance_sources": [
+      "guidance/01-copilot-orchestrator-contract.md",
+      "guidance/02-response-protocol.md",
+      "guidance/03-tools-and-selection.md",
+      "guidance/04-code-runner-approval-security.md",
+      "guidance/05-useful-findings.md",
+      "guidance/06-session-memory-context.md",
+      "guidance/07-errors-recovery-retries.md",
+      "guidance/08-files-attachments-synchronization.md",
+      "guidance/09-testing-acceptance.md",
+      "guidance/website/customers.md",
+      "guidance/website/documents.md",
+      "guidance/website/index.md",
+      "guidance/website/memory.md",
+      "guidance/website/plans.md",
+      "guidance/website/privacy.md",
+      "guidance/website/reconnaissance.md",
+      "guidance/website/recovery.md",
+      "guidance/website/tabs.md",
+      "guidance/website/testing.md"
+    ]
+  },
+  "source_files": [
+    {
+      "bytes": 6263,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "agent_ui/README.md",
+      "sha256": "384fc0ebdcb5611b53b82bfc96bdae507ab5b9c364d90ff6a10eeef3174e7adf"
+    },
+    {
+      "bytes": 18398,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "agent_ui/runtime.py",
+      "sha256": "1ffe5a8dcdfdfb42428e8fa21abf923dac2b1625684d53ac07aba3a6e193a6e9"
+    },
+    {
+      "bytes": 13430,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "agent_ui/tests/test_launch_ui.py",
+      "sha256": "b1ce9cb69a98ab2da788b1563d87cf192b24eb58d25ad130d9f161de152d9d3f"
+    },
+    {
+      "bytes": 2430,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "agent_ui/tests/test_runtime.py",
+      "sha256": "b89a280b37e921a8fe813f572c4cde3a84bb5da6ae23bfd4a940eae8cd6e343c"
+    },
+    {
+      "bytes": 4968,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "agent_ui/tests/test_uploads.py",
+      "sha256": "a722cfb116c2f21999950492c6e1ecbcef20cfe1cc3b2a5bd6837dbef9f5d4c2"
+    },
+    {
+      "bytes": 9104,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "agent_ui/tests/test_workspace.py",
+      "sha256": "7f4939f55f34d2607eaaeda49e8622b81a691afc523f7ef26a2fc48f889caab8"
+    },
+    {
+      "bytes": 13868,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "agent_ui/uploads.py",
+      "sha256": "ea9952eb14194bf4a7b519379001be1193861eac17dc5da7bfcee80b79048abf"
+    },
+    {
+      "bytes": 33747,
+      "content_treatment": "summarized_entrypoint_or_module_path; exact source hash recorded",
+      "path": "agent_ui/web/app.js",
+      "sha256": "238d61122c3429996214258f7d6050f68714ed33e38d072246ca6e469ff2f8bc"
+    },
+    {
+      "bytes": 6920,
+      "content_treatment": "summarized_entrypoint_or_module_path; exact source hash recorded",
+      "path": "agent_ui/web/index.html",
+      "sha256": "6213d5983ee8025011a9b0b3ad9e4faeb270d19e91ec6b9e8226c30f42efad56"
+    },
+    {
+      "bytes": 23043,
+      "content_treatment": "summarized_entrypoint_or_module_path; exact source hash recorded",
+      "path": "agent_ui/web/styles.css",
+      "sha256": "12481e2ccd92040ac4efe5e1a7f94f525267c60fa5efda2d8e5d54fe97208e8e"
+    },
+    {
+      "bytes": 22080,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "agent_ui/workspace.py",
+      "sha256": "898789dd698f0d98a63f32a4bacb47a1009fb5e9025fa8846e702c578f647715"
+    },
+    {
+      "bytes": 74,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "app.py",
+      "sha256": "2400018f390bdfec5072fcd90390df169b77c42713d3cefc0693b6f11e06e5d4"
+    },
+    {
+      "bytes": 804,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "bootstrap/README.md",
+      "sha256": "0c2b994422398f57ddc30c93cc38a3461512758d23edc63bdf218c890a4b3f05"
+    },
+    {
+      "bytes": 1051,
+      "content_treatment": "verbatim_text_embedded_as_operational_entrypoint_or_core_contract",
+      "path": "config.example.json",
+      "sha256": "1a3be128aeb4cac32b316c0d9b546c28da2d0cd04dfefaa1c825c8ea43acb78a"
+    },
+    {
+      "bytes": 75,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/__init__.py",
+      "sha256": "47c38e9ee6353b2d85889c239fb5671560aa9bde08b379e416bb1c5efc838ab8"
+    },
+    {
+      "bytes": 44548,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/app.py",
+      "sha256": "3a8d60011f2a358af98d0abe39d9e734a78c9c05f6979c3a5744827e077664a9"
+    },
+    {
+      "bytes": 16557,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/approvals.py",
+      "sha256": "648d074d7f7237c867fbadc701a8380d3ef0ea9c8a7406028983653bb0c434e8"
+    },
+    {
+      "bytes": 21970,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/archives.py",
+      "sha256": "ce25b7de56645f205d656a94d8cb4836fab3023ac695bd38619474b264f45ac0"
+    },
+    {
+      "bytes": 10065,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/attachments.py",
+      "sha256": "2d99320f2dea00cf7f5f8ffb8fadf2dddad6502796017512e73bec4c98540263"
+    },
+    {
+      "bytes": 117339,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/automation_packages.py",
+      "sha256": "18be1dda3d2574cb70c6a0c5ec173a95a96c93108087832c847e1026a588a20e"
+    },
+    {
+      "bytes": 91971,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/browser.py",
+      "sha256": "235fdb5f4a68847b658977f6dbae01ad0f6b70e0d02ea6c34b8147f6fe05196f"
+    },
+    {
+      "bytes": 15540,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/bundle.py",
+      "sha256": "8a266775c18a5d769454a80431f3f71fde14ff731566db7acb0a4b1d6c7f1702"
+    },
+    {
+      "bytes": 33477,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/code_runner.py",
+      "sha256": "9d8d18ffa8dd9ef674723821f0dfa1f8b14bda13cf57eeb89851669fbc0702ff"
+    },
+    {
+      "bytes": 12174,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/config.py",
+      "sha256": "e5fb5dc488964be35df8903512e4237562e03f282a5a5d35b824bac8bcb9f926"
+    },
+    {
+      "bytes": 12333,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/delivery.py",
+      "sha256": "0d36d834301af001b161a8139cea37097f4b0638e340660b4a25e8542bc4636f"
+    },
+    {
+      "bytes": 12089,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/desktop.py",
+      "sha256": "3f0d98e03042a2fe58f2b510d18475aaee71a248eac70ec374507f48776d8dad"
+    },
+    {
+      "bytes": 14176,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/diagnostics.py",
+      "sha256": "f3bd94bc33204725318bf53cd83d80ac31929f50555ee28f65b4cbdbc3c819dd"
+    },
+    {
+      "bytes": 16579,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/discovery_contracts.py",
+      "sha256": "7aa76c724869205026e751c8bf29690f8c07110c6d0c4f112a676846b0d048c8"
+    },
+    {
+      "bytes": 42465,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/discovery_engine.py",
+      "sha256": "a0bb78a003b4ed2191489d406214599e50e5c7e01febd27b49a2e4d12002f004"
+    },
+    {
+      "bytes": 17419,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/discovery_http.py",
+      "sha256": "d64d760a1aed667d23a8a72eedce2cd6e721f5270fb943124bec191f08757295"
+    },
+    {
+      "bytes": 38010,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/discovery_knowledge.py",
+      "sha256": "30ba7db462bbf2f7a5ea7d3a069d0cd5f3f8211c21c3e7f97fb5788d15692dbb"
+    },
+    {
+      "bytes": 5828,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/discovery_scope.py",
+      "sha256": "7d19a042d8f2c95f58b61aae8755d825cae608b3cf87b73bfc2d451c8c86f307"
+    },
+    {
+      "bytes": 38123,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/discovery_store.py",
+      "sha256": "1aff250b7fe17e3acd6c5713046476bd77a02c16bf80904de90805f50fe1a255"
+    },
+    {
+      "bytes": 11979,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/document_catalogue.py",
+      "sha256": "266c97e4060e58e0592e2b16c82807857c7b829c5955255ae06bf4a85439f8c1"
+    },
+    {
+      "bytes": 37592,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/downloads.py",
+      "sha256": "de7bc5e79470f26587393423244ad7857aebdcc7bbdba95a39ce1977e2959b3f"
+    },
+    {
+      "bytes": 2383,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/edge_owner.py",
+      "sha256": "b3e3b031519cf8673cb39ff2a24fb0ad5d24c285e0334d68e37cfce2ebe4375c"
+    },
+    {
+      "bytes": 6012,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/feedback.py",
+      "sha256": "f53812c54bd2bba95886c1bf749111d815e2ad0fa87f07a74d8f77100ba75eb2"
+    },
+    {
+      "bytes": 3877,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/file_picker.py",
+      "sha256": "22eb2aa73bbadcdb09494b43c6bdec3af64af3317896579b6d1bd96294324c02"
+    },
+    {
+      "bytes": 3418,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/findings.py",
+      "sha256": "d8966490753f56dbbb382a8c26dd98a259b5c9c44fe9f125f1bc0a1a4918669c"
+    },
+    {
+      "bytes": 1487,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/image_viewer.py",
+      "sha256": "6019d6c71db167a668bdd23a65d5350d3824a5571c5ce537729bb8ad6a034e2a"
+    },
+    {
+      "bytes": 4456,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/knowledge_health.py",
+      "sha256": "66604c25504921001cc47ff2217ec8c72104b444a12003a4c3ac5756ac8cd944"
+    },
+    {
+      "bytes": 4835,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/knowledge_notes.py",
+      "sha256": "e625dd6920b7314df561cd80b7467065c96afcec383c15b308943635b046a193"
+    },
+    {
+      "bytes": 11944,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/local_navigation.py",
+      "sha256": "e3ce3546bb42ac7a987b16022004e52df36ad031668a5a8f3dbf31f0f027cd6d"
+    },
+    {
+      "bytes": 18546,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/local_python_runner.py",
+      "sha256": "8fd63c93203f7487d9588fac8e5382618ccc9daf54ff2970935555fe55f4fe37"
+    },
+    {
+      "bytes": 19926,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/local_python_worker.py",
+      "sha256": "ebf6f750a4d65291f90d0961930c64d3a9bde7ecbe9de37c148966829f6137e6"
+    },
+    {
+      "bytes": 2125,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/logging_utils.py",
+      "sha256": "6b4d5842ff1dcdea56c823accaccc5e8ea17093a21775d027a67196dde7da092"
+    },
+    {
+      "bytes": 148946,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/orchestrator.py",
+      "sha256": "82b3fc781079385db8e29b139493a26bd79ddf6c64bc48fa3d35c14a3c7f31c4"
+    },
+    {
+      "bytes": 1860,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/persistence.py",
+      "sha256": "2bf04d1e0e8b73dadd77f9baa326d1515e6ebb1a44aad6bacd09e19891015802"
+    },
+    {
+      "bytes": 9635,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/policy.py",
+      "sha256": "b084c9af6db1d90710a78612c5d6818d87da790eaf91ae0a2465127e96dc54d5"
+    },
+    {
+      "bytes": 2650,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/presentation.py",
+      "sha256": "ca489e13f012cce7ebae3e2c056d01f73cf773c6bca88af1d4498ab712f5f17f"
+    },
+    {
+      "bytes": 35207,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/prompts.py",
+      "sha256": "0b18dba821e17d48038bf19c491d109f48b296a0f9c3b9b5f379aa4fd7104944"
+    },
+    {
+      "bytes": 13052,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/protocol.py",
+      "sha256": "74df18a3f20aa671831a72c802690c11e2c3a9688fe3641ded6cb351a3a1cc1d"
+    },
+    {
+      "bytes": 16855,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/reconciliation.py",
+      "sha256": "59c8d5be1aa0e8c8609fc37d57f042a5737b02608909da676b6c4652b22b2c4b"
+    },
+    {
+      "bytes": 25669,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/research_permissions.py",
+      "sha256": "f57b9ef43801cead5c353242cbdf4cabde3a9e7a98b0820437a23b88f2630086"
+    },
+    {
+      "bytes": 21326,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/reused_browser.py",
+      "sha256": "375396637e651cd9477dd276e419aade45d4af92a0b90453336b061820e2d7f5"
+    },
+    {
+      "bytes": 2899,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/setup_resources.py",
+      "sha256": "19c23691c38503272176225443d74804364fae962d4a9bf2e37fa7877bad852a"
+    },
+    {
+      "bytes": 50948,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/site_knowledge.py",
+      "sha256": "769e20adc92184d29c24d2dc4a60ea4417ba5f2d85d46bdbc7d53b2db56141b0"
+    },
+    {
+      "bytes": 24720,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/state.py",
+      "sha256": "3d69d4caeb39c6ad31219ca4120778be4ab6d14f8f683582a5d7a84b686c7cc1"
+    },
+    {
+      "bytes": 4946,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/storage.py",
+      "sha256": "101fabf35e91e318e215f8b1adfab3dc30ea3742a61f62853f33ed54c8db0c72"
+    },
+    {
+      "bytes": 3757,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/sync.py",
+      "sha256": "a7cce479954fb97cb1d84e7ef0b91f41e0a29fc5e09e68e65b4dacf0d4d69933"
+    },
+    {
+      "bytes": 3905,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/temp_storage.py",
+      "sha256": "dff76d7f5d3aeaf4ef54ee63a3fcb0900a0eecb3c037046a86778b632a6e6bae"
+    },
+    {
+      "bytes": 6906,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/terminal_input.py",
+      "sha256": "f2be3ebcdf8c0231bb75203e4a72f305a1c32052c60f203dd5890ebf3ff1549b"
+    },
+    {
+      "bytes": 87301,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/tools.py",
+      "sha256": "ba68458b1cce62a6479c7c5f1283230cc5915e8d086562cf5e34db77c13c596e"
+    },
+    {
+      "bytes": 38270,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/web_documents.py",
+      "sha256": "9fc06e4032351f6ed8d7a614b4c8e86075efc85684e7e4f1afeb58e9faf22a7f"
+    },
+    {
+      "bytes": 59471,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/web_navigation.py",
+      "sha256": "9b38a0737ece79feac2386850146bef2bc42d1f20e9d5e53f212e794137f313e"
+    },
+    {
+      "bytes": 25586,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/web_operations.py",
+      "sha256": "ec906e052e14e23c965013256f8393e0bc06bc75d981d297461890dd5cc18467"
+    },
+    {
+      "bytes": 5217,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/web_privacy.py",
+      "sha256": "85fe2a7dd4e5475bf6db8a7e9249db1f9dce8a40c4f2bfbbd53428322c1e26cd"
+    },
+    {
+      "bytes": 18124,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/API_ANYTHING_INTEGRATION.md",
+      "sha256": "cf6137ee67df4789dfd296f7c2bc680ff511a3161892415449c0588deeeaca91"
+    },
+    {
+      "bytes": 16642,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/ARCHITECTURE.md",
+      "sha256": "b23b26856ac37cffc645da07da38f068e169644b6ca6b79af9ac1e20f5b73aa6"
+    },
+    {
+      "bytes": 7220,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/ATTACHMENTS.md",
+      "sha256": "05a901ed87bd9b89ceca9f9d2585ceceee140418f3a1bc01b8ec7658cc4efba9"
+    },
+    {
+      "bytes": 6636,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/AUTOMATION_PACKAGE_ARCHITECTURE.md",
+      "sha256": "b1e29b0cc5037a30e51805c68b978013b5b2592356612d68459d9feb4f22d38d"
+    },
+    {
+      "bytes": 5410,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/BROWSER_RECOVERY.md",
+      "sha256": "6e09474326eb7a3baa83634097e0e43739b00712e7da30d665042194c5bf0429"
+    },
+    {
+      "bytes": 3636,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/COPILOT_TESTING.md",
+      "sha256": "3d0481c52767052a4d2dcea560989d4e9e0787efb6e246227b735cef74f16f52"
+    },
+    {
+      "bytes": 1811,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/DIAGNOSTICS.md",
+      "sha256": "da0acdb1fb58835a2bd77e5290acfe3c20a2a8e06af10ba86626460de8fae2d6"
+    },
+    {
+      "bytes": 2628,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/DISCOVERY_NAVIGATION.md",
+      "sha256": "6a9d0d33217c2d6edc7d522385e31565247880e6944c5b26fc2cd8025a165f96"
+    },
+    {
+      "bytes": 3973,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/FEEDBACK.md",
+      "sha256": "d4c007ffe4de6d6e19275f0a5da1dee3db0def2ed464f55ce2998bc439fe9095"
+    },
+    {
+      "bytes": 16572,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/FILE_DELIVERY.md",
+      "sha256": "121bde37ca5a8c25cbef13c55a2902a550985c298c281702b603d64883f2bb26"
+    },
+    {
+      "bytes": 3009,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/KNOWLEDGE_PERSISTENCE.md",
+      "sha256": "cc93571cdf4c2cbc2ad6c7bb15430165a4042a79b9a5df2dabd0075881597838"
+    },
+    {
+      "bytes": 7041,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/KNOWN_LIMITATIONS.md",
+      "sha256": "9628eac9fdf8bbb363c24a11243edf93eb2870ffe6cc6a806404583858c0db67"
+    },
+    {
+      "bytes": 4487,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/LIVE_GOVUK_PACKAGE_ACCEPTANCE_20261013.md",
+      "sha256": "bc80e483fbdb8e6d92da077eff80d1f2d0e3f3f28ca97d62b740ea6d5d49beae"
+    },
+    {
+      "bytes": 9145,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/REUSE_MAPPING.md",
+      "sha256": "1c585168bcfda22b6f41f7be0a9dfd270526468d893b3eed46e2c6cd1baed5ac"
+    },
+    {
+      "bytes": 5379,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/SHARED_VDI.md",
+      "sha256": "a337aa9bfaf2937d9f817b1f73fc1ed82ae9422a967fbf6686472986fb8342a4"
+    },
+    {
+      "bytes": 13933,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/TEST_REPORT.md",
+      "sha256": "7d2f19d5a2ba74c88329110599f25c4ef05646169f118d3964230b295df9ca9f"
+    },
+    {
+      "bytes": 6566,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/THREAT_MODEL.md",
+      "sha256": "307869c7a0989cecb29139918911db2b44a0602f4828ad1929066e4945ddc1d6"
+    },
+    {
+      "bytes": 4441,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/TOOL_CATALOGUE.md",
+      "sha256": "cc40d54f8db0b83d5ecda48c320b284a3db67595be49d49d1a14438d4cccb246"
+    },
+    {
+      "bytes": 7892,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/TROUBLESHOOTING.md",
+      "sha256": "57196a594c4b07bca1130856c8897ee88cd5d390fa8ca96a597579cfa15ef9da"
+    },
+    {
+      "bytes": 11559,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/VISUAL_ACCEPTANCE.md",
+      "sha256": "e1176ed0f8df107675739b92200125494cdf00b43313c8e6cbfbdf93e9254ee6"
+    },
+    {
+      "bytes": 8333,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/WEBSITE_UPGRADE_REPORT.md",
+      "sha256": "f04d4570864249981cf540c53f58c4537299b08d8448411b375814b3def72ca8"
+    },
+    {
+      "bytes": 6161,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/01-copilot-orchestrator-contract.md",
+      "sha256": "b3d49d300e9128f4a3bd2fe868fb4d38e595f69aaeae436fd93c4c38bc773bbb"
+    },
+    {
+      "bytes": 7255,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/02-response-protocol.md",
+      "sha256": "f8ff95b2103dac7f87ab36d77a487bab313da0f9348c84de41d487ffacf6f70d"
+    },
+    {
+      "bytes": 13131,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/03-tools-and-selection.md",
+      "sha256": "59849c75e93d7598565fdf5e667c535230ae3968bcefdf62d3a9670d86f08275"
+    },
+    {
+      "bytes": 6626,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/04-code-runner-approval-security.md",
+      "sha256": "2e1cd85c71eef7b5d49271f9e35902211947d5d6655f723ff0e83d1eba436ac1"
+    },
+    {
+      "bytes": 2945,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/05-useful-findings.md",
+      "sha256": "816d1a4b6a2aea89f40727f46ad0bd76963c7d8101449d90f958d0b1ae520375"
+    },
+    {
+      "bytes": 3212,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/06-session-memory-context.md",
+      "sha256": "2d48d17eb6d0eddedc761216a3345ac75d3d1fee5135acddaceb497aca985a8d"
+    },
+    {
+      "bytes": 8139,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/07-errors-recovery-retries.md",
+      "sha256": "dc53833746fe41cc0c956595813820349e16d6ddc3aff2a07b6c4cbbe14d6711"
+    },
+    {
+      "bytes": 11283,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/08-files-attachments-synchronization.md",
+      "sha256": "2cc34623bc4e4c839de032b493c318f74e6fead0f6a79e7a699e9739719a613f"
+    },
+    {
+      "bytes": 3138,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/09-testing-acceptance.md",
+      "sha256": "640b31284397de9d629c3d8e77206a7711d1acc90ed027bbe793e01e2527f611"
+    },
+    {
+      "bytes": 860,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/website/customers.md",
+      "sha256": "a41c1ce8f5f8d0b2d33c1abd7b97a4446183ee0cca772596f14172b62e0df4b9"
+    },
+    {
+      "bytes": 3706,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/website/documents.md",
+      "sha256": "cbe16e36a8f02f10718ca70a1f102dbb2b83a1120f9c2e8bfda5659421850e5b"
+    },
+    {
+      "bytes": 987,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/website/index.md",
+      "sha256": "389862c5dec3467eb8c3ea8edc8041c290d808d84ef8ae5a629395648883b7d6"
+    },
+    {
+      "bytes": 1258,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/website/memory.md",
+      "sha256": "3225f2a1d50da8e29b3ac3fd62fa2fb646227372473147b1ff7bbee29aab60bb"
+    },
+    {
+      "bytes": 1092,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/website/plans.md",
+      "sha256": "289ab7031246f3898bf34fca29c34fa805923805a1cf0befac7bc83896e28113"
+    },
+    {
+      "bytes": 1170,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/website/privacy.md",
+      "sha256": "eb02db0b3833a43c5745079cfcb727fee8f81c7c91d7ac0ed1085c9ce17e4c99"
+    },
+    {
+      "bytes": 847,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/website/reconnaissance.md",
+      "sha256": "5dedb09233565a5b7f3d86bbc24cd0fe98a97359118ca86f0399157d2e080e1d"
+    },
+    {
+      "bytes": 820,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/website/recovery.md",
+      "sha256": "46a762751fcccd8c88c0dd8c7e620ea009e6891a12d9e3fced40a479accc764d"
+    },
+    {
+      "bytes": 938,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/website/tabs.md",
+      "sha256": "2763f87d5067e4c99aab6f3d7554a0b18c07f7c7cc34830cdd5ff0e7396e43d6"
+    },
+    {
+      "bytes": 829,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "guidance/website/testing.md",
+      "sha256": "e83ed0a8df74fc937452ca2d51d07f5cb79e892dc7280f4e243ad272d225b25e"
+    },
+    {
+      "bytes": 29044,
+      "content_treatment": "verbatim_text_embedded_as_operational_entrypoint_or_core_contract",
+      "path": "Launcher.ps1",
+      "sha256": "07a033a5a9c787babff26499c00220f5e94b5bcf0fbfbe8f4e59e94cedb7bc5e"
+    },
+    {
+      "bytes": 14204,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "README.md",
+      "sha256": "b8f5581f9f4c388282fa94e33f5ae382c3e2d7c3fad8a041a7e591ed37ceb5ef"
+    },
+    {
+      "bytes": 142,
+      "content_treatment": "verbatim_text_embedded_as_operational_entrypoint_or_core_contract",
+      "path": "requirements.lock.txt",
+      "sha256": "c3b6e42bc94c26c9acdb41b19d20876c6ec0355fc2200b1d85924728526cfe30"
+    },
+    {
+      "bytes": 19,
+      "content_treatment": "verbatim_text_embedded_as_operational_entrypoint_or_core_contract",
+      "path": "requirements.txt",
+      "sha256": "b52b8d63608db4d9c6926f0bded19680398b125233aca36e0e8a041948035744"
+    },
+    {
+      "bytes": 155,
+      "content_treatment": "verbatim_text_embedded_as_operational_entrypoint_or_core_contract",
+      "path": "Run Tests.cmd",
+      "sha256": "006d922fd0089b70a0c64c64ee9167769a936b10f1b66badabe80c54f89a95cc"
+    },
+    {
+      "bytes": 11115,
+      "content_treatment": "summarized_configuration_or_schema; exact source hash recorded",
+      "path": "schemas/automation-package-v1.1.schema.json",
+      "sha256": "6ad192d015b42da976a74ce8aef4c90ee5f4e5cd4ca59391bc709961adc5c622"
+    },
+    {
+      "bytes": 5683,
+      "content_treatment": "summarized_configuration_or_schema; exact source hash recorded",
+      "path": "schemas/automation-package-v1.schema.json",
+      "sha256": "06c98b572fe53eba64d28bd615343ef78bf0a6dd7ccfa66df9f63f5c91a10a16"
+    },
+    {
+      "bytes": 13601,
+      "content_treatment": "summarized_configuration_or_schema; exact source hash recorded",
+      "path": "schemas/discovery/discovery-manifest.schema.json",
+      "sha256": "ff53ad26a1c355d0d4cfaf2855a7f44974b0bf07167cd01353859d3ba10cbe8c"
+    },
+    {
+      "bytes": 8159,
+      "content_treatment": "summarized_configuration_or_schema; exact source hash recorded",
+      "path": "schemas/discovery/discovery-result.schema.json",
+      "sha256": "c1a9ca9d98fac77c0524ec9bd86f020d9834e6237e0c932fe70054cf99413ee2"
+    },
+    {
+      "bytes": 10790,
+      "content_treatment": "summarized_configuration_or_schema; exact source hash recorded",
+      "path": "schemas/discovery/graph-amendment.schema.json",
+      "sha256": "2d219dde613971709e9ff3e33d390dc92ccc6a6bfb5b06175e4d94c048f0ce10"
+    },
+    {
+      "bytes": 5141,
+      "content_treatment": "summarized_configuration_or_schema; exact source hash recorded",
+      "path": "schemas/discovery/navigation-intent.schema.json",
+      "sha256": "4de376da23c9097c47486d16a25b7dec3e4601e92338b355c2d789f011d2395b"
+    },
+    {
+      "bytes": 8999,
+      "content_treatment": "summarized_configuration_or_schema; exact source hash recorded",
+      "path": "schemas/discovery/navigation-plan.schema.json",
+      "sha256": "567bf1f40f53744e6b3fcd5594019e4750fa9210d7146dfa2fc673d15179bf52"
+    },
+    {
+      "bytes": 9044,
+      "content_treatment": "summarized_configuration_or_schema; exact source hash recorded",
+      "path": "schemas/discovery/replanning-checkpoint.schema.json",
+      "sha256": "c23b8ef195f952c782269e9b6456515e106f677551cc09218e1701d974797717"
+    },
+    {
+      "bytes": 18375,
+      "content_treatment": "summarized_configuration_or_schema; exact source hash recorded",
+      "path": "schemas/discovery/website-knowledge.schema.json",
+      "sha256": "635474945afb9cc9a27117849388f1b2155f5e5f4fc7c5804a3ea98ea4a0876c"
+    },
+    {
+      "bytes": 3417,
+      "content_treatment": "verbatim_text_embedded_as_operational_entrypoint_or_core_contract",
+      "path": "schemas/response-v1.schema.json",
+      "sha256": "5b57f31c0ad96dbbca8f48d4305b962d519fe9e247d07cfc1d66e08917b87eca"
+    },
+    {
+      "bytes": 333082,
+      "content_treatment": "summarized_complete_tool_name_purpose_risk_approval_arguments_and_effects",
+      "path": "schemas/tool-catalogue-v1.json",
+      "sha256": "9d087b7b414ca8f0d215bb9b00c3f943846815461c7cdecaa7a676999039eccc"
+    },
+    {
+      "bytes": 155,
+      "content_treatment": "verbatim_text_embedded_as_operational_entrypoint_or_core_contract",
+      "path": "Setup.cmd",
+      "sha256": "6a410c728958d33158a95deb8ff33616dd96328d52916cf6899f533136a696ec"
+    },
+    {
+      "bytes": 152,
+      "content_treatment": "verbatim_text_embedded_as_operational_entrypoint_or_core_contract",
+      "path": "Start Agent UI.cmd",
+      "sha256": "357f3554110baa372c15cd80b2fbcd62e8918f11aaf2073705fc4c9f80540f81"
+    },
+    {
+      "bytes": 155,
+      "content_treatment": "verbatim_text_embedded_as_operational_entrypoint_or_core_contract",
+      "path": "Start Agent.cmd",
+      "sha256": "2bbd95e33cced6854103e94778aeb7d35ed3f6a6eaf0f176712044e60e60f7be"
+    },
+    {
+      "bytes": 4711,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/discovery_fixtures.py",
+      "sha256": "5bba1424ff863f3abeb81ee9b00052309c766aa6d69df65e98c5c4197d3e737d"
+    },
+    {
+      "bytes": 1070,
+      "content_treatment": "summarized_entrypoint_or_module_path; exact source hash recorded",
+      "path": "tests/fixtures/code_preview.html",
+      "sha256": "6dc4566d4c11c710261f4f69788608660136f2343cab167d99a3236cecf227eb"
+    },
+    {
+      "bytes": 2661,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/inspect_download_settings.py",
+      "sha256": "40561c2b011fe8b667f73430cc13c35c0c71dd6ce7d5ca60c9f0f7b2b6fe8dde"
+    },
+    {
+      "bytes": 13948,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/live_acceptance.py",
+      "sha256": "02ef4e9c3e7d6d5c7df15d7697bbb843f759bbd8e6746e08f7b7b507093f610c"
+    },
+    {
+      "bytes": 13793,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/live_attachments.py",
+      "sha256": "2c84a5b80a96f44d26011f2c8ca5fd898c4c3b41b7b8b1fc60b71f8116740083"
+    },
+    {
+      "bytes": 7235,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/live_delivery.py",
+      "sha256": "e311a09cfac5a9f1a3aa2f654f084f9d40605a455902269d61a0bf0235a990e8"
+    },
+    {
+      "bytes": 18695,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/live_download_run.py",
+      "sha256": "92b88cd3e907a39fc27eb2c95fb42320cc4005a96ddfcc3f6a3f0ace5f86aa0c"
+    },
+    {
+      "bytes": 6452,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/live_new_session.py",
+      "sha256": "53dfe4397c048201fd2fa159538fcdd8487134038ed96ae358afeaa9d4139c49"
+    },
+    {
+      "bytes": 51844,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/live_package_run.py",
+      "sha256": "3c29d4b07360cd29d4569451c2ec1bfebdbba45fee1ce742932a8b15d055ff57"
+    },
+    {
+      "bytes": 19971,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/live_probe.py",
+      "sha256": "835d687173dbe8bb3d26c521c70a1def6bfbb132427da259fca23de6af331969"
+    },
+    {
+      "bytes": 14975,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/live_verify_completed_run.py",
+      "sha256": "ac010a3c3e8e829ce179d19b9533be66c56e6846c85f45a5d30be7971d5d3877"
+    },
+    {
+      "bytes": 3009,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/manual_live_copy_probe.py",
+      "sha256": "670fd9a70688b74f8c3faca618bc9c3392c99e4e669aa65364678ef612dbac57"
+    },
+    {
+      "bytes": 8120,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_agent_ui_runtime.py",
+      "sha256": "83ca0fa10c08ae3b04a68afb5068c4955a8cef62377632ef9c182f2a4871ef78"
+    },
+    {
+      "bytes": 15872,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_app_ports.py",
+      "sha256": "14d61c5a0c4e0342a05a22ca5e7e7fe3be66b81f129610902110adfae6719c6e"
+    },
+    {
+      "bytes": 8469,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_app_sessions.py",
+      "sha256": "3d0bb7a24744a47eaa152cb99a1634972118438a0b1c29c585c80190017deb9c"
+    },
+    {
+      "bytes": 13960,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_app_startup_flow.py",
+      "sha256": "632c312b96bb7dd4f4edfd235b86089729a263ea16db775b59fec6b715a914eb"
+    },
+    {
+      "bytes": 16332,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_archives.py",
+      "sha256": "82ea47e56fcfab803672d0c8a4cc2ef2403cb4a46ac795187aefd26547f6fafd"
+    },
+    {
+      "bytes": 4833,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_attachment_capacity.py",
+      "sha256": "f9b05e8ee60e902d8c3218f24ab7a437541ce0c1fcbf789caebe2710b2220de3"
+    },
+    {
+      "bytes": 7542,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_attachments.py",
+      "sha256": "1bf3eb00703aa2f347936a3e85d9d52449b9cb4005f38fb92200d55ebb3f01b4"
+    },
+    {
+      "bytes": 8657,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_automation_approval.py",
+      "sha256": "08fed114544fd65ef9e14663924d6d930d1b7f02ae23a00fddfd54b7eba60ea9"
+    },
+    {
+      "bytes": 116354,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_automation_packages.py",
+      "sha256": "78cd8fb94f23cd9aa4cad6f31454f5160f410071ae76f977baba164aa46600d8"
+    },
+    {
+      "bytes": 48127,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_browser.py",
+      "sha256": "5020941114ed6e8f9b2c0f42c9769c20276060861e03ba7b97b80b85716058bf"
+    },
+    {
+      "bytes": 3615,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_browser_plan_extensions.py",
+      "sha256": "7d5e25e0821d7f4c5e27d4b0cf2c6f3fd3311dd9e92a51152d93d57f8dbb6a94"
+    },
+    {
+      "bytes": 1746,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_bug_handoff.py",
+      "sha256": "289fc089cd28a60798474e0963d6030406c3e0ecd0b9ce5dcaf7c556619abbcd"
+    },
+    {
+      "bytes": 13034,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_bundle.py",
+      "sha256": "ca847f6b68918229bc98db99caaae1b3bda3e76fbb8bfd0405c061cebc947392"
+    },
+    {
+      "bytes": 33869,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_code_runner.py",
+      "sha256": "89bfed9dff0d3e34ef23e08c0cbf84e47db2aec93992f3671ec0ebf6a35f10d9"
+    },
+    {
+      "bytes": 11752,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_delivery.py",
+      "sha256": "1ee7a9112e2982feaef1ba7c33e1f267fb91f29ca507a3e0a7df5c54c1d29c05"
+    },
+    {
+      "bytes": 17472,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_delivery_integration.py",
+      "sha256": "794014ed7521c2a4b5a7ee35951f8c741af4c68ea350db506b720e8062cc8acc"
+    },
+    {
+      "bytes": 3759,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_diagnostics.py",
+      "sha256": "45345eae4401f8795d0de5c7dd2f4153a9d96298ab3e648203435121181565bb"
+    },
+    {
+      "bytes": 8143,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_discovery_contracts.py",
+      "sha256": "dd8b3a2ae9a50e9d948c1dba8527e53f96c9153675938010a9565c903620c2db"
+    },
+    {
+      "bytes": 10957,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_discovery_engine.py",
+      "sha256": "457810799af13b8978036dd0ab61920a1ee21f98ca149d5514876e122552238f"
+    },
+    {
+      "bytes": 8323,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_discovery_knowledge.py",
+      "sha256": "b4eef9562e12c218ef2e613574356c9f6d90e9ac4241b34b66b50ec65ee87ad5"
+    },
+    {
+      "bytes": 4886,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_discovery_transport.py",
+      "sha256": "c36a2a332b43386b176c47900684007c5d2076dd83ded903770f919cbb2da740"
+    },
+    {
+      "bytes": 10329,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_document_catalogue.py",
+      "sha256": "4577775f09be43c01bf2ab934176938298c955024d9a716a50599a024bae433f"
+    },
+    {
+      "bytes": 27108,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_downloads.py",
+      "sha256": "2c5e1eeb2277732cc323c778fc321ce33c4c0abc699e8f5703ecd2660cb2c7ff"
+    },
+    {
+      "bytes": 16192,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_edge_startup.py",
+      "sha256": "f9356cf6d0d75b6b6c683a6a095f7d37582167313097e591303e84233a220de2"
+    },
+    {
+      "bytes": 7201,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_feedback.py",
+      "sha256": "e53565cd8f90c6cda5507353864961f5a1f0134ef7782ca2b9035a51d529c69d"
+    },
+    {
+      "bytes": 3716,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_file_picker.py",
+      "sha256": "42b7de4857f9cc4b0c1ce6eedf5daca1358d5ddd8a5ac46e77e1f65ec8ec53a7"
+    },
+    {
+      "bytes": 16436,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_isolated_proof_mode.py",
+      "sha256": "2c9b9d2abe67a9ca6e36d6366c46fd66c6bf4153e34d608ac27eda2f600f3369"
+    },
+    {
+      "bytes": 2664,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_knowledge_health.py",
+      "sha256": "01404aef53efc4669e8bdc3046fd7c50b634e6f116f910f83a48ccf1c152bb7f"
+    },
+    {
+      "bytes": 8889,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_knowledge_repair.py",
+      "sha256": "156101bffbc3066a65c59915321a1e62311da82b61257ca11c56908d8067530c"
+    },
+    {
+      "bytes": 32361,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_launcher.py",
+      "sha256": "3075b6639843ce0d0f890c9882dfa6ab88215646a5fa3ca1b7104b6be28fcc9b"
+    },
+    {
+      "bytes": 8177,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_local_navigation.py",
+      "sha256": "916903ed72327af9a2ae32ecc886d39091b84d78c651961b4feda413bbae5c36"
+    },
+    {
+      "bytes": 83924,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_orchestrator.py",
+      "sha256": "8f0cbb685c548108d2375ad5dbde1182d3bc15ac90aec33b5afa26f86a5cb139"
+    },
+    {
+      "bytes": 2379,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_persistence.py",
+      "sha256": "59cb0ab7164e6178bf982f4d0a1108e337d2ef1beac41c5ebec2ce6a8d380182"
+    },
+    {
+      "bytes": 39726,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_protocol_state.py",
+      "sha256": "f4426c228d3e2d9377391c6d0ed0f758f92b413a820093b26c8a3c16fcf4e3c4"
+    },
+    {
+      "bytes": 18453,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_reconciliation.py",
+      "sha256": "144a8be732301e7ebff1e8e2156d86a4489a8db3ce2b16c3977b68fc7981bb6d"
+    },
+    {
+      "bytes": 5834,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_setup_resources.py",
+      "sha256": "c35b5fe411790f3c512dda3c9575fc9354222f0e1a2779765c7a3e556c2ebba9"
+    },
+    {
+      "bytes": 30060,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_site_knowledge.py",
+      "sha256": "6807708b3c91c7a58a4880a89dfc34813585fc5ea84c2f53b69af4dfc707ac5e"
+    },
+    {
+      "bytes": 6585,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_storage.py",
+      "sha256": "b837fca29f0d0e33a1b5c6e12451f92e856db17943036f9595d475f29c8f713a"
+    },
+    {
+      "bytes": 2291,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_sync.py",
+      "sha256": "732cce533a612ff94d2ec376033a373d8804c2b7b2385710cdcee8e0f14f5973"
+    },
+    {
+      "bytes": 3980,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_temp_storage.py",
+      "sha256": "26395b9c77c1061fbb02c0bfe7060d5c491a6f01ee47e98cd389e598207ebd2b"
+    },
+    {
+      "bytes": 5764,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_terminal_input.py",
+      "sha256": "470390727c43be6301fe4437a67d82768a8c811c585de31ae09b6f1fb981502b"
+    },
+    {
+      "bytes": 37640,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_tools.py",
+      "sha256": "0d4366bc448571638ab7b5e59cdeb9b969869c8f857c45b9a38991b5e9eb0098"
+    },
+    {
+      "bytes": 5392,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_version_launcher.py",
+      "sha256": "8c2467f932a066bd3b0ade28db3233537b5844e24c3a890ffc58e1e7032ec929"
+    },
+    {
+      "bytes": 18241,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_web_documents.py",
+      "sha256": "7fc3337dc3d70983c76c1e0a696119c38f969455c2b9d6753ffefd0341d0dd7b"
+    },
+    {
+      "bytes": 30954,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_web_navigation.py",
+      "sha256": "fc1deafb4abe889ac985aa3d3ee32c28dff17a06f9bb030a670e557e84c0ae07"
+    },
+    {
+      "bytes": 8710,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_web_operations.py",
+      "sha256": "8f124af26b63ed48c01ad67b3b16a10eee585bfa5d0759bf34ddeec80a6bd65b"
+    },
+    {
+      "bytes": 12631,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_web_privacy.py",
+      "sha256": "eaa7c362e12b243d5405816d9c4759aa8684242ef48aea62874f4f3d837d3e7f"
+    },
+    {
+      "bytes": 9089,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_web_transport.py",
+      "sha256": "eeb2dbabee1aa31cc588bf41dc42cc05ab22d49d9a6ab23f8b885f33f18206f0"
+    },
+    {
+      "bytes": 15319,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_website_integration.py",
+      "sha256": "9578397061e508c16e58ffc2ba0b24c4dfa727ddeb1e82809bb339ea98e9fb32"
+    },
+    {
+      "bytes": 6683,
+      "content_treatment": "summarized_entrypoint_or_module_path; exact source hash recorded",
+      "path": "tools/vdi-bridge/VDI-Test-Bridge.ps1",
+      "sha256": "6ed2ff277d0ab4fe2487a095d18a1209c84ec52cf247f40adc5ddaae10c7b3c2"
+    },
+    {
+      "bytes": 7528,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "version_launcher.py",
+      "sha256": "91df29e4084c62f1351989cf7208ce8725fcb1cb1a4b6cd52d5a5be9c21a8790"
+    }
+  ],
+  "source_revision_analyzed": "1b98bd2d41ba0019f6f823b2385b8bdc8a77d211",
+  "validation": {
+    "absolute_maximum_files": 20,
+    "archive_used": false,
+    "configured_maximum_files": 20,
+    "file_count": 6,
+    "manifest_included_in_file_count": true,
+    "staging_outside_final_output": true
+  }
+}
