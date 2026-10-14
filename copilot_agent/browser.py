@@ -21,6 +21,10 @@ class BrowserUIError(RuntimeError):
     pass
 
 
+class ExistingEdgeUnavailable(BrowserUIError):
+    """A user-selected existing Edge session failed attachment verification."""
+
+
 class ModelAccessError(BrowserUIError):
     """The UI reports that the chosen model is unavailable or silently fell back."""
 
@@ -508,6 +512,8 @@ class BrowserAdapter:
             except edge.EndpointError as exc:
                 if exact_endpoint is not None:
                     raise BrowserUIError('The exact dedicated Edge listener could not be attached; no fallback port or profile was used.') from exc
+                if getattr(self.config, '_user_selected_existing', False):
+                    raise ExistingEdgeUnavailable('The selected existing Edge session could not be attached.') from exc
                 self.browser = await self._connect_running_edge_fallback()
                 if self.browser is None:
                     raise
@@ -582,9 +588,14 @@ class BrowserAdapter:
             if auth_deadline is not None:
                 raise BrowserUIError('Copilot did not become ready after the interactive sign-in window expired. The Edge profile and session records are preserved; retry setup to resume.')
             raise BrowserUIError('Copilot editor/model picker was not ready before startup_timeout. Check sign-in/account access, then retry setup.')
-        except Exception:
+        except Exception as exc:
+            retry_as_new = (getattr(self.config, '_user_selected_existing', False)
+                            and self.startup_stage in {'controller', 'endpoint_probe', 'cdp_connection'})
             await self.diagnostics('startup')
             await self.close()
+            if retry_as_new:
+                raise ExistingEdgeUnavailable(
+                    'The selected existing Edge session could not be verified at attachment.') from exc
             raise
 
     async def _evaluate(self, script, arg=None):

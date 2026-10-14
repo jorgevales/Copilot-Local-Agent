@@ -12,6 +12,7 @@ The launcher asks which project version to run, then starts an authenticated loc
 
 ## Implemented
 - A compact Start agent card appears at the single local-navigation and knowledge-saving confirmation prompt. Start and Cancel submit the same `y` and `n` replies through `/api/submit`, the prompt broker and `app.run`; no terminal command or launch configuration is rebuilt. The card waits for backend feedback, prevents duplicate confirmation, preserves the first-request draft and reports local submission errors inline.
+- During regular startup, verified existing Edge sessions are offered through the normal backend prompt. Choose a listed port, start a new isolated Edge session, or cancel startup; if no verified session exists, a new one starts directly.
 - A cohesive light workspace palette and compact display mode.
 - Collapsible navigation and context panels; responsive layout.
 - Safe Markdown subset, code copy, basic tables and lists; raw HTML is inert.

@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 import uuid
 from .browser import (BrowserAdapter, BrowserUIError, CaptureTimeoutError,
+                      ExistingEdgeUnavailable,
                       SubmissionAmbiguousError, SubmissionNotSentError, model_rank)
 from .config import Config
 from .knowledge_health import check_knowledge_health
@@ -137,14 +138,47 @@ def _recent_events(state):
         return []
 
 
-async def choose_browser_endpoint(config, args, settings):
-    """Reuse only the exact owned profile; otherwise choose a free loopback port.
+async def _choose_existing_endpoint(endpoints, prompt):
+    """Ask whether to reuse one of the verified Edge sessions or launch a new one."""
+    if not endpoints:
+        return None
+    while True:
+        options = [f'{index}. Reuse the existing Edge session on port {item["port"]}'
+                   for index, item in enumerate(endpoints, 1)]
+        new_choice = len(endpoints) + 1
+        options.append(f'{new_choice}. Start a new isolated Edge session')
+        options.append('0. Cancel startup')
+        selected = (await prompt(
+            'Verified existing Edge sessions are available:\n'
+            + '\n'.join(options)
+            + f'\nChoose [1-{new_choice}, default 1]: '
+        )).strip().lower()
+        if not selected:
+            return endpoints[0]
+        if selected in {'0', 'c', 'cancel', 'q', 'quit', 'exit'}:
+            raise ValueError('Startup canceled at the Edge session selection; no browser was launched.')
+        if selected in {'new', 'n'}:
+            return None
+        if selected.isdecimal():
+            choice = int(selected)
+            if 1 <= choice <= len(endpoints):
+                return endpoints[choice - 1]
+            if choice == new_choice:
+                return None
+        system(f'Choose a number from 1 to {new_choice}, or 0 to cancel startup.')
+
+
+async def choose_browser_endpoint(config, args, settings, *, interactive=False,
+                                  prompt=ask, force_new=False):
+    """Select a verified Edge session or a free loopback port for a new one.
 
     Changes the in-memory config/settings only. The caller persists settings before
     launch. The browser adapter still repeats endpoint/profile validation and
     guards the profile with its controller mutex, including startup races.
     """
-    if config.attach_existing:
+    if not hasattr(config, '_new_session_profile_dir'):
+        config._new_session_profile_dir = config.profile_dir
+    if config.attach_existing and not force_new:
         return config
     debug_ports = settings.get('debug_ports', {})
     if not isinstance(debug_ports, dict):
@@ -173,13 +207,14 @@ async def choose_browser_endpoint(config, args, settings):
         # a stale/mismatched dedicated port as permission to launch elsewhere.
         candidates = [explicit_port]
     selected = None
+    verified = []
     endpoints = [edge.cdp_endpoint(port) for port in candidates]
     payloads = await asyncio.gather(*(
         asyncio.to_thread(edge.get_cdp_version, endpoint) for endpoint in endpoints))
-    # Reuse a verified running Edge before selecting any free launch port. This
-    # avoids starting a second browser merely because preferred port 9222 is free.
-    for port, endpoint, payload in zip(candidates, endpoints, payloads):
-        if payload:
+    if not force_new:
+        for port, endpoint, payload in zip(candidates, endpoints, payloads):
+            if not payload:
+                continue
             try:
                 edge.validate_endpoint(endpoint, payload)
                 discovered_item = discovered_by_port.get(port)
@@ -203,16 +238,28 @@ async def choose_browser_endpoint(config, args, settings):
                     await asyncio.to_thread(edge.validate_profile_ownership, port, config.profile_dir)
             except (edge.EndpointError, OSError, ValueError):
                 # Unknown or mismatched listeners are never attached.
-                pass
-            else:
-                selected = port
-                config.attach_existing = True
-                if discovered_item is not None:
-                    config._discovered_edge_endpoint = True
-                    if discovered_item['profile'] is not None:
-                        config.profile_dir = discovered_item['profile']
-                system('Reusing a verified running Edge session on local port ' + str(port) + '.')
-                break
+                continue
+            verified.append({'port': port, 'profile': discovered_item.get('profile') if discovered_item else None,
+                             'discovered': discovered_item is not None})
+
+    selected_existing = None
+    if verified:
+        if explicit_port:
+            selected_existing = verified[0]
+        elif interactive:
+            selected_existing = await _choose_existing_endpoint(verified, prompt)
+        else:
+            selected_existing = verified[0]
+    if selected_existing is not None:
+        selected = selected_existing['port']
+        config.attach_existing = True
+        if selected_existing['discovered']:
+            config._discovered_edge_endpoint = True
+            if selected_existing['profile'] is not None:
+                config.profile_dir = selected_existing['profile']
+        if interactive and not explicit_port:
+            config._user_selected_existing = True
+        system('Reusing a verified running Edge session on local port ' + str(selected) + '.')
     if selected is None:
         if explicit_port:
             explicit_payload = payloads[0] if payloads else None
@@ -458,7 +505,11 @@ async def run(args):
                 else 'Setup verified. S: Discoveries storage: ') + str(config.storage_dir))
         system('Python resource setup verified. Setup.cmd creates the project virtual environment and installs pinned dependencies before this storage step.')
         return
-    await choose_browser_endpoint(config, args, settings)
+    await choose_browser_endpoint(
+        config, args, settings,
+        interactive=not bool(args.resume or getattr(args, 'isolated_test_workspace', None)
+                              or getattr(args, 'local_knowledge_test_directory', None)),
+        prompt=ask)
     persist_runtime_settings(config, settings)
     for root in config.allowed_roots:
         if root not in {getattr(config, '_auto_s_drive_root', None),
@@ -525,7 +576,19 @@ async def run(args):
             state.data['status'] = 'capture_failed'
             state.save()
         resume_request_id = latest_committed_request_id(state) if resume_existing else None
-        await browser.start(resume_request_id=resume_request_id)
+        try:
+            await browser.start(resume_request_id=resume_request_id)
+        except ExistingEdgeUnavailable:
+            system('The selected existing Edge session could not be verified at attachment. Starting a new isolated Edge session.')
+            config.attach_existing = False
+            config._user_selected_existing = False
+            config.profile_dir = config._new_session_profile_dir
+            if hasattr(config, '_discovered_edge_endpoint'):
+                delattr(config, '_discovered_edge_endpoint')
+            await choose_browser_endpoint(config, args, settings, force_new=True)
+            persist_runtime_settings(config, settings)
+            browser = BrowserAdapter(config)
+            await browser.start(resume_request_id=resume_request_id)
         if _UI_ASK is None:
             from .terminal_input import TerminalInputBroker
             terminal_input = TerminalInputBroker()
