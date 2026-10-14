@@ -23,6 +23,8 @@ def _object(properties, required=()):
 TEXT = {"type": "string", "maxLength": 4096}
 KEY = {"type": "string", "maxLength": 128}
 LOCATOR = _object({key: TEXT for key in ("id", "testid", "role", "name", "label", "text", "css", "frame_selector")})
+LOCATOR['properties']['xpath'] = TEXT
+LOCATOR['properties']['nth'] = {'type': 'integer', 'minimum': 0, 'maximum': 10000}
 ASSERTION = _object({
     "kind": {"type": "string", "enum": ["visible", "hidden", "text", "url", "count", "enabled"]},
     "locator": LOCATOR, "value": TEXT,
@@ -103,13 +105,11 @@ def _validate_schema(value, schema):
 
 
 def _validate_locator(locator):
-    if not locator or not any(locator.get(key) for key in ("id", "testid", "role", "label", "text", "css")):
+    if not locator or not any(locator.get(key) for key in ("id", "testid", "role", "label", "text", "css", "xpath")):
         raise ValueError("A semantic locator is required")
-    if "role" in locator and not locator.get("name"):
-        raise ValueError("Role locators require an exact accessible name")
     if "name" in locator and not locator.get("role"):
         raise ValueError("Accessible name requires a role")
-    if any(not value.strip() for value in locator.values()):
+    if any(not value.strip() for key, value in locator.items() if key != 'nth'):
         raise ValueError("Locator values cannot be empty")
     css = locator.get("css", "")
     if css.startswith(("xpath=", "//", "..")) or ">>>" in css:
@@ -425,13 +425,18 @@ async def _candidates(page, strategy, context):
     if strategy.get("testid"):
         candidates.append(("testid", scope.get_by_test_id(strategy["testid"])))
     if strategy.get("role"):
-        candidates.append(("role", scope.get_by_role(strategy["role"], name=strategy["name"], exact=True)))
+        options = {'name': strategy['name'], 'exact': True} if strategy.get('name') else {}
+        candidates.append(("role", scope.get_by_role(strategy["role"], **options)))
     if strategy.get("label"):
         candidates.append(("label", scope.get_by_label(strategy["label"], exact=True)))
     if strategy.get("text"):
         candidates.append(("text", scope.get_by_text(strategy["text"], exact=True)))
     if strategy.get("css"):
         candidates.append(("css", scope.locator(strategy["css"])))
+    if strategy.get('xpath'):
+        candidates.append(('xpath', scope.locator('xpath=' + strategy['xpath'])))
+    if 'nth' in strategy:
+        candidates = [(method, locator.nth(strategy['nth'])) for method, locator in candidates]
     # Once a locator method has succeeded for this exact generic strategy in
     # this session, try it first. The preference contains only hashes and
     # method names, so it cannot retain page/customer labels.

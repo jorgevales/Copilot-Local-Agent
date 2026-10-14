@@ -49,6 +49,7 @@ class Orchestrator:
         self.feedback = Feedback(display, state)
         self.approvals = ApprovalManager(state, approval_decider, self.feedback)
         self.approvals.fast_package_session = bool(getattr(config, '_continuous_package_session', False))
+        self.approvals.supervised_session = bool(getattr(config, '_supervised_session', False))
         self.process_registry = ManagedProcessRegistry(state.directory)
         self.live_seen = {}
         self.navigation_domains = set()  # Fresh local browser approval only; never inherited on restart.
@@ -874,6 +875,7 @@ class Orchestrator:
         return target
 
     async def _send(self, kind: str, content, extra_attachments=()):
+        self.config._supervised_session = self.approvals.supervised_session
         await self._finish_next_turn_preparation()
         prepared = self._prepared_initialization if kind == 'initialize' and not extra_attachments else None
         if prepared is not None:
@@ -1138,7 +1140,8 @@ class Orchestrator:
         recovered = recover_missing_navigation(self.state, self.browser)
         if recovered:
             self.feedback.emit('Orchestrator', 'Lost navigation tab: prior outcome retained as unverified. Fresh approved navigation may proceed; re-observe the page before using its facts.')
-        if self.base_context.get('discovery_synthesis_pending') and response['tool_requests']:
+        if (self.base_context.get('discovery_synthesis_pending') and response['tool_requests']
+                and not self.approvals.supervised_session):
             from .discovery_contracts import DiscoveryError
             raise DiscoveryError('synthesis_only', '$', 'The consolidated discovery/navigation run has ended. Synthesize actual evidence and gaps; new execution requires a new user request.')
         catalog = {d['name']: d for d in self.registry.definitions()}
@@ -1163,7 +1166,7 @@ class Orchestrator:
                     'The identical ' + str(prior_failure.get('request', {}).get('name', call['name'])) +
                     ' action already failed under call_id ' + str(prior_failure.get('call_id', 'unknown')) +
                     '. Its observed result is: ' + evidence +
-                    '. No new action ran. Choose a materially different safe method or arguments using this result, '
+                    '. No new action ran. Correct the specific failing argument, selector, path or code using this result; a small justified repair to the same approach is enough, '
                     'or explain the actual blocker; changing only call_id is not a recovery.'
                 )
             if (catalog[call['name']]['approval_policy'] != 'read_only'
@@ -1459,7 +1462,7 @@ class Orchestrator:
             execution_calls = list(response['tool_requests'])
             plan = {'action_plan': response['action_plan'], 'tool_requests': execution_calls, 'risk_summary': response['risk_summary']}
             prepared_plan = None
-            package_local_build_requested = (route.get('route') == 'package' and any(
+            package_local_build_requested = (not self.approvals.supervised_session and route.get('route') == 'package' and any(
                 self._package_local_build_rejection(call['name']) is not None
                 for call in response['tool_requests']))
             if (not package_local_build_requested and len(response['tool_requests']) > 1
@@ -1515,7 +1518,7 @@ class Orchestrator:
                         if route.get('route') == 'package':
                             self._queue_reviewed_package_run(execution_calls, cached_review)
                         continue
-                if route.get('route') == 'package':
+                if route.get('route') == 'package' and not self.approvals.supervised_session:
                     rejected = self._package_local_build_rejection(call['name'])
                     if rejected is not None:
                         self.state.begin_call(call, state_changing=False)
@@ -1896,8 +1899,8 @@ class Orchestrator:
             kind, content = 'tool_results', {'results': redact(results), 'not_executed': not_executed, 'instruction': (
                 'Use these actual outcomes. Never infer unexecuted steps succeeded. A denial is authoritative. '
                 'When a method fails with verified certain effects, continue using '
-                'a materially different safe approach available through registered tools or a newly proposed exact '
-                'Code Runner script. Every materially changed local execution requires its normal fresh approval. '
+                'a targeted repair to that same approach, including a small selector, argument, path, timeout or script correction, through registered tools or a newly proposed exact '
+                'Code Runner script. Preserve successful work. The supervised session grant authorizes valid revisions automatically; other sessions use their applicable approval flow. '
                 'If a navigation-only browser call is uncertain, request browser.info, then browser.reconcile '
                 'with fresh evidence. If a non-navigation browser effect cannot be reconciled, request the separately '
                 'approved browser.recover_uncertain action; it quarantines the unknown outcome, verifies a fresh '

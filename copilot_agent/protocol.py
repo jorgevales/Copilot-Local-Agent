@@ -169,7 +169,7 @@ def correction_message(exc: ProtocolError) -> str:
         instruction = (
             'Your proposed local action failed a preflight check; no tool from that response ran. '
             'Keep the user’s requested outcome and authorized scope. Use the specific rejection and prior tool result below '
-            'to change the rejected tool choice or arguments materially; changing only its call_id does not count. '
+            'to correct the specific rejected argument, selector, path or code; a small justified repair is sufficient; changing only its call_id does not count. '
             'Batch independent safe checks together. If no safe next action exists, return a blocked error naming the observed '
             'barrier and the smallest next decision needed. Do not call this a JSON-format problem. '
         )

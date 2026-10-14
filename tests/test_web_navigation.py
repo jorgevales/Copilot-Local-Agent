@@ -271,6 +271,17 @@ class NavigationBrowserTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(PolicyError):
             await read_business_field(self.page.locator('#credential-fixture'))
 
+    async def test_unnamed_button_works_with_observed_role_position_and_xpath(self):
+        await self.page.set_content('''<h1>Unnamed controls</h1><button type="button"></button>
+            <button type="button" onclick="document.querySelector('#done').hidden=false"></button>
+            <p id="done" hidden>Completed</p>''')
+        args = {'task_id': 'unnamed-controls', 'steps': [{'id': 'click-unnamed', 'op': 'click',
+            'locator': {'role': 'button', 'nth': 1}, 'effect': 'navigation',
+            'expect': [{'kind': 'visible', 'locator': {'css': '#done'}}]}],
+            'success': [{'kind': 'text', 'locator': {'xpath': '//*[@id="done"]'}, 'value': 'Completed'}]}
+        result = await self.execute('browser.plan', args)
+        self.assertEqual('verified', result['status'], result)
+
     async def test_spa_transition_and_delayed_rendering(self):
         await self.page.goto("https://fixture.test/spa")
         plan = {"task_id": "task-1", "steps": [{"id": "spa", "op": "click", "locator": {"role": "button", "name": "Open profile"}, "effect": "navigation", "expect": [{"kind": "url", "value": "https://fixture.test/app/profile"}, {"kind": "text", "locator": {"role": "heading", "name": "Profile"}, "value": "Profile"}]}], "success": [{"kind": "url", "value": "https://fixture.test/app/profile"}]}

@@ -19,11 +19,13 @@ class ApprovalManager:
         # resumed conversation or new agent process must obtain fresh consent.
         self._package_session_grant = False
         self.fast_package_session = False
+        self.supervised_session = False
 
     def revoke_session_grants(self):
         """Drop ephemeral package authority when the owning agent session ends."""
         self._package_session_grant = False
         self.fast_package_session = False
+        self.supervised_session = False
 
     def _show(self, preview, path):
         prepared = list((preview.get('prepared_pending_plan') or {}).values())
@@ -164,6 +166,11 @@ class ApprovalManager:
         else:
             plan_hash = canonical_hash({'plan': plan, 'prepared_current_call': prepared}) if prepared is not None else canonical_hash(plan)
         call_hash = canonical_hash({'plan_hash': plan_hash, 'call': call})
+        if self.supervised_session:
+            self.state.event('supervised_session_authorization_used', tool=call['name'],
+                             plan_hash=plan_hash, call_hash=call_hash)
+            self.feedback.emit('Session', 'Running supervised plan: ' + str(call['name']) + '.')
+            return True, plan_hash
         grant = self.state.data['approvals'].get(plan_hash)
         package_scope = bool((prepared or {}).get('approval_scope_type') == 'automation_package')
         package_fresh = package_scope and bool((prepared or {}).get('requires_fresh_run_confirmation'))
@@ -184,7 +191,7 @@ class ApprovalManager:
         preview = {'approval_scope': 'Only this exact plan or execution; material changes require renewed approval.',
                    'plan_hash': plan_hash, 'call_hash': call_hash, 'current_call_id': call['call_id'],
                    'complete_pending_plan': plan, 'prepared_code': prepared,
-                   'choices': ['deny', 'once', 'plan']}
+                   'choices': ['deny', 'once', 'plan', 'supervised']}
         if package_scope:
             preview['approval_scope'] = (
                 'Fresh confirmation for this exact package run is required. Options 2, 3 and 4 all authorize this run; '
@@ -193,7 +200,8 @@ class ApprovalManager:
                 'package hashes, tools, effects, paths, and resource scope are shown for transparency. Protected-path and '
                 'platform handoffs remain active.')
             preview['approval_scope_type'] = 'automation_package'
-            preview['choices'] = ['deny', 'once', 'plan', 'session']
+            preview['choices'] = ['deny', 'once', 'plan', 'session', 'supervised']
+        preview['approval_scope'] += ' You may instead authorize all valid local plans and revisions for this supervised session.'
         if prepared_plan is not None:
             preview['prepared_pending_plan'] = prepared_plan
         path = self.state.directory / 'approvals' / (call_hash + '.json')
@@ -214,17 +222,20 @@ class ApprovalManager:
                 decision = await decision
         else:
             prompt_text = ('Choose 1 = Deny, 2 = Allow this exact execution once, '
-                           '3 = Allow this exact displayed plan, 4 = Allow inspected packages for this agent session [1/2/3/4]: '
+                           '3 = Allow this exact displayed plan, 4 = Allow inspected packages, 5 = Allow all valid plans for this supervised session [1/2/3/4/5]: '
                            if package_scope else
-                           'Choose 1 = Deny, 2 = Allow this exact execution once, 3 = Allow this exact displayed plan [1/2/3]: ')
+                           'Choose 1 = Deny, 2 = Allow once, 3 = Allow this plan, 4 = Allow all valid plans for this supervised session [1/2/3/4]: ')
             prompt = self.feedback.prompt('User', prompt_text)
             decision = await asyncio.to_thread(input, prompt)
         decision = str(decision).strip().lower()
-        decision = {'1': 'deny', '2': 'once', '3': 'plan', '4': 'session'}.get(decision, decision)
-        allowed_decisions = {'deny', 'once', 'plan'} | ({'session'} if package_scope else set())
+        decision = {'1': 'deny', '2': 'once', '3': 'plan', '4': 'session' if package_scope else 'supervised',
+                    '5': 'supervised' if package_scope else 'deny'}.get(decision, decision)
+        allowed_decisions = {'deny', 'once', 'plan', 'supervised'} | ({'session'} if package_scope else set())
         if decision not in allowed_decisions:
             decision = 'deny'
-        if decision == 'session':
+        if decision == 'supervised':
+            self.supervised_session = True
+        elif decision == 'session':
             self._package_session_grant = True
         else:
             self.state.grant(plan_hash if decision == 'plan' else call_hash, decision)
@@ -232,4 +243,4 @@ class ApprovalManager:
             self.state.data['approvals'][plan_hash]['expires_at'] = time.time() + 1800
             self.state.save()
         self.feedback.emit('User', 'Approval decision: ' + decision + '.')
-        return decision in {'once', 'plan', 'session'}, plan_hash if decision in {'plan', 'session'} else call_hash
+        return decision in {'once', 'plan', 'session', 'supervised'}, plan_hash if decision in {'plan', 'session', 'supervised'} else call_hash

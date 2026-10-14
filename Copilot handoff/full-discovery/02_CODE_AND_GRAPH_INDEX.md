@@ -744,6 +744,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `copilot_agent.config`, `copilot_agent.storage`, `json`, `os`, `pathlib`, `tempfile`, `unittest`, `unittest.mock`
 - Public symbols: `class StorageTests(unittest.TestCase); 13 public methods`
 
+### `tests/test_supervised_session.py`
+
+- Role: Implementation module; responsibilities are identified by its public symbols and imports.
+- Direct imports: `copilot_agent.approvals`, `copilot_agent.config`, `copilot_agent.policy`, `copilot_agent.state`, `copilot_agent.web_navigation`, `copy`, `pathlib`, `tempfile`, `tests`, `tests.test_orchestrator`, `tests.test_web_navigation`, `unittest`, `unittest.mock`
+- Public symbols: `class SupervisedSessionTests(unittest.IsolatedAsyncioTestCase); 7 public methods`
+
 ### `tests/test_sync.py`
 
 - Role: Implementation module; responsibilities are identified by its public symbols and imports.
@@ -784,7 +790,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Executable headless browser fixtures; requests are fulfilled locally, never production.
 - Direct imports: `asyncio`, `copilot_agent.policy`, `copilot_agent.web_navigation`, `copy`, `pathlib`, `tempfile`, `types`, `unittest`
-- Public symbols: `class NavigationBrowserTests(unittest.IsolatedAsyncioTestCase); 26 public methods`; `class NavigationSchemaTests(unittest.TestCase); 3 public methods`; `search_plan()`
+- Public symbols: `class NavigationBrowserTests(unittest.IsolatedAsyncioTestCase); 27 public methods`; `class NavigationSchemaTests(unittest.TestCase); 3 public methods`; `search_plan()`
 
 ### `tests/test_web_operations.py`
 

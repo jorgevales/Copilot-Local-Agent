@@ -1,5 +1,10 @@
 # Copilot Local Agent
 
+Startup can authorize **all valid plans and revisions for one supervised session**,
+without individual approval prompts. Small repairs may keep the same approach;
+unnamed controls support role, CSS, XPath and explicit positions. See
+[supervised continuous execution](docs/SUPERVISED_SESSIONS.md).
+
 Customer and company data work is enabled by default. Authorized customer reads,
 discovery and requested artifacts use the normal local tools, with no separate
 customer-category gate. Customer navigation and declared internal package hosts

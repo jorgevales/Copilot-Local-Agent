@@ -561,7 +561,7 @@ async def run(args):
            else 'Agent-owned writes are restricted to the isolated proof workspace.' if getattr(config, '_automation_test_mode', False)
            else 'Agent-owned writes are restricted to the S: share; no C: or OneDrive storage fallback is permitted.')
     system('Third-party browser domains: ' + ', '.join(config.allowed_domains))
-    system('Package code follows your session choice below. Other generated-code execution requires approval.')
+    system('Starting this supervised session authorizes valid local plans and revisions without individual approval prompts. Stop remains available.')
     system('Useful Findings are saved on any valid turn; their file is attached every ten messages.')
     system('File delivery: actual Copilot UI downloads and verified ZIP extraction; no Created-folder monitoring.')
     isolated_proof = getattr(config, '_automation_test_mode', False)
@@ -569,8 +569,9 @@ async def run(args):
     await choose_package_mode(config, ask, system,
         supplied=getattr(args, 'package_mode', None) or
                  ('reviewed' if isolated_proof or args.yes_setup and _UI_ASK is None else None))
-    confirmed = False if isolated_proof else bool(args.yes_setup) or (await ask('Allow local navigation and verified knowledge saving for this run [Y/n]? ')).strip().lower() in {'', 'y', 'yes'}
+    confirmed = False if isolated_proof else bool(args.yes_setup) or (await ask('Allow all valid local plans and revisions without individual approval for this supervised session [Y/n]? ')).strip().lower() in {'', 'y', 'yes'}
     config._local_navigation_confirmed = confirmed
+    config._supervised_session = confirmed
     state.data['visible'] = True
     if not confirmed and not isolated_proof:
         state.data['status'] = 'cancelled'
