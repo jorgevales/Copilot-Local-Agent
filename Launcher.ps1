@@ -130,11 +130,16 @@ function Get-PipConfiguration([string]$Executable, [string[]]$PythonFlags) {
 
 function Get-WorkingPip([string]$Executable, [string[]]$PythonFlags) {
     $ErrorActionPreference = 'Continue'
-    $description = @(& $Executable @PythonFlags -m pip --version 2>$null)
-    if ($LASTEXITCODE -ne 0 -or $description.Count -eq 0) { return $null }
     # A damaged virtualenv seed can import pip but lack its distribution metadata.
-    & $Executable @PythonFlags -c 'import pip; from importlib.metadata import distribution; assert distribution(pip.__name__).version == pip.__version__' 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { return $null }
+    $pipProbe = @'
+import pip
+from importlib.metadata import distribution
+package = distribution(pip.__name__)
+assert package.version == pip.__version__
+print('pip ' + package.version + ' from ' + str(package.locate_file('')))
+'@
+    $description = @(& $Executable @PythonFlags -c $pipProbe 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $description.Count -eq 0) { return $null }
     return ($description -join ' ').Trim()
 }
 
@@ -232,8 +237,10 @@ function Initialize-AgentEnvironment([string]$BasePython, [string[]]$PythonFlags
         if ($env:PIP_TARGET) { throw 'PIP_TARGET redirects package installation. Clear that override before running Setup; no settings were changed.' }
         $pipConfiguration = Get-PipConfiguration $environmentPython $PythonFlags
         if ($pipConfiguration -match '(?im)^\s*[^=]*\.target\s*=') { throw 'Pip configuration redirects installation with target. Remove that override before Setup; no settings were changed.' }
-        Write-Host 'Installing the pinned project dependencies (the configured package mirror is respected).'
-        Invoke-SetupPython $environmentPython ($PythonFlags + @('-m','pip','install','--requirement',$requirements,'--disable-pip-version-check','--no-user','--prefix',$environmentPath))
+        $dependencySetup = Join-Path $ProjectRoot 'bootstrap\setup_dependencies.py'
+        if (-not (Test-Path -LiteralPath $dependencySetup -PathType Leaf) -or -not (Test-SafePythonEntry (Get-Item -LiteralPath $dependencySetup -Force))) { throw 'The package setup helper is missing or redirected. Pull the complete repository and retry Setup.' }
+        Write-Host 'Checking existing packages first. Downloads use your configured package source and tested unpacking folders.'
+        Invoke-SetupPython $environmentPython ($PythonFlags + @($dependencySetup,'install',$requirements,$environmentPath))
         return $environmentPython
     } finally { if ($setupLock) { $setupLock.Dispose() } }
 }
@@ -426,6 +433,7 @@ def locked_versions(text):
         if not line or line.startswith('#'):
             continue
         name, separator, pinned = line.partition('==')
+        name = name.lower().replace('-', '_').replace('.', '_')
         if (not separator or not name or not pinned or name in result
                 or not all(char.isalnum() or char in '._-' for char in name)
                 or not all(char.isalnum() or char in '._+-!' for char in pinned)):

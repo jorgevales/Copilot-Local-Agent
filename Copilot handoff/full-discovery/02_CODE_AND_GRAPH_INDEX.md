@@ -51,6 +51,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Role: Implementation module; responsibilities are identified by its public symbols and imports.
 - Direct imports: `copilot_agent.app`
 
+### `bootstrap/setup_dependencies.py`
+
+- Role: Repeat-safe package setup. Scratch files only; agent knowledge stays on S:.
+- Direct imports: `__future__`, `collections`, `hashlib`, `importlib`, `os`, `pathlib`, `re`, `subprocess`, `sys`, `types`, `uuid`
+- Public symbols: `candidates(project, env)`; `folder(value)`; `health_check(pins)`; `install(requirements, prefix, *, versions=installed_versions, run=run_python, health=None, environ=None, probe_folder=probe, ask=input)`; `installed_versions()`; `main()`; `path_failure(output)`; `pins_from(path)`; `probe(path)`; `run_python(args, env)`
+
 ### `copilot_agent/__init__.py`
 
 - Role: Local, policy-controlled Copilot web UI agent.
@@ -622,7 +628,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Exercise the launcher's actual Python portability probe without private S:.
 - Direct imports: `ast`, `os`, `pathlib`, `re`, `shutil`, `subprocess`, `sys`, `tempfile`, `unittest`, `unittest.mock`
-- Public symbols: `class PythonSetupChoiceTests(unittest.TestCase); 24 public methods`; `class SharedPathFallbackTests(unittest.TestCase); 1 public methods`; `class SharedRuntimeProbeTests(unittest.TestCase); 15 public methods`
+- Public symbols: `class PythonSetupChoiceTests(unittest.TestCase); 24 public methods`; `class SharedPathFallbackTests(unittest.TestCase); 1 public methods`; `class SharedRuntimeProbeTests(unittest.TestCase); 16 public methods`
 
 ### `tests/test_local_navigation.py`
 
@@ -665,6 +671,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Role: Automatic reconciliation uses the original owned tab and fresh page state.
 - Direct imports: `copilot_agent.reconciliation`, `copilot_agent.state`, `copilot_agent.tools`, `pathlib`, `tempfile`, `unittest`
 - Public symbols: `class Browser; 2 public methods`; `class Page; 4 public methods`; `class ReconciliationTests(unittest.IsolatedAsyncioTestCase); 20 public methods`; `class RecoveryOrchestrationTests(unittest.IsolatedAsyncioTestCase); 2 public methods`
+
+### `tests/test_setup_dependencies.py`
+
+- Role: Installer path/reuse regressions; simulated VDI error, actual offline pip proof.
+- Direct imports: `importlib.util`, `os`, `pathlib`, `subprocess`, `sys`, `tempfile`, `types`, `unittest`, `zipfile`
+- Public symbols: `class DependencySetupTests(unittest.TestCase); 9 public methods`
 
 ### `tests/test_setup_resources.py`
 
@@ -1202,11 +1214,16 @@ function Get-PipConfiguration([string]$Executable, [string[]]$PythonFlags) {
 
 function Get-WorkingPip([string]$Executable, [string[]]$PythonFlags) {
     $ErrorActionPreference = 'Continue'
-    $description = @(& $Executable @PythonFlags -m pip --version 2>$null)
-    if ($LASTEXITCODE -ne 0 -or $description.Count -eq 0) { return $null }
     # A damaged virtualenv seed can import pip but lack its distribution metadata.
-    & $Executable @PythonFlags -c 'import pip; from importlib.metadata import distribution; assert distribution(pip.__name__).version == pip.__version__' 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { return $null }
+    $pipProbe = @'
+import pip
+from importlib.metadata import distribution
+package = distribution(pip.__name__)
+assert package.version == pip.__version__
+print('pip ' + package.version + ' from ' + str(package.locate_file('')))
+'@
+    $description = @(& $Executable @PythonFlags -c $pipProbe 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $description.Count -eq 0) { return $null }
     return ($description -join ' ').Trim()
 }
 
@@ -1304,8 +1321,10 @@ function Initialize-AgentEnvironment([string]$BasePython, [string[]]$PythonFlags
         if ($env:PIP_TARGET) { throw 'PIP_TARGET redirects package installation. Clear that override before running Setup; no settings were changed.' }
         $pipConfiguration = Get-PipConfiguration $environmentPython $PythonFlags
         if ($pipConfiguration -match '(?im)^\s*[^=]*\.target\s*=') { throw 'Pip configuration redirects installation with target. Remove that override before Setup; no settings were changed.' }
-        Write-Host 'Installing the pinned project dependencies (the configured package mirror is respected).'
-        Invoke-SetupPython $environmentPython ($PythonFlags + @('-m','pip','install','--requirement',$requirements,'--disable-pip-version-check','--no-user','--prefix',$environmentPath))
+        $dependencySetup = Join-Path $ProjectRoot 'bootstrap\setup_dependencies.py'
+        if (-not (Test-Path -LiteralPath $dependencySetup -PathType Leaf) -or -not (Test-SafePythonEntry (Get-Item -LiteralPath $dependencySetup -Force))) { throw 'The package setup helper is missing or redirected. Pull the complete repository and retry Setup.' }
+        Write-Host 'Checking existing packages first. Downloads use your configured package source and tested unpacking folders.'
+        Invoke-SetupPython $environmentPython ($PythonFlags + @($dependencySetup,'install',$requirements,$environmentPath))
         return $environmentPython
     } finally { if ($setupLock) { $setupLock.Dispose() } }
 }
@@ -1498,6 +1517,7 @@ def locked_versions(text):
         if not line or line.startswith('#'):
             continue
         name, separator, pinned = line.partition('==')
+        name = name.lower().replace('-', '_').replace('.', '_')
         if (not separator or not name or not pinned or name in result
                 or not all(char.isalnum() or char in '._-' for char in name)
                 or not all(char.isalnum() or char in '._+-!' for char in pinned)):

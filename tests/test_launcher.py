@@ -154,6 +154,12 @@ class SharedRuntimeProbeTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError,'requirements.lock.txt'):
                     self.dependencies(wrong,expected,True)
 
+    def test_dependency_lock_accepts_hyphen_alias_and_rejects_canonical_duplicate(self):
+        lock='playwright==1.55.0\ngreenlet==3.5.6\npyee==13.0.1\ntyping-extensions==4.16.0\n'
+        self.assertIn('typing_extensions', self.locked_versions(lock))
+        with self.assertRaisesRegex(RuntimeError, 'unique exact'):
+            self.locked_versions(lock+'typing_extensions==4.16.0\n')
+
     def test_development_keeps_local_playwright_dependency_allowed(self):
         installed = {'playwright':{'version':'1.55.0','location':r'C:\Local\site-packages'}}
         self.dependencies(installed,{'playwright':'1.55.0'},False)
@@ -288,12 +294,13 @@ class PythonSetupChoiceTests(unittest.TestCase):
         bootstrap = Path(directory) / 'bootstrap'
         bootstrap.mkdir()
         shutil.copyfile(Path(__file__).resolve().parents[1] / 'bootstrap' / 'virtualenv.pyz', bootstrap / 'virtualenv.pyz')
+        shutil.copyfile(Path(__file__).resolve().parents[1] / 'bootstrap' / 'setup_dependencies.py', bootstrap / 'setup_dependencies.py')
         path = str(directory).replace("'", "''")
         return self.run_helpers("$global:operations=[System.Collections.Generic.List[string]]::new(); function Get-PipConfiguration { return '' }; function Get-WorkingPip { return 'pip fixture' }; function Invoke-SetupPython($Executable,$Arguments) { $global:operations.Add(($Arguments -join '|')); " + fail + " if (($Arguments -join '|') -like '*virtualenv.pyz*') { $envPath=$Arguments[-1]; New-Item -ItemType Directory -Path (Join-Path $envPath 'Scripts') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $envPath 'pyvenv.cfg') -Value 'fixture'; Set-Content -LiteralPath (Join-Path $envPath 'Scripts\\python.exe') -Value 'fixture' } }; " + body.replace('PROJECT', "'"+path+"'"))
 
     def test_setup_creates_environment_installs_pins_and_retains_lock(self):
         with tempfile.TemporaryDirectory() as directory:
-            output = self.environment_fixture(directory, "$result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; if ($operations.Count -ne 4 -or $operations[1] -notlike '*virtualenv.pyz|--no-download|--no-periodic-update*' -or $operations[3] -notlike '*pip|install|--requirement*--no-user|--prefix*') { throw 'Wrong setup sequence' }; if ($result -notlike '*Scripts\\python.exe') { throw 'Wrong interpreter' }; if (-not (Test-Path -LiteralPath (Join-Path PROJECT '.venv-setup.lock'))) { throw 'Lock not retained' }; Write-Output 'passed'")
+            output = self.environment_fixture(directory, "$result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; if ($operations.Count -ne 4 -or $operations[1] -notlike '*virtualenv.pyz|--no-download|--no-periodic-update*' -or $operations[3] -notlike '*setup_dependencies.py|install|*') { throw 'Wrong setup sequence' }; if ($result -notlike '*Scripts\\python.exe') { throw 'Wrong interpreter' }; if (-not (Test-Path -LiteralPath (Join-Path PROJECT '.venv-setup.lock'))) { throw 'Lock not retained' }; Write-Output 'passed'")
             self.assertIn('passed', output)
 
     def test_environment_bootstrap_needs_neither_base_venv_nor_base_pip(self):
@@ -328,7 +335,7 @@ class PythonSetupChoiceTests(unittest.TestCase):
             old.mkdir()
             (old / 'old-file.txt').write_text('keep old environment')
             failure = "if (($Arguments -join '|') -like '*virtualenv.pyz*' -and $Arguments -notcontains '--seeder') { $partial=Join-Path $Arguments[-1] 'Scripts'; New-Item -ItemType Directory -Path $partial -Force | Out-Null; Set-Content -LiteralPath (Join-Path $partial 'partial-file.txt') -Value 'keep partial'; throw 'damaged app-data pip seed' };"
-            body = "$result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; $archives=@(Get-ChildItem -LiteralPath PROJECT -Directory -Filter '.venv-incomplete-*'); $old=@($archives | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'old-file.txt') }); $partial=@($archives | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'Scripts\\partial-file.txt') }); if ($archives.Count -ne 2 -or $old.Count -ne 1 -or $partial.Count -ne 1 -or $operations.Count -ne 5 -or $operations[2] -notlike '*--seeder|pip*' -or $operations[4] -notlike '*|pip|install|*') { throw 'Seeder fallback lost files or skipped validation' }; Write-Output 'passed'"
+            body = "$result=Initialize-AgentEnvironment 'base' @('-B') 'probe' 'development' PROJECT; $archives=@(Get-ChildItem -LiteralPath PROJECT -Directory -Filter '.venv-incomplete-*'); $old=@($archives | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'old-file.txt') }); $partial=@($archives | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'Scripts\\partial-file.txt') }); if ($archives.Count -ne 2 -or $old.Count -ne 1 -or $partial.Count -ne 1 -or $operations.Count -ne 5 -or $operations[2] -notlike '*--seeder|pip*' -or $operations[4] -notlike '*setup_dependencies.py|install|*') { throw 'Seeder fallback lost files or skipped validation' }; Write-Output 'passed'"
             output = self.environment_fixture(directory, body, failure)
             self.assertIn('passed', output)
 
