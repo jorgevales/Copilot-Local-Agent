@@ -8,6 +8,10 @@ or keep refreshing, then pass saved shared-storage paths to the agent. See the
 callable through `crawl4ai.crawl` and `crawl4ai.read`, using the connected Edge
 session for public or internal websites without fixed page/depth ceilings.
 
+Edge startup now isolates native ownership queries and retries failed new-session
+launches through direct installed Edge and verified S:/UNC profile spellings.
+See [Edge startup recovery and validation](docs/EDGE_STARTUP_RECOVERY.md).
+
 Public exploration now defaults to [Crawl4AI](https://github.com/unclecode/crawl4ai)
 through `discovery.manifest`: continuous bounded parallel expansion, up to 1,000
 pages, and reuse of saved unexplored routes. Update dependencies with `Setup.cmd`.

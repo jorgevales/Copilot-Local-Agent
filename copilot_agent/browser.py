@@ -470,6 +470,34 @@ class BrowserAdapter:
                 await asyncio.sleep(.25 * (round_index + 1))
         return None
 
+    async def _connect_direct_edge_fallback(self):
+        """Retry new owned launches; keep the chosen port and exact profile."""
+        if self.config.attach_existing or getattr(self.config, '_proof_exact_edge_endpoint', None):
+            return None
+        profile = Path(self.config.profile_dir).expanduser().resolve()
+        executable = edge.find_edge_executable(self.config.edge_executable)
+        if self._launched_process is not None:
+            exit_code = self._launched_process.poll()
+            if isinstance(exit_code, int):
+                print('[System] Browser launch helper exited with code 0x' + format(exit_code & 0xffffffff, '08X') + '; trying independent launch routes.')
+        for label, spelling, software_graphics in edge.direct_profile_candidates(profile):
+            print('[System] Browser startup retry: ' + label + '; keeping the same profile and debugging port.')
+            # An owner failure can leave a usable Edge child behind. Recheck it
+            # before launching, and prove its identity before attaching.
+            payload = await asyncio.to_thread(edge.get_cdp_version, self.endpoint)
+            try:
+                if payload is None:
+                    self._launched_process = await asyncio.to_thread(edge.launch_edge_direct,
+                        executable, self.config.debug_port, spelling, software_graphics=software_graphics)
+                def verify():
+                    edge.validate_launched_endpoint(self.config.debug_port, profile, self._launched_process)
+                return await edge.connect_bounded(self._playwright, self.endpoint,
+                    min(20, self.config.startup_timeout), process=self._launched_process,
+                    initial_payload=payload, endpoint_validator=verify, endpoint_wait_timeout=10)
+            except (edge.EndpointError, OSError):
+                continue
+        return None
+
     @staticmethod
     def _authentication_required(url):
         host = (urlparse(str(url)).hostname or '').casefold().rstrip('.')
@@ -518,7 +546,21 @@ class BrowserAdapter:
                 executable = edge.find_edge_executable(self.config.edge_executable)
                 print('[System] Starting a visible Edge window with the dedicated agent profile.')
                 self.startup_stage = 'edge_launch'
-                self._launched_process = edge.launch_edge(executable, self.config.debug_port, profile)
+                try:
+                    self._launched_process = edge.launch_edge(executable, self.config.debug_port, profile)
+                except (edge.EndpointError, OSError):
+                    if edge.remote_debugging_blocked():
+                        raise
+                    for label, spelling, software_graphics in edge.direct_profile_candidates(profile):
+                        try:
+                            print('[System] Initial launch failed; retrying ' + label + '.')
+                            self._launched_process = await asyncio.to_thread(edge.launch_edge_direct,
+                                executable, self.config.debug_port, spelling, software_graphics=software_graphics)
+                            break
+                        except (edge.EndpointError, OSError):
+                            continue
+                    else:
+                        raise BrowserUIError('All Edge launch routes failed before a debugging endpoint opened; profile files were retained.')
             from playwright.async_api import async_playwright
             self.startup_stage = 'playwright_start'
             self._manager = async_playwright()
@@ -534,17 +576,23 @@ class BrowserAdapter:
                                                           process=self._launched_process,
                                                           initial_payload=payload,
                                                           endpoint_validator=(verify_launched_endpoint
-                                                                              if self._launched_process is not None else None))
+                                                                              if self._launched_process is not None else None),
+                                                          endpoint_wait_timeout=(15 if self._launched_process is not None else None))
             except edge.EndpointError as exc:
                 if exact_endpoint is not None:
                     raise BrowserUIError('The exact dedicated Edge listener could not be attached; no fallback port or profile was used.') from exc
                 if getattr(self.config, '_new_edge_session', False):
-                    raise BrowserUIError('The new Edge session could not be attached. Existing Edge sessions were not reused; retry startup.') from exc
-                if getattr(self.config, '_user_selected_existing', False):
-                    raise ExistingEdgeUnavailable('The selected existing Edge session could not be attached.') from exc
-                self.browser = await self._connect_running_edge_fallback()
-                if self.browser is None:
-                    raise
+                    self.browser = await self._connect_direct_edge_fallback()
+                    if self.browser is None:
+                        raise BrowserUIError('The new Edge session failed all launch routes. Profile files were retained; no unrelated session was reused.') from exc
+                else:
+                    if getattr(self.config, '_user_selected_existing', False):
+                        raise ExistingEdgeUnavailable('The selected existing Edge session could not be attached.') from exc
+                    self.browser = await self._connect_running_edge_fallback()
+                    if self.browser is None and self._launched_process is not None:
+                        self.browser = await self._connect_direct_edge_fallback()
+                    if self.browser is None:
+                        raise
             verify_exact_endpoint()
             if exact_endpoint is not None:
                 await asyncio.to_thread(edge.validate_profile_ownership, self.config.debug_port, profile)

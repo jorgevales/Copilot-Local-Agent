@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from pathlib import Path
+import sys
 
 
 async def own_edge(port: int, profile: Path, executable: Path) -> None:
@@ -48,6 +49,9 @@ async def own_edge(port: int, profile: Path, executable: Path) -> None:
 
 
 def main() -> None:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from copilot_agent.edge_native_probe import suppress_fault_dialogs
+    suppress_fault_dialogs()  # A failed owner exits; the parent can try direct Edge.
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--profile", type=Path, required=True)

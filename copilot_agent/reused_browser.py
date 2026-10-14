@@ -101,7 +101,72 @@ def _edge_listener_process(port: int) -> dict:
     return {'command_line': line, 'profile': _profile_argument(line)}
 
 
+def _native_probe(kind, identifier):
+    """A faulty native DLL must not terminate the agent's Python process."""
+    command = [sys.executable, '-I', '-B', str(Path(__file__).with_name('edge_native_probe.py')),
+               kind, str(int(identifier))]
+    output = _hidden_command(command, timeout=5)
+    if len(output) > 262144:
+        raise OSError('Native ownership probe returned an oversized response')
+    result = json.loads(output)
+    if not isinstance(result, dict) or result.get('ok') is not True:
+        raise OSError('Native ownership probe did not complete')
+    return result['result']
+
+
 def _windows_process_details(pid: int) -> dict:
+    """Isolated native query, then independent CIM/WMI provider fallbacks."""
+    if os.name != 'nt':
+        raise OSError('Windows process inspection is unavailable')
+    pid = int(pid)
+    if not 1 <= pid <= 0xffffffff:
+        raise ValueError('Invalid process identifier')
+    try:
+        result = _native_probe('process', pid)
+        if not isinstance(result, dict) or not isinstance(result.get('Name'), str) or not isinstance(result.get('CommandLine'), str):
+            raise ValueError('Malformed process probe')
+        return result
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        pass
+    for provider in ('Get-CimInstance', 'Get-WmiObject'):
+        command = (f"$ErrorActionPreference='Stop'; {provider} Win32_Process -Filter \"ProcessId={pid}\" "
+                   '| Select-Object Name,CommandLine | ConvertTo-Json -Compress')
+        try:
+            result = json.loads(_hidden_command(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', command], timeout=4))
+            if isinstance(result, dict) and isinstance(result.get('Name'), str) and isinstance(result.get('CommandLine'), str):
+                return result
+        except (OSError, ValueError, subprocess.SubprocessError):
+            continue
+    raise OSError('All process-ownership inspection routes failed; no browser identity was assumed')
+
+
+def _decode_process_command(buffer, returned):
+    """Decode only bytes inside the caller-owned native result allocation."""
+    import ctypes
+    class UnicodeString(ctypes.Structure):
+        _fields_ = [('Length', ctypes.c_ushort), ('MaximumLength', ctypes.c_ushort),
+                    ('Buffer', ctypes.c_void_p)]  # LPWSTR would dereference before validation.
+    header_size = ctypes.sizeof(UnicodeString)
+    returned = int(returned)
+    if not header_size <= returned <= ctypes.sizeof(buffer):
+        raise OSError('Process command-line response length was invalid')
+    command = UnicodeString.from_buffer_copy(buffer)
+    address = ctypes.addressof(buffer)
+    offset = (command.Buffer or 0) - address
+    if (not command.Length or command.Length % 2 or command.MaximumLength < command.Length
+            or command.MaximumLength % 2 or offset < header_size or offset % 2
+            or offset + command.Length > returned or offset + command.MaximumLength > ctypes.sizeof(buffer)):
+        raise OSError('Process command-line pointer or length was outside the returned allocation')
+    try:
+        text = buffer.raw[offset:offset + command.Length].decode('utf-16-le', errors='strict')
+    except UnicodeError as error:
+        raise OSError('Process command line was not valid UTF-16') from error
+    if '\x00' in text:
+        raise OSError('Process command line contained an embedded terminator')
+    return text
+
+
+def _windows_process_details_native(pid: int) -> dict:
     """Read a process image and command line without privileged CIM/WMI access."""
     if os.name != "nt":
         raise OSError("Windows process inspection is unavailable")
@@ -129,10 +194,6 @@ def _windows_process_details(pid: int) -> dict:
         if not image_query(handle, 0, image, ctypes.byref(image_length)):
             raise ctypes.WinError(ctypes.get_last_error())
 
-        class UnicodeString(ctypes.Structure):
-            _fields_ = [("Length", wintypes.USHORT), ("MaximumLength", wintypes.USHORT),
-                        ("Buffer", wintypes.LPWSTR)]
-
         command_buffer = ctypes.create_string_buffer(65536)
         returned = wintypes.ULONG()
         query = ntdll.NtQueryInformationProcess
@@ -142,11 +203,8 @@ def _windows_process_details(pid: int) -> dict:
         status = query(handle, 60, command_buffer, len(command_buffer), ctypes.byref(returned))
         if status < 0:
             raise OSError(f"Process command-line query failed with NTSTATUS 0x{status & 0xffffffff:08x}")
-        command = ctypes.cast(command_buffer, ctypes.POINTER(UnicodeString)).contents
-        if command.Length % 2 or command.Length > 65534 or not command.Buffer:
-            raise OSError("Process command line was malformed")
         return {"Name": Path(image.value).name,
-                "CommandLine": ctypes.wstring_at(command.Buffer, command.Length // 2)}
+                "CommandLine": _decode_process_command(command_buffer, returned.value)}
     finally:
         close_handle(handle)
 
@@ -160,6 +218,12 @@ def validate_edge_listener(port: int, profile: Path | None = None) -> Path | Non
     if actual_profile is None:
         raise EndpointError("The Edge debugging listener does not expose its profile identity.")
     actual = actual_profile.expanduser().resolve()
+    try:
+        first, second = os.stat(actual), os.stat(profile.expanduser().resolve())
+        if first.st_ino and second.st_ino and os.path.samestat(first, second):
+            return actual
+    except OSError:
+        pass
     if os.path.normcase(str(actual)) != os.path.normcase(str(profile.expanduser().resolve())):
         raise EndpointError("The debugging port belongs to a different Edge profile.")
     return actual
@@ -226,6 +290,44 @@ def port_listening(port: int) -> bool:
 
 
 def loopback_listener_pid(port: int) -> int | None:
+    """Isolated TCP query, PowerShell TCP provider, then numeric netstat."""
+    if os.name != 'nt':
+        return None
+    port = int(port)
+    try:
+        result = _native_probe('listener', port)
+        if result is not None and (type(result) is not int or result <= 0):
+            raise ValueError('Malformed listener probe')
+        return result
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        pass
+    command = (f"$ErrorActionPreference='Stop'; Get-NetTCPConnection -State Listen -LocalPort {port} "
+               "| Where-Object { $_.LocalAddress -in @('127.0.0.1','::1','::ffff:127.0.0.1') } "
+               '| Select-Object -ExpandProperty OwningProcess | ConvertTo-Json -Compress')
+    try:
+        output = _hidden_command(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', command], timeout=4)
+        values = json.loads(output) if output.strip() else []
+        matches = set(values if isinstance(values, list) else [values])
+        if any(type(pid) is not int or pid <= 0 for pid in matches):
+            raise ValueError('Malformed TCP provider response')
+        return next(iter(matches)) if len(matches) == 1 else None
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+        pass
+    try:
+        output = _hidden_command(['netstat.exe', '-ano'], timeout=4)
+        matches = set()
+        for line in output.splitlines():
+            fields = line.split()
+            if (len(fields) == 5 and fields[0].upper() == 'TCP'
+                    and fields[1] in {f'127.0.0.1:{port}', f'[::1]:{port}', f'[::ffff:127.0.0.1]:{port}'}
+                    and fields[3].upper() == 'LISTENING' and fields[4].isdigit()):
+                matches.add(int(fields[4]))
+        return next(iter(matches)) if len(matches) == 1 else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _loopback_listener_pid_native(port: int) -> int | None:
     """Read IPv4/IPv6 loopback listener owners without PowerShell/CIM privileges."""
     if os.name != "nt":
         return None
@@ -236,6 +338,9 @@ def loopback_listener_pid(port: int) -> int | None:
                     ('state', 'local_address', 'local_port', 'remote_address', 'remote_port', 'pid')]
 
     query = ctypes.windll.iphlpapi.GetExtendedTcpTable
+    query.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32), ctypes.c_int32,
+                      ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32)
+    query.restype = ctypes.c_uint32
     matches = set()
 
     def read_table(family: int, row_type, is_ipv6: bool) -> bool:
@@ -244,6 +349,8 @@ def loopback_listener_pid(port: int) -> int | None:
             return False
         buffer = ctypes.create_string_buffer(size.value)
         if query(buffer, ctypes.byref(size), False, family, 3, 0) != 0:
+            return False
+        if not 4 <= size.value <= ctypes.sizeof(buffer):
             return False
         count = ctypes.c_uint32.from_buffer_copy(buffer).value
         if 4 + count * ctypes.sizeof(row_type) > size.value:
@@ -261,15 +368,15 @@ def loopback_listener_pid(port: int) -> int | None:
         return True
 
     class Tcp6Row(ctypes.Structure):
-        _fields_ = [('state', ctypes.c_uint32), ('local_address', ctypes.c_ubyte * 16),
+        _fields_ = [('local_address', ctypes.c_ubyte * 16),
                     ('local_scope_id', ctypes.c_uint32), ('local_port', ctypes.c_uint32),
                     ('remote_address', ctypes.c_ubyte * 16), ('remote_scope_id', ctypes.c_uint32),
-                    ('remote_port', ctypes.c_uint32), ('pid', ctypes.c_uint32)]
+                    ('remote_port', ctypes.c_uint32), ('state', ctypes.c_uint32), ('pid', ctypes.c_uint32)]
 
     ipv4_ok = read_table(2, Tcp4Row, False)
     ipv6_ok = read_table(23, Tcp6Row, True)
     if not ipv4_ok and not ipv6_ok:
-        return None
+        raise OSError('Native TCP ownership tables were unavailable')
     return next(iter(matches)) if len(matches) == 1 else None
 
 
@@ -314,7 +421,8 @@ def launch_edge(edge_path: Path, port: int, profile: Path) -> subprocess.Popen:
         raise EndpointError("The dedicated agent Edge profile is already open. Close that agent browser before retrying.")
     if port_listening(port):
         raise EndpointError("The selected local debugging port is already in use. Restart the agent to select a free port.")
-    profile.mkdir(parents=True, exist_ok=True)
+    from .persistence import io_path
+    io_path(profile).mkdir(parents=True, exist_ok=True)
     owner = Path(__file__).with_name('edge_owner.py').resolve()
     command = [sys.executable, str(owner), '--port', str(int(port)),
                '--profile', str(profile), '--edge-executable', str(edge_path)]
@@ -344,8 +452,72 @@ def stop_launched_edge(process: subprocess.Popen | None) -> None:
         pass
 
 
+def direct_profile_candidates(profile):
+    """Alternative launch spellings must identify the exact same profile."""
+    profile = Path(profile).expanduser().resolve()
+    result = [('direct Edge', profile, False)]
+    if os.name == 'nt':
+        from .persistence import io_path
+        extended = io_path(profile)
+        try:
+            if str(extended) != str(profile) and os.path.samefile(extended, profile):
+                result.append(('direct Edge using the verified extended Windows path', extended, False))
+        except OSError:
+            pass
+        try:
+            from .policy import mapped_s_drive_root
+            share = mapped_s_drive_root().resolve()
+            alias = Path('S:/') / profile.relative_to(share)
+            if str(alias) != str(profile) and os.path.samefile(alias, profile):
+                result.append(('direct Edge using the verified S: path', alias, False))
+        except (OSError, ValueError, RuntimeError):
+            pass
+    result.append(('direct Edge with software graphics', profile, True))
+    return result
+
+
+def launch_edge_direct(edge_path, port, profile, *, software_graphics=False):
+    """Launch installed Edge without a second Python/Playwright owner runtime."""
+    from .persistence import io_path
+    import uuid
+    profile = Path(profile).expanduser().absolute()  # Preserve a verified S: alias.
+    if remote_debugging_blocked():
+        raise EndpointError('Microsoft Edge policy disables remote debugging; no alternate launch bypasses it.')
+    if profile_in_use(profile):
+        raise EndpointError('The dedicated agent Edge profile is already open; it was preserved.')
+    if port_listening(port):
+        raise EndpointError('The selected local debugging port is already in use; it was not replaced.')
+    directory = io_path(profile)
+    directory.mkdir(parents=True, exist_ok=True)
+    probe = directory / ('.edge-startup-' + uuid.uuid4().hex)
+    try:
+        with probe.open('xb') as stream:
+            stream.write(b'Edge profile write/read check')
+            stream.flush()
+            os.fsync(stream.fileno())
+        if probe.read_bytes() != b'Edge profile write/read check':
+            raise OSError('Profile write readback failed')
+    finally:
+        probe.unlink(missing_ok=True)
+    command = [str(Path(edge_path).expanduser().resolve()),
+               f'--remote-debugging-port={int(port)}', '--remote-debugging-address=127.0.0.1',
+               '--user-data-dir=' + str(profile), '--no-first-run', '--no-default-browser-check', 'about:blank']
+    if software_graphics:
+        command.insert(-1, '--disable-gpu')
+    options = {'stdin': subprocess.DEVNULL, 'stdout': subprocess.DEVNULL,
+               'stderr': subprocess.DEVNULL, 'close_fds': True}
+    if os.name == 'nt':
+        options['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+    else:
+        options['start_new_session'] = True
+    try:
+        return subprocess.Popen(command, **options)
+    except OSError as error:
+        raise EndpointError('Direct Microsoft Edge launch failed; profile files were retained.') from error
+
+
 async def connect_bounded(playwright, endpoint: str, timeout: float, process=None, initial_payload=None,
-                          endpoint_validator=None):
+                          endpoint_validator=None, endpoint_wait_timeout=None):
     """Bounded CDP startup with sanitized failure categories."""
     deadline = time.monotonic() + max(1, timeout)
     handshakes = 0
@@ -400,6 +572,9 @@ async def connect_bounded(playwright, endpoint: str, timeout: float, process=Non
         # A new local Edge listener normally appears quickly. Poll tightly at
         # first, then back off while preserving the same bounded startup window.
         elapsed = time.monotonic() - started
+        if (not endpoint_seen and endpoint_wait_timeout is not None
+                and elapsed >= endpoint_wait_timeout):
+            break  # A live endpoint still receives the full handshake timeout.
         interval = 0.05 if elapsed < 2 else (0.1 if elapsed < 5 else 0.25)
         await asyncio.sleep(min(interval, max(0, deadline - time.monotonic())))
     if endpoint_seen:

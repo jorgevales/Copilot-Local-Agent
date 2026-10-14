@@ -18,7 +18,7 @@
       "purpose": "Reading guide, scope, evidence labels and completeness boundary.",
       "recommended_reading_order": 1,
       "required": true,
-      "sha256": "37c258e654d22227cf18aa8bb850d8a9df5dc2818b03911794a42abeb4e34246",
+      "sha256": "edadedfd1d37f34be7d68554aa0148d2ee432bb3780a0fad5a13861660539283",
       "source_files_represented": [
         "README.md"
       ]
@@ -33,7 +33,7 @@
       "purpose": "Self-contained purpose, architecture, execution path, trust boundaries and operational assumptions.",
       "recommended_reading_order": 2,
       "required": true,
-      "sha256": "866948797b4b6434d14edb4cef1b2001592eeaff677fb990594e981cf3b23811",
+      "sha256": "b542f18c77777e8c17c0d14d2bb032933beef6ca27f577d26a4b38a4da4f582f",
       "source_files_represented": [
         "Launcher.ps1",
         "README.md",
@@ -56,7 +56,7 @@
       ]
     },
     {
-      "bytes": 144861,
+      "bytes": 146006,
       "content_category": "generated source-symbol and Graphify summary",
       "content_treatment": "verbatim sections are source-bounded; generated analysis and summaries are explicitly labeled",
       "exclusions_or_summarization": "See package-level exclusions and per-source treatment records.",
@@ -65,7 +65,7 @@
       "purpose": "Python module/symbol/import inventory, summarized contracts and traceable Graphify relationship evidence.",
       "recommended_reading_order": 3,
       "required": true,
-      "sha256": "03459cfa19d5aa957d10e239c09d20217b5a1233292b5047d0c9e7420dd57077",
+      "sha256": "3ffd73e20d7ddf12785f64a74efc74499d4bdc76015714f0fbccbbb4b3b7eb33",
       "source_files_represented": [
         "Launcher.ps1",
         "Run Tests.cmd",
@@ -104,6 +104,7 @@
         "copilot_agent/discovery_store.py",
         "copilot_agent/document_catalogue.py",
         "copilot_agent/downloads.py",
+        "copilot_agent/edge_native_probe.py",
         "copilot_agent/edge_owner.py",
         "copilot_agent/feedback.py",
         "copilot_agent/file_picker.py",
@@ -177,6 +178,7 @@
         "tests/test_discovery_transport.py",
         "tests/test_document_catalogue.py",
         "tests/test_downloads.py",
+        "tests/test_edge_native_safety.py",
         "tests/test_edge_startup.py",
         "tests/test_feedback.py",
         "tests/test_file_picker.py",
@@ -211,7 +213,7 @@
       ]
     },
     {
-      "bytes": 207524,
+      "bytes": 211826,
       "content_category": "verbatim source documentation bundle",
       "content_treatment": "verbatim sections are source-bounded; generated analysis and summaries are explicitly labeled",
       "exclusions_or_summarization": "See package-level exclusions and per-source treatment records.",
@@ -220,7 +222,7 @@
       "purpose": "Verbatim project README and docs sources with explicit source boundaries.",
       "recommended_reading_order": 4,
       "required": true,
-      "sha256": "9a111584179419ddadbd95e0663410bd93bc365db7943e0631fd0866afd620b2",
+      "sha256": "c2b33b20559f63d89d77ecbec89bcf971189097ab33e9d6c580d83e1adb43507",
       "source_files_represented": [
         "README.md",
         "agent_ui/README.md",
@@ -234,6 +236,7 @@
         "docs/CRAWL4AI_VALIDATION.md",
         "docs/DIAGNOSTICS.md",
         "docs/DISCOVERY_NAVIGATION.md",
+        "docs/EDGE_STARTUP_RECOVERY.md",
         "docs/FEEDBACK.md",
         "docs/FILE_DELIVERY.md",
         "docs/KNOWLEDGE_PERSISTENCE.md",
@@ -290,7 +293,7 @@
       ]
     },
     {
-      "bytes": 70711,
+      "bytes": 71691,
       "content_category": "generated manifest",
       "content_treatment": "generated metadata; SHA-256 is omitted for the manifest itself because it would be self-referential",
       "exclusions_or_summarization": "Self size is recorded; self hash is omitted.",
@@ -325,7 +328,7 @@
   "project": "Copilot Local Agent",
   "project_path_in_workspace": "Scripts and projects/Copilot Local Agent",
   "source_coverage": {
-    "eligible_text_source_count": 202,
+    "eligible_text_source_count": 205,
     "summarized_or_catalogued_sources": [
       "agent_ui/runtime.py",
       "agent_ui/tests/test_launch_ui.py",
@@ -361,6 +364,7 @@
       "copilot_agent/discovery_store.py",
       "copilot_agent/document_catalogue.py",
       "copilot_agent/downloads.py",
+      "copilot_agent/edge_native_probe.py",
       "copilot_agent/edge_owner.py",
       "copilot_agent/feedback.py",
       "copilot_agent/file_picker.py",
@@ -442,6 +446,7 @@
       "tests/test_discovery_transport.py",
       "tests/test_document_catalogue.py",
       "tests/test_downloads.py",
+      "tests/test_edge_native_safety.py",
       "tests/test_edge_startup.py",
       "tests/test_feedback.py",
       "tests/test_file_picker.py",
@@ -488,6 +493,7 @@
       "docs/CRAWL4AI_VALIDATION.md",
       "docs/DIAGNOSTICS.md",
       "docs/DISCOVERY_NAVIGATION.md",
+      "docs/EDGE_STARTUP_RECOVERY.md",
       "docs/FEEDBACK.md",
       "docs/FILE_DELIVERY.md",
       "docs/KNOWLEDGE_PERSISTENCE.md",
@@ -655,10 +661,10 @@
       "sha256": "086531815f31a6f4d3c0e3dc00963b1f326734de5df4037abed16762adfa30a8"
     },
     {
-      "bytes": 97422,
+      "bytes": 100712,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/browser.py",
-      "sha256": "9fc7c88a485219032885884528020205ef215be2efeae29d7b8b74113a798c8d"
+      "sha256": "5099bb27129589d8389d962d9d6b3e521fcc8c9b49507a30081152bf0503efbf"
     },
     {
       "bytes": 15540,
@@ -751,10 +757,16 @@
       "sha256": "de7bc5e79470f26587393423244ad7857aebdcc7bbdba95a39ce1977e2959b3f"
     },
     {
-      "bytes": 2383,
+      "bytes": 1162,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/edge_native_probe.py",
+      "sha256": "1f5eaaab0a98b55eb7a72e6385b1d12ff687d41f6cecb237b189ad5a25ca235e"
+    },
+    {
+      "bytes": 2616,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/edge_owner.py",
-      "sha256": "b3e3b031519cf8673cb39ff2a24fb0ad5d24c285e0334d68e37cfce2ebe4375c"
+      "sha256": "f4cfe63c54a9bf2f72a772531e9300e28f5fc5455958692b67afc9047a528b6d"
     },
     {
       "bytes": 6012,
@@ -871,10 +883,10 @@
       "sha256": "f57b9ef43801cead5c353242cbdf4cabde3a9e7a98b0820437a23b88f2630086"
     },
     {
-      "bytes": 21326,
+      "bytes": 30288,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/reused_browser.py",
-      "sha256": "375396637e651cd9477dd276e419aade45d4af92a0b90453336b061820e2d7f5"
+      "sha256": "0cc9ac4aff52872c0c67c4634fad99117a4d5723a4be4fd06d0fade550174776"
     },
     {
       "bytes": 6370,
@@ -1007,6 +1019,12 @@
       "content_treatment": "verbatim_text_embedded",
       "path": "docs/DISCOVERY_NAVIGATION.md",
       "sha256": "955810e30a69a2c9a69ca7cec5412609aeffe7bf37b48d9553e443a04340feec"
+    },
+    {
+      "bytes": 3855,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/EDGE_STARTUP_RECOVERY.md",
+      "sha256": "42355164b46f3104d23e262937f9d3ab4ca226ebc27108ac7b0a2ae3c446686a"
     },
     {
       "bytes": 5123,
@@ -1225,10 +1243,10 @@
       "sha256": "949553fecd97f0122177b2ce8391d932eeeada87c50ffb905ae4b5fa83f80eab"
     },
     {
-      "bytes": 16539,
+      "bytes": 16775,
       "content_treatment": "verbatim_text_embedded",
       "path": "README.md",
-      "sha256": "fa551cf6c129039f4119a0fd4029be70dcfa1a5738af19aaabd6776c23365d26"
+      "sha256": "81c0d9730e0f8c064c3f518bb048ac487ef7ad9dfded43e06ee030e1eda2e689"
     },
     {
       "bytes": 1819,
@@ -1547,6 +1565,12 @@
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "tests/test_downloads.py",
       "sha256": "2c5e1eeb2277732cc323c778fc321ce33c4c0abc699e8f5703ecd2660cb2c7ff"
+    },
+    {
+      "bytes": 9542,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_edge_native_safety.py",
+      "sha256": "924b411bcd5f2a7c65914db16aad9a13b2a4e8522db5c6c18d849185d8726a33"
     },
     {
       "bytes": 16192,
