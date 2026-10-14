@@ -244,6 +244,33 @@ class NavigationBrowserTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("role", result["results"][0]["locator_strategy"])
         self.assertEqual(0, result["results"][0]["retry_count"])
 
+    async def test_customer_business_inputs_and_long_notes_are_read_without_edit_approval(self):
+        await self.page.goto('https://fixture.test/profile/C100')
+        notes = 'Observed customer notes. ' * 250
+        await self.page.evaluate('''notes => {
+            const name=document.createElement('input'); name.setAttribute('data-testid','business-name');
+            name.value='Synthetic customer name'; document.body.append(name);
+            const area=document.createElement('textarea'); area.setAttribute('data-testid','business-notes');
+            area.value=notes; document.body.append(area);
+        }''', notes)
+        self.context['approved'] = False
+        args = {'task_id': 'read-task', 'customer_key': 'customer-C100',
+                'identity': [{'locator': {'testid': 'customer-id'}, 'value': 'C100'}],
+                'fields': [{'name': 'name', 'locator': {'testid': 'business-name'}},
+                           {'name': 'notes', 'locator': {'testid': 'business-notes'}}]}
+        result = await self.execute('browser.customer_summary', args)
+        self.assertEqual('verified', result['status'])
+        self.assertEqual('Synthetic customer name', result['facts'][0]['value'])
+        self.assertEqual(notes.strip(), result['facts'][1]['value'])
+        self.assertEqual(notes, await self.page.get_by_test_id('business-notes').input_value())
+        from copilot_agent.web_navigation import read_business_field
+        await self.page.evaluate('''() => {
+            const field=document.createElement('input'); field.type='password';
+            field.id='credential-fixture'; field.value='synthetic-credential'; document.body.append(field);
+        }''')
+        with self.assertRaises(PolicyError):
+            await read_business_field(self.page.locator('#credential-fixture'))
+
     async def test_spa_transition_and_delayed_rendering(self):
         await self.page.goto("https://fixture.test/spa")
         plan = {"task_id": "task-1", "steps": [{"id": "spa", "op": "click", "locator": {"role": "button", "name": "Open profile"}, "effect": "navigation", "expect": [{"kind": "url", "value": "https://fixture.test/app/profile"}, {"kind": "text", "locator": {"role": "heading", "name": "Profile"}, "value": "Profile"}]}], "success": [{"kind": "url", "value": "https://fixture.test/app/profile"}]}

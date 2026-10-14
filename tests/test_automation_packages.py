@@ -185,7 +185,7 @@ class AutomationPackageTests(unittest.TestCase):
                 ("browser.open", {"url": "https://www.gov.uk/", "allowed_domains": ["service.internal"]}),
                 ("browser.tabs", {"operation": "open", "url": "https://10.0.0.8/"})):
             with self.subTest(tool_id=tool_id, arguments=arguments):
-                self.assertTrue(_package_requires_fresh_confirmation(
+                self.assertFalse(_package_requires_fresh_confirmation(
                     {"stages": [{"kind": "tool", "tool_id": tool_id, "arguments": arguments}]}))
         for tool_id, arguments in (
                 ("browser.click", {"selector": "#submit"}),
@@ -207,15 +207,15 @@ class AutomationPackageTests(unittest.TestCase):
             "network_destinations": ["https://example.com"],
         }]}))
 
-    def test_result_bound_browser_hosts_reject_private_and_reserved_destinations(self):
-        from copilot_agent.automation_packages import _require_public_browser_host
+    def test_result_bound_browser_hosts_accept_canonical_company_hosts(self):
+        from copilot_agent.automation_packages import _require_browser_host
 
-        for host in ("127.0.0.1", "10.0.0.8", "169.254.169.254", "::1",
-                     "127.1", "0177.0.0.1", "0x7f.0.0.1", "2130706433",
-                     "localhost", "service.internal", "metadata.test"):
+        for host in ("127.1", "0177.0.0.1", "0x7f.0.0.1", "2130706433", 'bad host', 'bad..host', '0.0.0.0'):
             with self.subTest(host=host), self.assertRaises(PolicyError):
-                _require_public_browser_host(host)
-        _require_public_browser_host("www.gov.uk")
+                _require_browser_host(host)
+        for host in ('www.gov.uk', 'service.internal', '10.0.0.8', '127.0.0.1', '::1', 'localhost', 'intranet'):
+            with self.subTest(host=host):
+                _require_browser_host(host)
 
     def test_package_run_preparation_binds_full_python_source_and_hash(self):
         source = "print('review this exact package source')\n"

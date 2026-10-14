@@ -105,15 +105,17 @@ class LocalCrawlerTests(unittest.IsolatedAsyncioTestCase):
             self.assertGreater(len(result['index_path']), 260)
             self.assertIn('Long shared paths', read_knowledge({'path': result['index_path']}, context)['content'])
 
-    def test_saved_html_omits_scripts_hidden_fields_and_form_values(self):
+    def test_saved_html_keeps_business_form_data_but_omits_credentials_and_scripts(self):
         from copilot_agent.local_crawler import saved_html
-        document = '<html><body><h1>Navigation</h1><script>secretToken="private";</script><input type="hidden" value="secret"><input value="private"><textarea>private</textarea><a onclick="send()" data-token="private" href="/next">Next</a></body></html>'
+        document = '<html><body><h1>Navigation</h1><script>secretToken="private";</script><input type="hidden" value="secret"><input type="password" value="private"><input name="customer-name" value="Customer name"><textarea>Customer notes</textarea><a onclick="send()" data-token="private" href="/next">Next</a></body></html>'
         result = saved_html(document)
         self.assertIn('Navigation', result)
         self.assertIn('href="/next"', result)
         self.assertNotIn('private', result)
         self.assertNotIn('secret', result)
         self.assertNotIn('onclick', result)
+        self.assertIn('value="Customer name"', result)
+        self.assertIn('Customer notes', result)
 
     async def test_stop_retains_index_and_pending_routes(self):
         self.context['cancel_event'].set()

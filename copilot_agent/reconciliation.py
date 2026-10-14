@@ -52,13 +52,13 @@ def _navigation_only(request: dict) -> bool:
     steps = request.get('arguments', {}).get('steps', [])
     if not isinstance(steps, list):
         return False
-    if any(not isinstance(step, dict) or step.get('op') not in {'navigate', 'click', 'wait', 'assert', 'capture'}
+    if any(not isinstance(step, dict) or step.get('effect') == 'consequential'
+           or step.get('op') not in {'navigate', 'click', 'wait', 'assert', 'capture'}
            for step in steps):
         return False
     transitions = [step for step in steps if step.get('op') in {'navigate', 'click'}]
-    return (bool(transitions)
-            and all(step['op'] == 'navigate' or step.get('effect') == 'navigation' for step in transitions)
-            and not request.get('arguments', {}).get('customer_key'))
+    return bool(transitions) and all(
+        step['op'] == 'navigate' or step.get('effect') == 'navigation' for step in transitions)
 
 
 def _owned_page(browser, request):
@@ -119,8 +119,7 @@ def recover_missing_navigation(state, browser):
 
 def navigation_scope_allows(request, browser, domains, expected_binding=None):
     """A browser grant covers navigation, never forms, scripts or downloads."""
-    if (not domains or request.get('arguments', {}).get('customer_key')
-            or expected_binding is not None and expected_binding != _binding(browser)):
+    if (not domains or expected_binding is not None and expected_binding != _binding(browser)):
         return False
     name, args = request.get('name'), request.get('arguments', {})
     urls = URLPolicy(domains)

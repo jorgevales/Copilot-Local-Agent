@@ -1,5 +1,10 @@
 # Copilot Local Agent
 
+Customer and company data work is enabled by default. Authorized customer reads,
+discovery and requested artifacts use the normal local tools, with no separate
+customer-category gate. Customer navigation and declared internal package hosts
+reuse applicable session approvals. See [business data work](docs/BUSINESS_DATA_WORK.md).
+
 Startup now offers **review packages** or **skip quality review and run
 continuously for this session**, followed by a plain-language local Crawl4AI
 website guide. Sign in manually, title each website's knowledge, explore once

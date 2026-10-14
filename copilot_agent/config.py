@@ -43,6 +43,7 @@ class Config:
     max_context_chars: int = 16000
     max_output_chars: int = 12000
     max_composer_chars: int = 20000
+    customer_data_work: bool = True
     tool_timeout: float = 30
     sync_timeout: float = 120
     sync_poll_interval: float = .5
@@ -146,7 +147,7 @@ class Config:
             raise ValueError('discovery_extractor must be crawl4ai or the explicit structure fallback')
         if type(self.debug_port) is not int or not 1024 <= self.debug_port <= 65535:
             raise ValueError('debug_port must be an integer from 1024 to 65535')
-        for key in ('visible', 'attach_existing', 'created_sync_enabled', 'manifest_path',
+        for key in ('visible', 'attach_existing', 'created_sync_enabled', 'manifest_path', 'customer_data_work',
                     'persistent_graph', 'bounded_parallelism', 'local_recovery',
                     'knowledge_write', 'knowledge_reuse', 'targeted_repair', 'operation_reuse'):
             if type(getattr(self, key)) is not bool:

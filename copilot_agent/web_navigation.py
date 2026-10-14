@@ -1,8 +1,9 @@
 """Bounded semantic website discovery and verified plans in owned Edge tabs.
 
 Page content is untrusted. Plans are approved immutable inputs, never page-produced
-code. Site maps and customer observations remain ephemeral here; persistence has
-its own explicit consent boundary. A failed/uncertain effect is never replayed.
+code. Local site maps stay in memory; authorized business observations may enter
+task/response artifacts through the orchestrator. A failed/uncertain effect is
+never replayed.
 """
 import asyncio
 import hashlib
@@ -73,7 +74,7 @@ NAVIGATION_SPECS = {
     "browser.customer_summary": (_object({
         "task_id": KEY, "customer_key": KEY, "identity": IDENTITIES, "tab_id": KEY,
         "fields": {"type": "array", "maxItems": 20, "items": _object({"name": KEY, "locator": LOCATOR}, ("name", "locator"))},
-    }, ("task_id", "customer_key", "identity", "fields")), "user_approval", "Verify supplied authorised identifiers exactly and uniquely before extracting only requested customer fields. Facts have sources; missing/ambiguous fields are explicit; no inference or persistence."),
+    }, ("task_id", "customer_key", "identity", "fields")), "read_only", "Read requested customer/company facts after exact observed identity checks. Customer data does not require a separate category grant. Facts have sources and missing/ambiguous fields are explicit; authentication and correct-record checks remain active."),
 }
 
 
@@ -519,6 +520,21 @@ async def _identity(page, identities, context):
             raise PolicyError("Identity evidence must be displayed source data, not an editable field")
         if (await locator.inner_text(timeout=1000)).strip() != identity["value"].strip():
             raise NavigationStop("customer_identity_mismatch", "Authorised customer identity did not match exactly")
+
+
+async def read_business_field(locator):
+    """Read displayed business fields, including editable values, without edits."""
+    value = await locator.evaluate(r"""n => {
+      const hint=[n.type,n.name,n.id,n.getAttribute('autocomplete')||''].join(' ');
+      if (['password','hidden','file'].includes(String(n.type||'').toLowerCase()) ||
+          /password|passwd|access.?token|refresh.?token|api.?key|client.?secret|authorization/i.test(hint))
+          return null;
+      return ['INPUT','TEXTAREA','SELECT'].includes(n.tagName) ? String(n.value||'') :
+             String(n.innerText||n.textContent||'');
+    }""")
+    if value is None:
+        raise PolicyError('Credential and hidden controls cannot be used as business field evidence')
+    return str(value).strip()
 
 
 async def _fingerprint(page):
@@ -979,13 +995,13 @@ async def execute_navigation(name, args, context, policy=None):
         for field in args["fields"]:
             try:
                 locator, strategy, _ = await _resolve(page, field["locator"], context)
-                if (await locator.evaluate("n=>n.tagName")) in {"INPUT", "TEXTAREA"} or await locator.get_attribute("contenteditable") == "true":
-                    raise PolicyError("Summary cannot expose editable input contents")
-                text = (await locator.inner_text(timeout=1000)).strip()[:1000]
+                text = await read_business_field(locator)
                 facts.append({"field": field["name"], "value": text, "source_url": safe_url(page.url), "locator_strategy": strategy, "evidence": "observed"})
             except NavigationStop as exc:
                 missing.append({"field": field["name"], "reason": exc.code})
         return {"status": "verified" if not missing else "partial", "identity_verified": True,
                 "side_effects_uncertain": False,
-                "facts": facts, "missing": missing, "inferences": [], "persistence": "ephemeral_only"}
+                "facts": facts, "missing": missing, "inferences": [],
+                "persistence": 'response_artifacts_allowed' if config_value(context.get('config', {}),
+                    'customer_data_work', True) is True else 'ephemeral_only'}
     raise ValueError("Unknown navigation capability")

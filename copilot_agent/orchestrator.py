@@ -903,7 +903,7 @@ class Orchestrator:
         if self.navigation_domains:
             message = json.loads(text)
             message['approved_navigation_scope'] = {'domains': sorted(self.navigation_domains),
-                'session_only': True, 'instruction': 'Continue navigation-only browser.open/back/forward/plans and bounded same-origin new tabs within this approved scope without another approval prompt. Forms, searches, downloads, scripts, customer-bound actions and consequential controls retain their normal approval. After a lost tab, open fresh and observe live; never credit the lost operation.'}
+                'session_only': True, 'instruction': 'Continue navigation-only browser.open/back/forward/plans and bounded same-origin new tabs within this approved scope without another approval prompt. Identity-checked customer navigation uses the same origin grant. Forms, searches, downloads, scripts and consequential controls retain their applicable approval. After a lost tab, open fresh and observe live; never credit the lost operation.'}
             text = json.dumps(message, ensure_ascii=False, indent=2)
         text, attachments = await self._pack_outbound_response(text, attachments)
         snapshot = [{'path': str(p), 'sha256': self._bounded_hash(p)} for p in attachments]

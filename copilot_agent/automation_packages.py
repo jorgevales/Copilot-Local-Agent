@@ -47,13 +47,14 @@ _MULTI_TOOL = re.compile(r"\b(?:browser|web|research|download|filesystem|file|de
 
 # A session grant may cover reviewed discovery/navigation and bounded file or
 # knowledge writes within already allowed roots. Operations that can submit
-# data, download/extract artifacts, inspect customer data, or execute a
-# semantic action plan require fresh confirmation for that exact package run.
+# data or download/extract artifacts require fresh confirmation for that exact
+# package run. Identity-checked customer reads and navigation use the same
+# session grant as other read work, including declared internal websites.
 # Package file-edit tools still use their normal PathPolicy, preflight and
 # expected-hash checks; path extensions retain their separate approval flow.
 _PACKAGE_FRESH_CONFIRMATION_TOOLS = {
-    "archives.extract", "browser.back", "browser.click", "browser.customer_summary",
-    "browser.download_batch", "browser.fill", "browser.forward", "browser.plan",
+    "archives.extract", "browser.click",
+    "browser.download_batch", "browser.fill",
     "browser.press", "browser.recover_uncertain", "browser.screenshot", "browser.select",
     "browser.tabs.reset", "copilot.download",
     "files.transfer_to_copilot", "knowledge.note", "operation.learn", "ocr.image",
@@ -78,6 +79,10 @@ def _package_requires_fresh_confirmation(manifest: dict) -> bool:
         tool_id = stage.get("tool_id")
         if tool_id in _PACKAGE_FRESH_CONFIRMATION_TOOLS:
             return True
+        if tool_id == 'browser.plan':
+            from .reconciliation import _navigation_only
+            if not _navigation_only({'name': tool_id, 'arguments': stage.get('arguments', {})}):
+                return True
         if tool_id == "browser.open":
             arguments = stage.get("arguments", {})
             destination = arguments.get("url")
@@ -89,10 +94,9 @@ def _package_requires_fresh_confirmation(manifest: dict) -> bool:
                     return True
             try:
                 for host in hosts:
-                    _require_public_browser_host(host)
+                    _require_browser_host(host)
             except (PolicyError, ValueError):
-                # Static internal/reserved hosts are still usable after the
-                # exact URL and effects are shown in a fresh run review.
+                # Malformed or ambiguous hosts still require a corrected scope.
                 return True
             if _find_binding_references(arguments.get("url")) or _find_binding_references(arguments.get("allowed_domains", [])):
                 # The final destination is data-dependent, so show and approve
@@ -111,7 +115,7 @@ def _package_requires_fresh_confirmation(manifest: dict) -> bool:
                     return True
                 if isinstance(url, str):
                     try:
-                        _require_public_browser_host(URLPolicy.website_domain(url))
+                        _require_browser_host(URLPolicy.website_domain(url))
                     except (PolicyError, ValueError):
                         return True
             if not isinstance(operation, str) or operation not in {"open", "list"}:
@@ -131,21 +135,20 @@ def _reject_ambiguous_numeric_host(hostname: str) -> None:
         raise PolicyError("Ambiguous numeric browser hosts are not allowed in automation packages") from error
 
 
-def _require_public_browser_host(hostname: str) -> None:
-    """Reject internal and reserved destinations for data-bound package URLs."""
+def _require_browser_host(hostname: str) -> None:
+    """Accept canonical company/private hosts; declarations still bind access."""
     host = hostname.lower().rstrip(".")
     _reject_ambiguous_numeric_host(host)
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
-        reserved_suffixes = ("localhost", "local", "internal", "lan", "home.arpa",
-                             "test", "example", "invalid")
-        if "." not in host or any(host == suffix or host.endswith("." + suffix)
-                                   for suffix in reserved_suffixes):
-            raise PolicyError("Result-bound browser destinations must use a public hostname")
+        if (len(host) > 253 or not re.fullmatch(r'[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?', host)
+                or any(not part or len(part) > 63 or part.startswith('-') or part.endswith('-')
+                       for part in host.split('.'))):
+            raise PolicyError("Browser destination must have a canonical hostname")
         return
-    if not address.is_global:
-        raise PolicyError("Result-bound browser destinations cannot use private or reserved IP addresses")
+    if address.is_unspecified or address.is_multicast:
+        raise PolicyError("Browser destination must identify one host")
 _CODE_TASK = re.compile(r"\b(?:implement|build|create|modify|full application|full app|codebase|design system|multi-file)\b", re.I)
 _OUTPUT = re.compile(r"\b(?:report|application|app|dashboard|documentation|tests?|workbook|presentation|package|artifact|deliverable)\b", re.I)
 _RECOVERY = re.compile(r"\b(?:checkpoint|resume|resumable|retry|recover|incremental|patch|cache|idempotent)\b", re.I)
@@ -844,12 +847,12 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
             raise PackageError("Package tool version is incompatible: " + ref["id"])
         if definition.get("approval_policy") not in {"read_only", "user_approval"}:
             raise PackageError("Package stages may use only registered tools covered by package approval; immutable-plan tools need their own review")
-        # Keep lifecycle, delivery, customer authorization, and uncertainty
+        # Keep lifecycle, delivery, durable permission management, and uncertainty
         # recovery controls on their dedicated orchestrator handoff paths.
         protected_tools = {"automation.run", "automation.inspect", "automation.compare",
                            "code_runner", "copilot.download", "files.transfer_to_copilot",
                            "archives.extract", "permissions.grant", "permissions.edit",
-                           "permissions.renew", "research.perform", "operation.quarantine",
+                           "permissions.renew", "operation.quarantine",
                            "operation.reconcile", "browser.reconcile", "browser.recover_uncertain"}
         protected_tools.add("files.grant_path")
         if ref["id"] in protected_tools or ref["id"].startswith("permissions."):
@@ -1570,7 +1573,7 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
                         destination_domain = URLPolicy.website_domain(stage_arguments["url"])
                         _reject_ambiguous_numeric_host(destination_domain)
                         if _find_binding_references(reviewed_arguments.get("url")):
-                            _require_public_browser_host(destination_domain)
+                            _require_browser_host(destination_domain)
                         if not any(destination_domain == domain or destination_domain.endswith("." + domain)
                                    for domain in stage_domains):
                             raise PolicyError("Resolved browser.open destination is outside this inspected stage's declared hosts")
@@ -1587,7 +1590,7 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
                         destination_domain = URLPolicy.website_domain(stage_arguments["url"])
                         _reject_ambiguous_numeric_host(destination_domain)
                         if _find_binding_references(stage["arguments"].get("url")):
-                            _require_public_browser_host(destination_domain)
+                            _require_browser_host(destination_domain)
                             if not any(destination_domain == domain or destination_domain.endswith("." + domain)
                                        for domain in package_declared_domains):
                                 raise PolicyError("Resolved browser.tabs destination is outside this package's inspected website hosts")

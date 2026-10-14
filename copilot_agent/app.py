@@ -553,6 +553,8 @@ async def run(args):
         system('Direct reads and new-file/folder creation in the explicit local test store are granted for this run; deletion or overwrite requires separate confirmation.')
     elif not getattr(config, '_automation_test_mode', False):
         system('Direct reads and new-file/folder creation in Discoveries knowledge are granted for this run; deletion or overwrite requires separate confirmation.')
+    if config.customer_data_work:
+        system('Customer and company data: local discovery, reads and requested business artifacts are enabled for every authorized customer.')
     system('Browser: Visible. Non-visible Copilot operation has not passed acceptance and is unavailable.')
     system('Permitted file roots: ' + ', '.join(Path(root).name for root in config.allowed_roots))
     system('Agent-owned writes are restricted to the explicit local C: test store.' if getattr(config, '_local_knowledge_test_mode', False)

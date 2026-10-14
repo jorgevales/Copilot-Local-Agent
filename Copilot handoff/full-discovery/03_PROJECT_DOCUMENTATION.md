@@ -570,6 +570,66 @@ Lost-tab facts must be re-observed and must never be promoted to verified knowle
 
 ---
 
+<!-- BEGIN VERBATIM SOURCE: docs/BUSINESS_DATA_WORK.md -->
+## Source: `docs/BUSINESS_DATA_WORK.md` (verbatim text; line endings normalized to LF)
+
+# Customer and company data work
+
+`customer_data_work: true` is the default for this installation. Customer/company
+classification does not prohibit local discovery, reads, analysis, document
+work or requested business artifacts. All authorized customers use the same
+processing rules. This configuration adds no customer allowlist or category
+approval prompt and requires no additional setup question.
+
+Use local `crawl4ai.crawl` for authenticated/internal/customer-specific sites and
+`crawl4ai.read` for titled saved knowledge. The public-only `discovery.manifest`
+adapter remains available for its original generic public route contracts;
+choose the local crawler for work outside that adapter's format. These are
+different transports, not different permissions to process customer data.
+
+Ordinary customer-bound browser reads no longer require a durable research
+grant or redirect unconditionally to `research.perform`.
+`browser.customer_summary` is an identity-checked read. It can read requested
+ordinary input/textarea values and complete business text, preserving observed
+facts. Customer selection and record identity still have to match the task.
+Credential, hidden and file controls are excluded from business field extraction.
+Rendered Crawl4AI knowledge retains business form values and notes while removing
+credential values, hidden inputs, executable scripts and token attributes.
+
+Complete redacted/schema-validated tool results reach the orchestrator rather
+than being shortened to three entries or a 12,000-character projection merely
+because a session handles website/customer data. The
+[large-result transport](LARGE_TOOL_RESULTS.md) creates complete indexed JSON
+attachments before Copilot submission. Existing file/attachment/resource limits
+still apply; exceeding a real transport budget reports an unsent result rather
+than claiming completion from a truncated preview.
+
+Navigation-only customer plans reuse the approved origin/profile session scope.
+Automation session grants cover identity-checked customer summaries and
+navigation-only plans, plus declared canonical internal/private hosts. Result-bound
+URLs are still checked against the inspected stage/package hosts at runtime;
+ambiguous numeric destinations remain invalid. A package may use `research.perform`
+under an already active matching durable grant. Changing grants remains a
+dedicated management action. Optional durable grants still enforce their own
+requested limits, expiry and revocation; ordinary authorized reads do not need one.
+
+The existing startup choice still controls reviewed versus immediate package
+execution, for that session only. Manual sign-in, credential protection, exact
+hashes and record identity, stop controls, allowed file destinations,
+consequential-action confirmation and uncertain-effect reconciliation remain
+active. These protect the operation being performed and do not reject work
+because it involves a customer or the company.
+
+Synthetic tests cover direct customer-tool dispatch, complete long results,
+customer session navigation, internal package hosts and continuing secret
+redaction. Browser fixtures cover actual field reads and identity mismatches.
+Live production data and the company's Copilot/VDI session are not exercised by
+these tests.
+<!-- END SOURCE: docs/BUSINESS_DATA_WORK.md -->
+
+
+---
+
 <!-- BEGIN VERBATIM SOURCE: docs/COPILOT_TESTING.md -->
 ## Source: `docs/COPILOT_TESTING.md` (verbatim text; line endings normalized to LF)
 
@@ -1198,7 +1258,8 @@ Each collection lives in the authoritative **Discoveries knowledge/websites**
 folder, with the chosen title and a stable identifier. `index.json` records URLs,
 page file paths, depth, hashes, remaining routes, capture errors and status. Page
 JSON files contain rendered HTML, markdown, links and metadata. Saved HTML
-omits scripts, hidden inputs, field values and credential-named attributes;
+retains ordinary business field values and notes while omitting scripts, hidden
+inputs, credential field values and credential-named attributes;
 obvious sign-out or destructive navigation links are excluded. These filters
 are not a guarantee that all sensitive content has been removed. Saves are
 incremental atomic writes with retained history and extended Windows I/O paths;
@@ -1762,6 +1823,11 @@ Browser downloads and semantic locator handling follow the existing pinned Playw
 ## Source: `README.md` (verbatim text; line endings normalized to LF)
 
 # Copilot Local Agent
+
+Customer and company data work is enabled by default. Authorized customer reads,
+discovery and requested artifacts use the normal local tools, with no separate
+customer-category gate. Customer navigation and declared internal package hosts
+reuse applicable session approvals. See [business data work](docs/BUSINESS_DATA_WORK.md).
 
 Startup now offers **review packages** or **skip quality review and run
 continuously for this session**, followed by a plain-language local Crawl4AI

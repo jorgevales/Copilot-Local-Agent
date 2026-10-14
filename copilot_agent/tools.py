@@ -168,7 +168,7 @@ SPECS = {
     "archives.inspect": (obj(PATH), "read_only", "Inspect a bounded ZIP manifest, archive SHA-256 and native Office container type without extracting."),
     "archives.extract": (obj({"path":S,"destination":S,"expected_files":{"type":"array","items":S,"maxItems":1000},"expected_sha256":S},["path","destination","expected_sha256"]), "user_approval", "Extract a reviewed SHA-256-bound ZIP exclusively inside allowed roots; preflight paths and verify all files without executing code. Preserve original and partial outputs."),
     "automation.inspect": (obj({"path":S,"expected_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}},["path"]), "read_only", "Validate a complete automation package ZIP, its manifest, file hashes, tool versions, stage graph, declared capabilities and resource limits. Does not execute or extract package code."),
-    "automation.run": (obj({"archive_path":S,"expected_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"workspace":S,"resume_run_id":{"type":"string","pattern":"^[a-f0-9]{32}$"},"prior_run_id":{"type":"string","pattern":"^[a-f0-9]{32}$"}},["archive_path","expected_sha256","workspace"]), "user_approval", "Run only the exact ZIP SHA-256 revision that passed fresh automatic automation.inspect review. A local session grant can authorize future freshly inspected packages and their declared registered tools until this agent session ends, including bounded file edits inside already allowed roots or session-approved path extensions. Package Python source is shown in full with its SHA-256 and always requires fresh one-run approval; session and reusable plan grants cannot authorize executable package code. Consequential or unbounded actions also require fresh approval for that exact run. Package stages cannot call files.grant_path; a requested new location still needs its separate exact path approval. PathPolicy, protected paths and every tool's preflight/hash checks remain active. Every run enforces its inspected tool, path, effect and resource declarations plus configured policies. Protected orchestration, authentication, customer authorization, uncertain-operation recovery and immutable-code review keep their dedicated handoffs; explicitly requested new file locations require a separate files.grant_path approval."),
+    "automation.run": (obj({"archive_path":S,"expected_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"workspace":S,"resume_run_id":{"type":"string","pattern":"^[a-f0-9]{32}$"},"prior_run_id":{"type":"string","pattern":"^[a-f0-9]{32}$"}},["archive_path","expected_sha256","workspace"]), "user_approval", "Run only the exact ZIP SHA-256 revision that passed fresh automatic automation.inspect review. A local session grant can authorize future freshly inspected packages and their declared registered tools until this agent session ends, including bounded file edits inside already allowed roots or session-approved path extensions. Package Python source is shown in full with its SHA-256 and always requires fresh one-run approval; session and reusable plan grants cannot authorize executable package code. Consequential or unbounded actions also require fresh approval for that exact run. Package stages cannot call files.grant_path; a requested new location still needs its separate exact path approval. PathPolicy, protected paths and every tool's preflight/hash checks remain active. Every run enforces its inspected tool, path, effect and resource declarations plus configured policies. Protected orchestration, authentication, durable permission management, uncertain-operation recovery and immutable-code review keep their dedicated handoffs; explicitly requested new file locations require a separate files.grant_path approval."),
     "code_runner": (obj(CODE_RUNNER_PROPERTIES, sorted(REQUIRED)), "immutable_plan_approval", "Run reviewed code. python_subset remains the default restricted evaluator. local_python is available only for an exact explicitly approved host-Python plan binding script bytes/hash, interpreter, arguments, imports, file/network/process/desktop scope, limits, effects and verification."),
 }
 
@@ -432,7 +432,7 @@ class ToolRegistry:
         if name in {'browser.plan', 'browser.download_batch'}: timeout = 125
         if name == 'operation.learn': timeout = 95
         if name in {'discovery.manifest', 'navigation.intent'}: timeout = 3605
-        return {"name":name,"version":"1.0","description":description,"intended_use":description,"preconditions":["Current validated tool call", "Configured filesystem/domain boundaries", "Explicit user grant for side effects" if approval!="read_only" else "Read-only operation"],"risk_level":"low" if approval=="read_only" else "moderate","timeout":timeout,"output_size_limit":12000,"error_codes":errors,"input_schema":schema,
+        return {"name":name,"version":"1.0","description":description,"intended_use":description,"preconditions":["Current validated tool call", "Configured filesystem/domain boundaries", "Explicit user grant for side effects" if approval!="read_only" else "Read-only operation"],"risk_level":"low" if approval=="read_only" else "moderate","timeout":timeout,"output_size_limit":None,"error_codes":errors,"input_schema":schema,
                 "output_schema":{"type":"object","properties":{"ok":{"type":"boolean"},"tool":{"type":"string"},"result":result_schema,"error":{"type":"object","properties":{"code":{"type":"string"},"message":{"type":"string"}},"required":["code","message"],"additionalProperties":False}},"required":["ok","tool"],"additionalProperties":False},"approval_policy":approval,
                 "side_effects":[] if approval=="read_only" else [
                     "exact separately consented local knowledge write/invalidation" if name in {'discovery.knowledge_save', 'discovery.knowledge_invalidate'}
@@ -440,7 +440,8 @@ class ToolRegistry:
                     else "approved public HTTPS GET/HEAD and optional sanitized local ledger; never browser interaction" if name in {'discovery.manifest', 'navigation.intent'}
                     else "filesystem creation or append" if name.startswith(("files.", "archives.")) or name in {"code_runner", "copilot.download"}
                     else "browser interaction or screenshot"],
-                "limits":{"timeout_seconds":timeout,"output_chars":12000,"file_bytes":20971520},
+                "limits":{"timeout_seconds":timeout,"output_chars":None,"legacy_projection_chars":12000,"file_bytes":20971520},
+                "output_transport": 'Complete current results; oversized chat envelopes use indexed JSON attachments. Worker-specific input/resource and attachment budgets still apply.',
                 "errors":errors,
                 "examples":examples}
 
@@ -574,6 +575,10 @@ class ToolRegistry:
             from .protocol import validate_schema
             errors=validate_schema(value,self.definition(value["tool"])["output_schema"])
             if errors: raise ValueError("Tool result violates output schema: " + "; ".join(errors[:3]))
+        if config_value(context.get('config', {}), 'customer_data_work', True) is True:
+            # The composer transport packages complete current results into
+            # attachments. Data classification is not a reason to discard them.
+            return value
         limit=min(12000,max(1000,config_value(context.get("config",{}),"max_output_chars",12000)))
         if value.get("tool") == "automation.inspect":
             # Package review is the user's decision record. Keep every checked
@@ -820,7 +825,8 @@ class ToolRegistry:
             return {key: grant[key] for key in ('path', 'scope', 'extension_scope', 'approved_operations', 'session_id')}
         if name in PERMISSION_SPECS: return await execute_permissions(name,args,context)
         customer_bound = bool(args.get('customer_key') or context.get('customer_key') or context.get('research_context',{}).get('active'))
-        if customer_bound and name in {'browser.customer_summary','browser.read','browser.recon','browser.structure','browser.documents'}:
+        if (customer_bound and config_value(context.get('config', {}), 'customer_data_work', True) is not True
+                and name in {'browser.customer_summary','browser.read','browser.recon','browser.structure','browser.documents'}):
             await guard_customer_read(context)
             raise PolicyError('Use research.perform for bounded, category-controlled customer reads under the matching grant')
         if name == 'browser.reconcile':
@@ -1093,7 +1099,9 @@ class ToolRegistry:
                     from urllib.parse import urljoin
                     urls.resolve(urljoin(page.url,src))
                 scope=page.frame_locator(frame_selector)
-            if name=="browser.read": return {"text":(await scope.locator("body").inner_text(timeout=10000))[:10000]}
+            if name=="browser.read":
+                text = await scope.locator("body").inner_text(timeout=10000)
+                return {"text": text if config_value(config, 'customer_data_work', True) is True else text[:10000]}
             if name=="browser.structure":
                 return {"controls":await scope.locator("body").evaluate(STRUCTURE_SCRIPT)}
             if name=='browser.frames':

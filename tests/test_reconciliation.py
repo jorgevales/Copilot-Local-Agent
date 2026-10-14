@@ -135,12 +135,13 @@ class ReconciliationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError):
             self.state.begin_call(dict(self.call, call_id='fresh'))
 
-    async def test_navigation_scope_excludes_forms_customer_context_and_new_domains(self):
+    async def test_navigation_scope_includes_customer_context_but_excludes_forms_and_new_domains(self):
         domains = {'example.com'}
         self.assertTrue(navigation_scope_allows(self.call, self.browser, domains))
         self.assertTrue(navigation_scope_allows({'name': 'browser.open', 'arguments': {'url': 'https://example.com/next'}}, self.browser, domains))
         self.assertFalse(navigation_scope_allows({'name': 'browser.open', 'arguments': {'url': 'https://other.example/'}}, self.browser, domains))
-        self.assertFalse(navigation_scope_allows(dict(self.call, arguments={'customer_key': 'current'}), self.browser, domains))
+        customer_call = dict(self.call, arguments={**self.call['arguments'], 'customer_key': 'current'})
+        self.assertTrue(navigation_scope_allows(customer_call, self.browser, domains))
         self.assertFalse(navigation_scope_allows({'name': 'browser.fill', 'arguments': {}}, self.browser, domains))
 
     async def test_changed_endpoint_cannot_reconcile_original_navigation(self):

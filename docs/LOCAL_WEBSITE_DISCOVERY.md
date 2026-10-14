@@ -28,7 +28,8 @@ Each collection lives in the authoritative **Discoveries knowledge/websites**
 folder, with the chosen title and a stable identifier. `index.json` records URLs,
 page file paths, depth, hashes, remaining routes, capture errors and status. Page
 JSON files contain rendered HTML, markdown, links and metadata. Saved HTML
-omits scripts, hidden inputs, field values and credential-named attributes;
+retains ordinary business field values and notes while omitting scripts, hidden
+inputs, credential field values and credential-named attributes;
 obvious sign-out or destructive navigation links are excluded. These filters
 are not a guarantee that all sensitive content has been removed. Saves are
 incremental atomic writes with retained history and extended Windows I/O paths;

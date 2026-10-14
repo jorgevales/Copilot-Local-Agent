@@ -1,4 +1,5 @@
 {
+  "customer_data_work": true,
   "debug_port": 9443,
   "attach_existing": false,
   "knowledge_directory": null,

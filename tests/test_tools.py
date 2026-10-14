@@ -481,6 +481,7 @@ class ToolTests(unittest.TestCase):
         with self.assertRaises(PolicyError): self.registry.validate_call("files.create",{"path":"../escape.txt","text":"test"},self.context)
 
     def test_result_redaction_and_total_limit(self):
+        self.context['config']['customer_data_work'] = False
         result=self.registry._limit({"ok":True,"tool":"synthetic","result":{"text":"api_key=abc123 " + "x"*20000}},self.context)
         import json
         self.assertLessEqual(len(json.dumps(result,ensure_ascii=False)),12000)

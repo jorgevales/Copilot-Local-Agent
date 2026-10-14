@@ -35,7 +35,7 @@ def knowledge_root(config):
 
 
 def saved_html(document):
-    """Keep rendered knowledge without executable scripts or form values."""
+    """Keep business text/form values; remove scripts and credential controls."""
     from lxml import html
     tree = html.fromstring(document)
     for element in list(tree.xpath('//script | //input[@type="hidden"]')):
@@ -45,7 +45,10 @@ def saved_html(document):
     for element in tree.iter():
         if not isinstance(element.tag, str):
             continue
-        if element.tag.lower() in {'input', 'textarea'}:
+        hint = ' '.join(element.attrib.get(name, '') for name in ('type', 'name', 'id', 'autocomplete'))
+        credential = (element.attrib.get('type', '').lower() in {'password', 'hidden', 'file'}
+                      or re.search(r'password|passwd|access.?token|refresh.?token|api.?key|client.?secret|authorization', hint, re.I))
+        if element.tag.lower() in {'input', 'textarea'} and credential:
             element.attrib.pop('value', None)
             if element.tag.lower() == 'textarea':
                 element.text = ''
