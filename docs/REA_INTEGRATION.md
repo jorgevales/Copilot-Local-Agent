@@ -1,5 +1,7 @@
 # REA research and fast scoped discovery
 
+The [confirmed interview agreement](REA_AGREEMENT_UPDATE.md) specifies 180 seconds for Node setup/readiness, cached functional verification, usable partial observations and complete authorized paths.
+
 Current architecture: [mandatory Python/Node backends](REA_PYTHON_BACKEND.md). The bundled Python backend keeps all three tools available without Node. Ordinary startup never installs software.
 
 Copilot Chat plans; the existing local orchestrator validates and authorizes
@@ -33,7 +35,7 @@ The original upstream license is retained in the installed distribution.
    `%LOCALAPPDATA%/Copilot Local Agent/runtimes/rea/6.5.0`, then the corresponding
    system temporary directory. A failed writable location advances to the next;
    previous partial REA installations are preserved. Dependency setup tries the
-   existing npm cache before a bounded registry request. `--timeout-seconds 90`
+   existing npm cache before a bounded registry request. `--timeout-seconds 180`
    sets the provisioning budget; individual version/download/smoke probes also
    have fixed limits. No manual unpack-folder prompt is added. Discovery data
    remains in the existing S:/UNC store.

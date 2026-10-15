@@ -53,7 +53,7 @@ Fallback locations are `.runtime/rea` under the project, then
 `%LOCALAPPDATA%/Copilot Local Agent/runtimes/rea/6.5.0`, then the corresponding
 `%TEMP%` path. Existing runtimes and partial installations are preserved; every
 new install is staged separately and verified before publishing. Setup tries the
-npm offline cache before the registry and bounds the overall installation work.
+npm offline cache before the registry. Node selection, portable extraction, probes, dependency installation across every candidate and final CLI verification share one 180-second budget by default. Time spent waiting for you to paste a path is excluded. A retry never receives a fresh 180 seconds; timeout cleanup has its own short bounded allowance. Use `--timeout-seconds 10..180` to choose a smaller budget. If Node cannot be prepared, auto mode uses the verified Python backend. Setup diagnostics retain full executable, source and failure paths, while removing credentials and keeping output bounded.
 For disconnected setup, set `COPILOT_REA_ARCHIVE` to the absolute path of the
 unchanged published 6.5.0 tarball and populate the npm cache in advance. A complete
 existing installation can instead be selected with `rea_repository` in

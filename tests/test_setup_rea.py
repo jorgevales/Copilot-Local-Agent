@@ -145,7 +145,7 @@ class ReaSetupTests(unittest.TestCase):
                 self.assertIn('--omit=optional', command)
                 self.assertNotIn('shell', kwargs)
                 self.assertTrue(kwargs['env']['npm_config_cache'])
-                self.assertLessEqual(kwargs['timeout'], 60)
+                self.assertLessEqual(kwargs['timeout'], 180)
             self.assertFalse(list(chosen.parent.glob('.rea-install-*')))
 
     def test_no_offline_archive_is_actionable_without_network(self):

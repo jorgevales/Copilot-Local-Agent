@@ -11,7 +11,9 @@ import json
 from pathlib import Path
 import re
 import struct
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
+
+from .logging_utils import redact
 
 _MAX_BYTES = 20 * 1024 * 1024
 _MAX_FILES = 2000
@@ -33,6 +35,24 @@ def _symbol(value):
 
 def _digest(value):
     return hashlib.sha256(value.encode('utf-8', 'replace')).hexdigest()[:16]
+
+
+def _coordinate(value):
+    """Keep bounded source coordinates as metadata; never follow or load them."""
+    if not isinstance(value, str) or len(value) > 4096 or re.search(r'[\x00-\x1f]', value):
+        return None
+    if '://' in value:
+        try:
+            parsed = urlsplit(value)
+            host = parsed.hostname or ''
+            if ':' in host:
+                host = '[' + host + ']'
+            if parsed.port:
+                host += ':' + str(parsed.port)
+            value = urlunsplit((parsed.scheme, host, parsed.path, '', ''))
+        except ValueError:
+            return None
+    return redact(value)
 
 
 def _route(value):
@@ -94,7 +114,7 @@ def _javascript(files, budget):
         if total > _MAX_BYTES:
             raise ValueError('Artifact exceeds the static analysis input limit')
         location = 'file:' + str(index)
-        findings['inventory'].append({'location': location, 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'kind': 'source_map' if path.suffix.lower() == '.map' else 'javascript' if path.suffix.lower() in ('.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx') else 'other'})
+        findings['inventory'].append({'location': location, 'path': str(path), 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'kind': 'source_map' if path.suffix.lower() == '.map' else 'javascript' if path.suffix.lower() in ('.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx') else 'other'})
         if path.suffix.lower() == '.map':
             try:
                 value = json.loads(data)
@@ -104,7 +124,14 @@ def _javascript(files, budget):
                 names = value.get('names', [])
                 if not isinstance(sources, list) or not isinstance(names, list):
                     raise ValueError('Malformed source map')
-                findings['source_maps'].append({'location': location, 'version': 3, 'sources_count': len(sources), 'names_count': len(names), 'has_embedded_sources': bool(value.get('sourcesContent')), 'mappings_characters': len(value.get('mappings', '')) if isinstance(value.get('mappings'), str) else 0})
+                coordinates = [coordinate for source in sources[:_MAX_ITEMS]
+                               if (coordinate := _coordinate(source)) is not None]
+                findings['source_maps'].append({'location': location, 'version': 3,
+                    'sources_count': len(sources), 'sources': coordinates,
+                    'sources_truncated': max(0, len(sources) - _MAX_ITEMS),
+                    'source_root': _coordinate(value.get('sourceRoot')),
+                    'names_count': len(names), 'has_embedded_sources': bool(value.get('sourcesContent')),
+                    'mappings_characters': len(value.get('mappings', '')) if isinstance(value.get('mappings'), str) else 0})
             except (ValueError, UnicodeError):
                 unknowns.append({'location': location, 'reason': 'Source map is malformed or unsupported'})
             continue
@@ -176,7 +203,7 @@ def _javascript(files, budget):
     findings['build_indicators'] = sorted(builds)
     findings['inventory'] = findings['inventory'][:_MAX_FILES]
     findings['truncated_findings'] = max(0, len(imports) - _MAX_ITEMS) + max(0, len(exports) - _MAX_ITEMS) + max(0, len(routes) - _MAX_ITEMS)
-    return {'status': 'partial', 'findings': findings, 'confidence': 'derived', 'unknowns': unknowns, 'limitations': ['Conservative tokenizer; no JavaScript execution, complete AST, data flow, dynamic imports resolution or bundled-code deobfuscation.', 'Source maps are summarized in place; source paths and embedded source contents are never followed or emitted.', 'Unknown module names are hashed; endpoint identifiers, hosts, query strings and fragments are omitted.'], 'locations': [item['location'] for item in findings['inventory']]}
+    return {'status': 'partial', 'findings': findings, 'confidence': 'derived', 'unknowns': unknowns, 'limitations': ['Conservative tokenizer; no JavaScript execution, complete AST, data flow, dynamic imports resolution or bundled-code deobfuscation.', 'Source-map coordinates are bounded metadata only; neither source paths nor embedded source contents are followed or loaded, and embedded contents are not emitted.', 'Unknown module names are hashed; endpoint identifiers, hosts, query strings and fragments are omitted.'], 'locations': [item['location'] for item in findings['inventory']]}
 
 
 # ECMA-335 II.22 metadata table column schemas. Integers are fixed byte widths,

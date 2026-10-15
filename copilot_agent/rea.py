@@ -155,18 +155,19 @@ def _check_repository(root):
     return package
 
 
-def _check_node(executable):
+def _check_node(executable, timeout=180):
     if not executable.is_absolute() or not executable.is_file():
         raise _AvailabilityError('node_missing', f'Node runtime unavailable: {executable}; configure a trusted absolute rea_node_executable')
     reject_path_redirection(executable)
     if executable.suffix.lower() in {'.cmd', '.bat', '.ps1'}:
         raise _AvailabilityError('node_shell_wrapper', f'REA Node runtime must be a native executable, not a shell wrapper: {executable}')
-    try:
-        result = subprocess.run([str(executable), '--version'], capture_output=True, text=True,
-                                timeout=2, check=False, **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}))
-    except subprocess.TimeoutExpired as error:
-        raise _AvailabilityError('node_probe_timeout', f'Node version check timed out after 2 seconds: {executable}') from error
-    version = re.fullmatch(r'v?(\d+)\.(\d+)\.(\d+)\s*', result.stdout[:256]) if result.returncode == 0 else None
+    from .rea_readiness import native_probe
+    result = native_probe([str(executable), '--version'], timeout=timeout, output_limit=4096)
+    if result.get('cleanup_uncertain'):
+        raise _AvailabilityError('node_probe_cleanup_uncertain', f'Node version check cleanup is uncertain: {executable}')
+    if result.get('error'):
+        raise _AvailabilityError('node_probe_' + result['error'], f'Node version check {result["error"]} within the shared readiness budget: {executable}')
+    version = re.fullmatch(r'v?(\d+)\.(\d+)\.(\d+)\s*', result.get('stdout', '')[:256]) if result.get('returncode') == 0 else None
     if version is None:
         raise _AvailabilityError('node_probe_invalid', f'Node --version failed or returned an invalid version: {executable}')
     major, minor, patch = map(int, version.groups())
@@ -175,45 +176,80 @@ def _check_node(executable):
     return f'{major}.{minor}.{patch}'
 
 
-def _node_cli_probe(root, executable):
+def _node_cli_probe(root, executable, timeout=180):
     """Verify actual fixed CLI loading with bounded output and owned cleanup."""
-    from .local_python_runner import _terminate_pid
-    process = None
-    with tempfile.TemporaryFile() as output:
+    from .rea_readiness import native_probe
+    result = native_probe([str(executable), str(root / 'scripts/rea.mjs'), '--help'],
+                          cwd=root, timeout=timeout)
+    if result.get('cleanup_uncertain'):
+        return 'cli_smoke_cleanup_uncertain'
+    if result.get('error'):
+        return 'cli_smoke_' + result['error']
+    required = ['inspect-web-page', 'inspect-web-network-capture', *COMMANDS.values()]
+    if result.get('returncode') != 0 or not all(command in result.get('stdout', '') for command in required):
+        return 'cli_smoke_failed_or_capabilities_missing'
+    return None
+
+
+def _node_health_identity(config):
+    from .rea_readiness import file_stamp, source_tree_stamp
+    roots = rea_repository_candidates(config)
+    identities = []
+    for root in roots:
+        members = [file_stamp(root, include_parents=True), file_stamp(root / 'package.json'),
+                   file_stamp(root / 'native/windows/build/manifest.json'),
+                   file_stamp(root / 'native/windows/build/rea-windows-x64.node')]
+        members.extend(source_tree_stamp(root / 'scripts'))
+        members.extend(source_tree_stamp(root / 'dist'))
+        dependencies = ['zod']
         try:
-            options = {'creationflags': getattr(subprocess, 'CREATE_NO_WINDOW', 0)} if os.name == 'nt' else {'start_new_session': True}
-            process = subprocess.Popen([str(executable), str(root / 'scripts/rea.mjs'), '--help'],
-                cwd=root, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT, **options)
-            deadline = time.monotonic() + 5
-            while process.poll() is None:
-                if output.seek(0, 2) > 262144 or time.monotonic() > deadline:
-                    stopped = _terminate_pid(process.pid)
-                    try:
-                        process.wait(timeout=3)
-                    except subprocess.TimeoutExpired:
-                        stopped = False
-                    return 'cli_smoke_timeout_or_output_limit' if stopped else 'cli_smoke_cleanup_uncertain'
-                time.sleep(.02)
-            output.seek(0)
-            text = output.read(262145).decode('utf-8', 'replace')
-            required = ['inspect-web-page', 'inspect-web-network-capture', *COMMANDS.values()]
-            if process.returncode != 0 or len(text) > 262144 or not all(command in text for command in required):
-                return 'cli_smoke_failed_or_capabilities_missing'
-            return None
-        except OSError:
-            return 'cli_smoke_spawn_failed'
-        finally:
-            if process is not None and process.poll() is None:
-                _terminate_pid(process.pid)
+            manifest = root / 'package.json'
+            if manifest.stat().st_size <= 100000:
+                package = json.loads(manifest.read_text(encoding='utf-8'))
+                declared = package.get('dependencies', {}) if isinstance(package, dict) else {}
+                if isinstance(declared, dict) and len(declared) <= 100:
+                    dependencies.extend(name for name in declared if isinstance(name, str)
+                                        and re.fullmatch(r'(?:@[a-zA-Z0-9_.-]+/)?[a-zA-Z0-9_.-]+', name))
+        except (OSError, ValueError, TypeError):
+            pass
+        for name in sorted(set(dependencies)):
+            members.extend([file_stamp(root / 'node_modules' / name),
+                            file_stamp(root / 'node_modules' / name / 'package.json')])
+        identities.append(tuple(members))
+    return ('node', config_value(config, 'rea_enabled', True),
+            config_value(config, 'rea_node_readiness_timeout_seconds', 180),
+            tuple(identities), tuple(file_stamp(path, include_parents=True) for path in _node_candidates(config)),
+            id(_check_node), id(_node_cli_probe), file_stamp(Path(__file__)))
 
 
 def _node_health(config):
-    """Bounded local checks only: no install, network, REA CLI or target execution."""
+    """Reuse verified runtime/source identity across catalog and execution calls."""
+    from .rea_readiness import cached_health, UNCERTAIN_NODE_PROBES
+    selection = (str(config_value(config, 'root', '')), str(config_value(config, 'rea_repository', '')),
+                 str(config_value(config, 'rea_node_executable', '')))
+    if UNCERTAIN_NODE_PROBES:
+        return copy.deepcopy(next(iter(UNCERTAIN_NODE_PROBES.values())))
+    try:
+        identity = _node_health_identity(config)
+    except (OSError, ValueError, TypeError):
+        return _node_health_uncached(config)
+    result = cached_health(identity, lambda: _node_health_uncached(config),
+                           failure_seconds=_bounded(config, 'rea_node_readiness_timeout_seconds', 180, 1, 180))
+    if result.get('cleanup_uncertain'):
+        UNCERTAIN_NODE_PROBES[selection] = copy.deepcopy(result)
+    return result
+
+
+def _node_health_uncached(config):
+    """One shared readiness deadline: local version/help only, never install."""
+    allowance = _bounded(config, 'rea_node_readiness_timeout_seconds', 180, 1, 180)
+    deadline = time.monotonic() + allowance
     diagnostics = {'manifest_filename': 'package.json', 'repository_candidates': [], 'node_candidates': [],
                    'required_files': ['scripts/rea.mjs', 'dist/cli-runtime/cli.js', 'dist/cli-runtime/cliOutput.js', 'dist/cli-runtime/cliResultOutput.js'],
                    'capability_commands': {'rea.inspect_page': ['inspect-web-page'], 'rea.analyze_capture': ['inspect-web-network-capture'], 'rea.analyze_artifact': list(COMMANDS.values())},
                    'runtime_dependencies': 'Declared production dependency manifests plus zod must exist.',
-                   'capability_detection': 'Supported adapters pinned to rea-agents 6.5.x; compiled entry points and Windows native integrity checked, no REA invocation.',
+                   'capability_detection': 'Pinned rea-agents 6.5.x compiled entry points, Windows native integrity and fixed CLI --help capabilities verified.',
+                   'readiness_timeout_seconds': allowance,
                    'remediation': ['Run the normal launcher dependency setup to provision pinned REA into a managed runtime folder.',
                                    'Run .venv\\Scripts\\python.exe bootstrap\\setup_rea.py to repair or provision the managed runtime.',
                                    'For an existing built trusted installation set absolute rea_repository and, if required, rea_node_executable, then start a new session.']}
@@ -243,12 +279,18 @@ def _node_health(config):
         attempt = {'path': str(executable), 'available': False}
         diagnostics['node_candidates'].append(attempt)
         try:
-            node_version = _check_node(executable)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise _AvailabilityError('node_probe_timeout', 'Node shared readiness budget exhausted')
+            node_version = _check_node(executable, timeout=remaining)
             selected_node = executable
             attempt.update(available=True, code='ready', version=node_version)
             break
         except (OSError, ValueError, TypeError) as error:
             attempt.update(code=getattr(error, 'code', 'node_unreadable'), reason=str(error))
+            if getattr(error, 'code', '') == 'node_probe_cleanup_uncertain':
+                return {**base, 'status': 'unavailable', 'available': False, 'failure_stage': 'node',
+                        'reason': str(error), 'cleanup_uncertain': True}
     if selected_root is None or selected_node is None:
         stage = 'repository' if selected_root is None else 'node'
         attempts = diagnostics[stage + '_candidates']
@@ -256,7 +298,8 @@ def _node_health(config):
         if len(attempts) > 1:
             reason += f'; {len(attempts)} {stage} candidates checked; see diagnostics'
         return {**base, 'status': 'unavailable', 'available': False, 'failure_stage': stage, 'reason': reason}
-    smoke = _node_cli_probe(selected_root, selected_node)
+    remaining = deadline - time.monotonic()
+    smoke = _node_cli_probe(selected_root, selected_node, timeout=remaining) if remaining > 0 else 'cli_smoke_timeout'
     if smoke:
         return {**base, 'status': 'unavailable', 'available': False, 'failure_stage': 'cli_smoke',
                 'reason': smoke, 'cleanup_uncertain': smoke == 'cli_smoke_cleanup_uncertain'}
@@ -266,16 +309,8 @@ def _node_health(config):
 
 
 def _public_diagnostic(value):
-    """Public diagnostics use storage labels, never corporate filesystem paths."""
-    if isinstance(value, dict):
-        return {key: _public_diagnostic(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_public_diagnostic(item) for item in value]
-    if isinstance(value, str):
-        value = re.sub(r'(?i)(?<![a-z0-9])(?:[a-z]:[\\/]|\\\\)[^\r\n;]*', '<runtime-path>', value)
-        if value.startswith('/'):
-            return '<runtime-path>'
-    return value
+    """Retain useful runtime coordinates while excluding credential carriers."""
+    return _safe(value)
 
 
 def rea_health(config):
@@ -290,7 +325,7 @@ def rea_health(config):
     if mode not in {'auto', 'node_cli', 'python_native'}:
         return {**base, 'status': 'unavailable', 'available': False, 'selected_backend': None,
                 'reason': 'Invalid rea_backend configuration'}
-    python = PythonNativeREABackend().health()
+    python = PythonNativeREABackend(config).health()
     node = {'status': 'not_checked', 'available': False, 'reason': 'Python-only selection performs no Node discovery.'}
     if mode != 'python_native':
         try:
@@ -473,8 +508,7 @@ def _restore_source_paths(value, staging):
     if isinstance(value, str):
         for staged, original in ((staging['target'], staging['original']),
                                  (staging['target'].replace('\\', '/'), staging['original'].replace('\\', '/'))):
-            if value == staged or value.startswith(staged + '\\') or value.startswith(staged + '/'):
-                return original + value[len(staged):]
+            value = value.replace(staged, original)
         return value
     if isinstance(value, list):
         return [_restore_source_paths(item, staging) for item in value]
@@ -657,6 +691,27 @@ def _incomplete(value):
     return isinstance(value, list) and any(_incomplete(item) for item in value)
 
 
+def observation_usable(result):
+    """A successful bounded observation may still have explicit coverage gaps."""
+    if (result.get('side_effects_uncertain') or result.get('error')
+            or result.get('observation_verified') is False):
+        return False
+    if result.get('status') == 'completed':
+        return True
+    return (result.get('status') == 'partial' and result.get('observation_verified') is True
+            and isinstance(result.get('findings'), dict) and bool(result['findings']))
+
+
+def _observation_flags(result):
+    verified = (result.get('status') in {'completed', 'partial'}
+                and result.get('observation_verified') is not False
+                and not result.get('side_effects_uncertain') and not result.get('error')
+                and isinstance(result.get('findings'), dict) and bool(result['findings']))
+    result.update(observation_verified=verified,
+                  coverage_complete=verified and result.get('status') == 'completed')
+    return result
+
+
 async def _run(command, *, cwd, timeout, output_limit, context):
     from .local_python_runner import _read_bounded, _terminate_pid
     allowed = {'SYSTEMROOT', 'WINDIR', 'PATH', 'PATHEXT', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'USERPROFILE', 'HOME', 'LOCALAPPDATA', 'APPDATA'}
@@ -718,27 +773,24 @@ def _save(result, context):
     result.pop('evidence_sha256', None)
     original = result.get('target', '')
     result.setdefault('target_identity_sha256', hashlib.sha256(original.encode('utf-8')).hexdigest())
-    if result.get('target_type') != 'owned_browser':
-        result['target'] = '<approved-input>'
-    if isinstance(result.get('provenance', {}).get('input'), dict):
-        result['provenance']['input']['path'] = '<approved-input>'
-    # Remove absolute corporate filesystem coordinates from analysis strings.
-    def paths(value):
-        if isinstance(value, dict):
-            return {key: paths(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [paths(item) for item in value]
-        if isinstance(value, str):
-            return re.sub(r'(?i)(?<![a-z0-9])(?:[a-z]:[\\/]|\\\\)[^\r\n;]*', '<runtime-path>', value)
-        return value
-    result = paths(result)
     session = Path(context['session_dir']).resolve()
     reject_path_redirection(session)
     path = session / 'rea' / (result['execution_id'] + '.json')
     reject_path_redirection(path)
+    limit = config_value(context.get('config', {}), 'rea_max_output_bytes', 1048576)
+    complete_size = len(json.dumps(dict(result, evidence_path=str(path), evidence_sha256='0' * 64),
+                                   ensure_ascii=True).encode('utf-8'))
+    if complete_size > limit:
+        status = result.get('status', 'failed')
+        result = {key: item for key, item in result.items() if key in {
+            'execution_id', 'backend', 'tool', 'target', 'target_type', 'target_identity_sha256',
+            'started_at', 'finished_at', 'execution_started', 'side_effects_uncertain', 'provenance', 'retained_scratch'}}
+        result.update(status='output_limit' if status in {'completed', 'partial'} else status,
+                      observation_verified=False, coverage_complete=False,
+                      limitations=['Complete evidence with original source coordinates exceeded the configured output budget; no complete observation is claimed.'])
     write_json(path, _safe(result))
     content = io_path(path).read_bytes()
-    result['evidence_path'] = 'rea/' + path.name
+    result['evidence_path'] = str(path)
     result['evidence_sha256'] = hashlib.sha256(content).hexdigest()
     return result
 
@@ -780,7 +832,7 @@ async def _execute_python(name, args, context, policy):
                     {**context, '_rea_owned_page': page, '_rea_budget': budget}), timeout)
                 context['rea_execution_started'] = True
                 if page.url != prepared['url']:
-                    analysis.update(status='partial')
+                    analysis.update(status='partial', observation_verified=False)
                     analysis.setdefault('limitations', []).append('Owned page changed during passive observation; evidence is a bounded snapshot.')
                 _page_scope(args, context)
             else:
@@ -799,7 +851,7 @@ async def _execute_python(name, args, context, policy):
                     analysis = _json_object(run['stdout'])
                 after = validate_rea(name, args, context, policy)
                 if after['input'] != prepared['input'] and not analysis.get('side_effects_uncertain'):
-                    analysis.update(status='partial')
+                    analysis.update(status='partial', observation_verified=False)
                     analysis.setdefault('limitations', []).append('Input changed; current-byte identity is not verified.')
             if analysis.get('status') not in {'completed', 'partial', 'failed', 'unavailable', 'cancelled', 'timeout', 'output_limit', 'uncertain'}:
                 raise ValueError('Unsupported Python analysis status')
@@ -823,44 +875,46 @@ async def _execute_python(name, args, context, policy):
                       'error': {'code': 'python_analysis_failed', 'message': type(error).__name__}}
         finally:
             if staging is not None:
+                result = _restore_source_paths(result, staging)
                 if result.get('side_effects_uncertain'):
-                    result['retained_scratch'] = '<setup-temp>'
+                    result['retained_scratch'] = staging['root']
                 else:
                     try:
                         _clean_scratch(staging['root'])
                         context.pop('rea_retained_scratch', None)
                     except (OSError, ValueError):
-                        result.update(status='uncertain', side_effects_uncertain=True, retained_scratch='<setup-temp>')
+                        result.update(status='uncertain', side_effects_uncertain=True, retained_scratch=staging['root'])
                         context['rea_cleanup_confirmed'] = False
+        _observation_flags(result)
         result['finished_at'] = now()
         try:
             return _save(result, context)
         except (OSError, ValueError, TypeError, RecursionError):
             context['rea_cleanup_confirmed'] = False
-            return {**base, 'target': '<approved-input>', 'status': 'uncertain', 'side_effects_uncertain': True,
+            return {**base, 'status': 'uncertain', 'side_effects_uncertain': True,
                     'finished_at': now(), 'provenance': {'interface': 'bundled Python analysis'},
                     'error': {'code': 'evidence_storage_failed', 'message': 'Evidence persistence could not be confirmed.'}}
 
 
 async def execute_rea(name, args, context, policy):
     from .rea_backends import NodeCliREABackend
-    began = time.monotonic()
-    validate_rea(name, args, context, policy)
+    validated = validate_rea(name, args, context, policy)
     config = context.get('config', {})
     health = rea_health(config)
     if not health['available']:
         return {'backend': None, 'execution_id': uuid.uuid4().hex, 'status': 'unavailable',
-                'target': '<approved-input>', 'target_type': args.get('format', args.get('kind', 'owned_browser')),
+                'target': validated['target'], 'target_type': validated['target_type'],
                 'started_at': now(), 'finished_at': now(), 'side_effects_uncertain': False,
                 'execution_started': False, 'diagnostic': health}
     if health.get('execution_blocked'):
         context['rea_cleanup_confirmed'] = False
         return {'backend': health['selected_backend'], 'execution_id': uuid.uuid4().hex, 'status': 'uncertain',
-                'target': '<approved-input>', 'target_type': args.get('format', args.get('kind', 'owned_browser')),
+                'target': validated['target'], 'target_type': validated['target_type'],
                 'started_at': now(), 'finished_at': now(), 'side_effects_uncertain': True,
                 'execution_started': False, 'diagnostic': health}
     if health['selected_backend'] == 'python_native':
         return await _execute_python(name, args, context, policy)
+    began = time.monotonic()  # Readiness has a separate allowance from analysis.
     prepared = {'_name': name, '_arguments': args}
     method = name.split('.')[1]
     automatic = config_value(config, 'rea_backend', 'auto') == 'auto'
@@ -975,11 +1029,11 @@ async def _execute_node(name, args, context, policy):
                 if result.get('side_effects_uncertain'):
                     context['rea_cleanup_confirmed'] = False
             if page is not None and page.url != prepared['url']:
-                result.update(status='partial', limitations=['Owned page navigated during passive inspection; inspect its new state before reuse.'])
+                result.update(status='partial', observation_verified=False, limitations=['Owned page navigated during passive inspection; inspect its new state before reuse.'])
             if page is None:
                 after = validate_rea(name, args, context, policy)
                 if after['input'] != prepared['input'] and not result.get('side_effects_uncertain'):
-                    result.update(status='partial', limitations=['Input changed during analysis; findings are not a verified observation of current bytes.'])
+                    result.update(status='partial', observation_verified=False, limitations=['Input changed during analysis; findings are not a verified observation of current bytes.'])
         except asyncio.CancelledError:
             base['execution_started'] = context.get('rea_execution_started', False)
             result = {**base, 'status': 'uncertain', 'side_effects_uncertain': True,
@@ -1006,6 +1060,7 @@ async def _execute_node(name, args, context, policy):
                     result.update(status='uncertain', side_effects_uncertain=True,
                                   retained_scratch=staging['root'],
                                   cleanup='Local input snapshot cleanup could not be verified; inspect before retry.')
+        _observation_flags(result)
         result['finished_at'] = now()
         try:
             return _save(result, context)

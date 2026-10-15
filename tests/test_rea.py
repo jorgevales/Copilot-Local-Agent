@@ -46,7 +46,7 @@ class REATests(unittest.TestCase):
         (native / 'manifest.json').write_text(json.dumps({'packageVersion': '6.5.0',
             'platform': 'win32', 'architecture': 'x64',
             'artifactSha256': hashlib.sha256((native / 'rea-windows-x64.node').read_bytes()).hexdigest()}))
-        self.node_probe = patch('copilot_agent.rea.subprocess.run', return_value=__import__('subprocess').CompletedProcess([], 0, 'v24.13.0\n', ''))
+        self.node_probe = patch('copilot_agent.rea_readiness.native_probe', return_value={'returncode': 0, 'stdout': 'v24.13.0\n', 'error': None})
         self.node_probe.start()
         self.addCleanup(self.node_probe.stop)
         cli_probe = patch('copilot_agent.rea._node_cli_probe', return_value=None)
@@ -216,7 +216,7 @@ class REATests(unittest.TestCase):
         with patch('copilot_agent.rea._run', fake):
             result = asyncio.run(execute_rea('rea.analyze_artifact', {'path': str(self.input), 'kind': 'go'}, self.context, self.policy))
         self.assertTrue(Path(self.context['rea_retained_scratch']).is_dir())
-        self.assertEqual('<runtime-path>', result['retained_scratch'])
+        self.assertEqual(self.context['rea_retained_scratch'], result['retained_scratch'])
         self.assertTrue(result['side_effects_uncertain'])
 
     def test_owned_page_rejects_wrong_endpoint_and_unapproved_target(self):

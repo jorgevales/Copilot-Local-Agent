@@ -1,3 +1,5 @@
+> Historical supplied brief. The later [confirmed interview agreement](REA_AGREEMENT_UPDATE.md) overrides its company-path masking requirement and specifies180-second Node setup/readiness plus usable verified partial observations.
+
 # Codex Brief: REA Is Mandatory, Implement a Reliable Non-Node Backend
 
 ## Non-negotiable outcome

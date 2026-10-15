@@ -66,10 +66,27 @@ class PythonArtifactTests(unittest.TestCase):
         self.assertEqual(findings['exports'][0]['name'],'load')
         self.assertEqual(findings['route_templates'][0]['route'],'/api/users/:segment')
         self.assertTrue(findings['source_maps'][0]['has_embedded_sources'])
+        self.assertEqual(str(self.root/'app.js'), findings['inventory'][0]['path'])
+        self.assertEqual(['C:\\private\\customer.js'], findings['source_maps'][0]['sources'])
         output = json.dumps(result)
-        for private in ('TOPSECRET','PRIVATEVALUE','C:\\private','example.invalid','?token=',self.temp.name):
+        for private in ('TOPSECRET','PRIVATEVALUE','example.invalid','?token='):
             self.assertNotIn(private,output)
         self.assertEqual(result['status'],'partial')
+
+    def test_source_map_coordinates_are_bounded_metadata_never_followed(self):
+        source = 'https://user:password@example.invalid/private/app.ts?token=TOPSECRET#fragment'
+        path = self.root/'app.js.map'
+        path.write_text(json.dumps({'version':3,'sourceRoot':'S:\\Company\\Sources',
+            'sources':[source] * 130,'names':[],'sourcesContent':['PRIVATEVALUE'],'mappings':''}),
+            encoding='utf-8')
+        result = analyze_artifact(path,'javascript')
+        evidence = result['findings']['source_maps'][0]
+        self.assertEqual('S:\\Company\\Sources', evidence['source_root'])
+        self.assertEqual(128, len(evidence['sources']))
+        self.assertEqual(2, evidence['sources_truncated'])
+        self.assertEqual('https://example.invalid/private/app.ts', evidence['sources'][0])
+        for secret in ('TOPSECRET', 'PRIVATEVALUE', 'user:password'):
+            self.assertNotIn(secret, json.dumps(result))
 
     def test_unknown_import_hashed_and_dynamic_route_not_claimed(self):
         result=self.analyze(b'import x from "./customers/jane@example.invalid.js"; fetch(`/users/${id}`);','javascript','app.js')
@@ -129,7 +146,8 @@ class PythonArtifactTests(unittest.TestCase):
     def test_source_map_outside_paths_never_followed(self):
         result=self.analyze(json.dumps({'version':3,'sources':['../../outside.js'],'sourcesContent':['PRIVATEVALUE'],'names':[],'mappings':''}).encode(),'javascript','source.map')
         self.assertEqual(result['findings']['source_maps'][0]['sources_count'],1)
-        self.assertNotIn('outside',json.dumps(result))
+        self.assertEqual(['../../outside.js'], result['findings']['source_maps'][0]['sources'])
+        self.assertNotIn('PRIVATEVALUE',json.dumps(result))
 
 
 if __name__=='__main__': unittest.main()

@@ -9,10 +9,13 @@ import unittest
 from unittest.mock import patch
 
 from copilot_agent.rea import _node_health
+from copilot_agent.rea_readiness import HEALTH_CACHE, UNCERTAIN_NODE_PROBES
 
 
 class REAAvailabilityTests(unittest.TestCase):
     def setUp(self):
+        HEALTH_CACHE.clear()
+        UNCERTAIN_NODE_PROBES.clear()
         self.temp = tempfile.TemporaryDirectory(prefix='rea_availability_')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -25,7 +28,7 @@ class REAAvailabilityTests(unittest.TestCase):
         self.addCleanup(patch.stopall)
         patch('copilot_agent.rea._node_cli_probe', return_value=None).start()
         patch.dict(os.environ, {'LOCALAPPDATA': str(self.local)}).start()
-        self.run = patch('copilot_agent.rea.subprocess.run', return_value=subprocess.CompletedProcess([], 0, 'v24.13.0\n', '')).start()
+        self.run = patch('copilot_agent.rea_readiness.native_probe', return_value={'returncode': 0, 'stdout': 'v24.13.0\n', 'error': None}).start()
 
     def install(self, root):
         root.mkdir(parents=True, exist_ok=True)
@@ -89,18 +92,20 @@ class REAAvailabilityTests(unittest.TestCase):
         self.install(self.project / '.runtime/rea')
         for version, available in [('22.18.0', False), ('22.19.0', True), ('23.0.0', False), ('24.10.9', False), ('24.11.0', True), ('25.9.0', False), ('26.0.0', True)]:
             with self.subTest(version=version):
-                self.run.return_value = subprocess.CompletedProcess([], 0, 'v' + version + '\n', '')
+                HEALTH_CACHE.clear()
+                self.run.return_value = {'returncode': 0, 'stdout': 'v' + version + '\n', 'error': None}
                 health = _node_health(self.config)
                 self.assertEqual(available, health['available'], health)
                 self.assertEqual(1, len(health['diagnostics']['node_candidates']))
 
     def test_node_timeout_is_bounded_and_diagnostic(self):
         self.install(self.project / '.runtime/rea')
-        self.run.side_effect = subprocess.TimeoutExpired([str(self.node), '--version'], 3)
+        self.run.return_value = {'error': 'timeout', 'cleanup_uncertain': False}
         health = _node_health(self.config)
         self.assertEqual('node_probe_timeout', health['diagnostics']['node_candidates'][0]['code'])
         self.assertEqual('node', health['failure_stage'])
-        self.assertLessEqual(self.run.call_args.kwargs['timeout'], 3)
+        self.assertLessEqual(self.run.call_args.kwargs['timeout'], 180)
+        self.assertGreater(self.run.call_args.kwargs['timeout'], 170)
 
     def test_node_program_files_fallback_after_path_candidate_invalid(self):
         self.install(self.project / '.runtime/rea')

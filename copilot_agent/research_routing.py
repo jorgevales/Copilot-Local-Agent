@@ -79,7 +79,9 @@ def _fresh_evidence(target, selected, context, args, policy):
         outcome = record.get('result', {})
         result = outcome.get('result', {})
         if (request.get('name') != selected or record.get('status') != 'completed'
-                or outcome.get('ok') is not True or result.get('status') != 'completed'
+                or outcome.get('ok') is not True or result.get('status') not in {'completed', 'partial'}
+                or (result.get('status') == 'partial' and (result.get('observation_verified') is not True or not result.get('findings')))
+                or result.get('observation_verified') is False or result.get('side_effects_uncertain') or result.get('error')
                 or (result.get('target') != target and result.get('target_identity_sha256') != hashlib.sha256(target.encode('utf-8')).hexdigest()) or not result.get('evidence_path')
                 or not result.get('evidence_sha256')):
             continue
@@ -107,6 +109,8 @@ def _fresh_evidence(target, selected, context, args, policy):
             continue
         return {'call_id': call_id, 'tool': selected, 'evidence_path': str(path),
                 'sha256': result['evidence_sha256'], 'age_seconds': round(age, 2),
+                'status': result['status'], 'coverage_complete': result['status'] == 'completed',
+                'limitations': result.get('limitations', []), 'unknowns': result.get('unknowns', []),
                 'scope': 'same target and capability; verify the current live state before relying on navigation'}
     return None
 

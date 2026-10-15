@@ -44,6 +44,7 @@
   "rea_backend": "auto",
   "rea_repository": "",
   "rea_node_executable": "",
+  "rea_node_readiness_timeout_seconds": 180,
   "rea_timeout_seconds": 45,
   "rea_max_output_bytes": 1048576,
   "rea_max_input_bytes": 20971520,

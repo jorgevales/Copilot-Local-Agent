@@ -1,3 +1,5 @@
+Current follow-up: [confirmed agreement and behavior](REA_AGREEMENT_UPDATE.md). Earlier masking/timing behavior below is historical.
+
 # Current backend follow-up
 
 The [mandatory Python/Node backend change](REA_PYTHON_BACKEND.md) supersedes Node-only availability and startup installation behavior in the historical reports below.

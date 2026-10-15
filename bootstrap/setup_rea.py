@@ -37,9 +37,35 @@ REQUIRED = ('scripts/rea.mjs', 'dist/cli-runtime/cli.js',
             'dist/cli-runtime/cliOutput.js', 'dist/cli-runtime/cliResultOutput.js')
 
 
-# Each setup invocation retains bounded diagnostics; raw environment and command
-# arguments never enter public messages. The context also covers nested probes.
+# Each setup invocation retains bounded diagnostics with exact local paths.
+# Credentials are removed; arbitrary environment values and payloads are not logged.
 _DIAGNOSTICS = ContextVar('rea_setup_diagnostics', default=None)
+_BUDGET = ContextVar('rea_setup_budget', default=None)
+
+
+class SetupBudgetExpired(RuntimeError):
+    pass
+
+
+class SetupBudget:
+    def __init__(self, seconds):
+        self.seconds = float(seconds)
+        self.deadline = time.monotonic() + self.seconds
+
+    def remaining(self):
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise SetupBudgetExpired(f'Node setup exhausted its shared {self.seconds:g}-second budget; no further install attempt started.')
+        return remaining
+
+
+def _remaining(default=180):
+    diagnostics = _DIAGNOSTICS.get()
+    if diagnostics and any(item.get('termination') == 'subtree_cleanup_unconfirmed' for item in diagnostics.records):
+        raise RuntimeError('Node setup stopped: owned process subtree cleanup is unconfirmed; no additional probe or installation retry is safe.')
+    budget = _BUDGET.get()
+    return min(float(default), budget.remaining()) if budget else float(default)
+
 _STAGES = frozenset({'node_probe', 'npm_probe', 'archive_acquire', 'archive_verify',
                      'archive_extract', 'dependency_install', 'native_verify', 'cli_smoke', 'publish'})
 
@@ -47,23 +73,12 @@ _STAGES = frozenset({'node_probe', 'npm_probe', 'archive_acquire', 'archive_veri
 class SetupDiagnostics:
     def __init__(self, project, env):
         self.project, self.env, self.records = Path(project), env, []
-        self.paths = [(str(project), '<project-root>')]
-        for key, label in (('COPILOT_REA_NODE', '<node-runtime>'), ('COPILOT_REA_ARCHIVE', '<setup-archive>'),
-                           ('npm_config_cache', '<npm-cache>'), ('NPM_CONFIG_CACHE', '<npm-cache>'),
-                           ('TEMP', '<setup-temp>'), ('TMP', '<setup-temp>'), ('LOCALAPPDATA', '<user-runtime>'),
-                           ('APPDATA', '<user-runtime>')):
-            if env.get(key):
-                self.paths.append((env[key], label))
 
     def safe(self, value):
         value = str(value or '')[:8192]
-        for path, label in sorted(self.paths, key=lambda item: len(item[0]), reverse=True):
-            for spelling in {path, path.replace('\\', '/'), path.replace('/', '\\')}:
-                value = re.sub(re.escape(spelling), lambda _: label, value, flags=re.I)
-        value = re.sub(r'(?i)\bS:[\\/][^\r\n\t<>"|]*', 'S Drive', value)
-        value = re.sub(r'(?i)(?:[A-Z]:[\\/]|\\\\)[^\r\n\t<>"|]*', '<system-path>', value)
-        value = re.sub(r'(?<![\w:])/(?:[^\s<>"|/]+/)+[^\s<>"|]*', '<system-path>', value)
-        value = re.sub(r'(?i)(token|password|authorization|cookie|secret)[ :=]+[^\s,;]+', r'\1=<redacted>', value)
+        value = re.sub(r'''(?im)(authorization|proxy-authorization|cookie|set-cookie)["']?\s*[:=]\s*[^\r\n]+''', r'\1=<redacted>', value)
+        value = re.sub(r'''(?ix)([\"']?(?:[\w-]*token|password|passwd|secret|api[_-]?key)[\"']?\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)''', r'\1<redacted>', value)
+        value = re.sub(r'(?i)(https?://)[^/@\s]+:[^/@\s]+@', r'\1<redacted>@', value)
         return value[:2048]
 
     def record(self, stage, *, command=None, duration=0, timeout=None, returncode=None,
@@ -95,6 +110,7 @@ class SetupDiagnostics:
 
 
 def _stage(stage, function, *args, **kwargs):
+    _remaining()
     diagnostics = _DIAGNOSTICS.get()
     return diagnostics.call(stage, function, *args, **kwargs) if diagnostics else function(*args, **kwargs)
 
@@ -131,6 +147,7 @@ def _terminate_owned(process):
 def _run_command(command, *, cwd=None, env=None, timeout=8, stage='cli_smoke', identity='rea --help'):
     """Spool output to verified setup scratch, retaining at most 2 KiB per stream."""
     diagnostics = _DIAGNOSTICS.get()
+    timeout = _remaining(timeout)
     started = time.monotonic()
     process, termination, error = None, 'not_started', None
     scratch = (env or {}).get('TEMP') if (env or {}).get('TEMP') else None
@@ -156,6 +173,7 @@ def _run_command(command, *, cwd=None, env=None, timeout=8, stage='cli_smoke', i
             diagnostics.record(stage, command=identity, duration=time.monotonic()-started, timeout=timeout,
                                returncode=result.returncode, stdout=result.stdout, stderr=result.stderr,
                                termination=termination, error=error)
+            diagnostics.records[-1]['executable'] = diagnostics.safe(command[0])
         if error:
             raise error
         return result
@@ -189,7 +207,7 @@ def find_node(env):
         if not path.is_absolute() or not path.is_file() or path.suffix.lower() in {'.cmd', '.bat', '.ps1'}:
             continue
         try:
-            result = _run_command([str(path), '--version'], timeout=5, env=env,
+            result = _run_command([str(path), '--version'], timeout=_remaining(), env=env,
                                   stage='node_probe', identity='node --version')
             version = tuple(int(item) for item in re.fullmatch(r'v(\d+)\.(\d+)\.(\d+)\s*', result.stdout).groups())
             if result.returncode == 0 and (version[0] >= 26 or version[0] == 24 and version >= (24, 11, 0)
@@ -223,13 +241,20 @@ def _select_node(project, env, *, node_path=None, prompt_for_node=False,
     if not prompt_for_node:
         try:
             return find_node(env), bool(env.get('COPILOT_REA_NODE'))
+        except SetupBudgetExpired:
+            raise
         except RuntimeError:
             if not ask_on_missing:
                 raise
+            _remaining()
     ask = input_fn or input
     while True:
         try:
+            prompt_started = time.monotonic()
             value = ask('Paste Node node.exe, extracted portable folder or ZIP path (S: or UNC; Enter to use detected Node / cancel): ').strip()
+            budget = _BUDGET.get()
+            if budget:
+                budget.deadline += time.monotonic() - prompt_started
         except EOFError as error:
             raise RuntimeError('No Node path input is available. Rerun Setup interactively or supply --node-path.') from error
         if not value:
@@ -239,6 +264,8 @@ def _select_node(project, env, *, node_path=None, prompt_for_node=False,
                 raise RuntimeError('Node path was not supplied; setup needs a compatible Node executable or portable ZIP. Rerun Setup to paste it.') from error
         try:
             return _operator_node(value, project, env), True
+        except SetupBudgetExpired:
+            raise
         except (OSError, ValueError, RuntimeError) as error:
             diagnostics = _DIAGNOSTICS.get()
             detail = diagnostics.safe(error) if diagnostics else type(error).__name__
@@ -254,7 +281,7 @@ def find_npm(node, env):
         candidates.append(Path(env['APPDATA']) / 'npm' / 'node_modules' / 'npm' / 'bin' / 'npm-cli.js')
     for path in candidates:
         if path.is_file():
-            result = _run_command([str(node), str(path), '--version'], env=env, timeout=8,
+            result = _run_command([str(node), str(path), '--version'], env=env, timeout=_remaining(),
                                   stage='npm_probe', identity='node npm --version')
             if result.returncode == 0 and re.fullmatch(r'\d+\.\d+\.\d+\s*', result.stdout):
                 return path
@@ -286,7 +313,7 @@ def validate_runtime(root, node, env, *, smoke=True):
     _stage('native_verify', _validate_runtime_files, root)
     if smoke:
         result = _run_command([str(node), str(root / 'scripts' / 'rea.mjs'), '--help'],
-                              cwd=root, env=env, timeout=8, stage='cli_smoke', identity='node rea --help')
+                              cwd=root, env=env, timeout=_remaining(), stage='cli_smoke', identity='node rea --help')
         if result.returncode:
             raise ValueError('REA CLI could not load its production dependencies; rerun runtime repair')
     return True
@@ -301,7 +328,7 @@ def archive_bytes(env):
             raise ValueError('COPILOT_REA_ARCHIVE must be a bounded absolute archive path')
         payload = path.read_bytes()
     else:
-        with urllib.request.urlopen(ARCHIVE_URL, timeout=25) as response:
+        with urllib.request.urlopen(ARCHIVE_URL, timeout=_remaining()) as response:
             if not response.geturl().startswith('https://registry.npmjs.org/'):
                 raise ValueError('unexpected REA archive redirect')
             payload = response.read(MAX_ARCHIVE + 1)
@@ -339,7 +366,7 @@ def extract_archive(archive, destination):
                     shutil.copyfileobj(incoming, outgoing)
 
 
-def _provision_node(project, *, environ=None, deadline_seconds=90, offline=False, config_path=None,
+def _install_node(project, *, environ=None, deadline_seconds=180, offline=False, config_path=None,
               node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None):
     project = Path(project).resolve()
     env = dict(os.environ if environ is None else environ)
@@ -364,9 +391,9 @@ def _provision_node(project, *, environ=None, deadline_seconds=90, offline=False
         if json.loads(io_path(settings_file).read_text(encoding='utf-8-sig')) != settings:
             raise RuntimeError('Saved Node configuration did not read back correctly; setup stopped.')
         print('Node path validated and saved. Continuing the remaining setup automatically.', flush=True)
-    # Interactive operator time and ZIP preparation do not consume the REA
-    # dependency installation budget.
-    deadline = time.monotonic() + deadline_seconds
+    # One budget covers selection, portable preparation, every probe and all
+    # installation candidates. Only time spent waiting for operator input is paused.
+    deadline = _BUDGET.get().deadline
     candidates = runtime_candidates(project, env)
     if settings.get('rea_repository'):
         selected = Path(settings['rea_repository']).expanduser()
@@ -426,11 +453,11 @@ def _provision_node(project, *, environ=None, deadline_seconds=90, offline=False
                         diagnostics.record('dependency_install', command='npm cache write/read probe', error=error, termination='failed')
             stage = 'dependency_install'
             result = _run_command(command + ['--offline'], cwd=root, env=cache_env,
-                                  timeout=min(30, max(1, deadline-time.monotonic())),
+                                  timeout=_remaining(),
                                   stage='dependency_install', identity='node npm install --offline --ignore-scripts')
             if result.returncode and not offline:
                 result = _run_command(command, cwd=root, env=child_env,
-                                      timeout=min(60, max(1, deadline-time.monotonic())),
+                                      timeout=_remaining(),
                                       stage='dependency_install', identity='node npm install --ignore-scripts')
             if result.returncode:
                 raise RuntimeError('npm could not obtain production dependencies (cache and registry attempted)')
@@ -482,6 +509,17 @@ def _provision_node(project, *, environ=None, deadline_seconds=90, offline=False
                        'or set rea_repository to a complete existing installation. The Python REA backend remains available when its local health check succeeds.')
 
 
+def _provision_node(project, *, environ=None, deadline_seconds=180, offline=False, config_path=None,
+                    node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None):
+    token = _BUDGET.set(SetupBudget(deadline_seconds))
+    try:
+        return _install_node(project, environ=environ, deadline_seconds=deadline_seconds, offline=offline,
+                             config_path=config_path, node_path=node_path, prompt_for_node=prompt_for_node,
+                             ask_on_missing=ask_on_missing, input_fn=input_fn)
+    finally:
+        _BUDGET.reset(token)
+
+
 def _verify_scratch(path):
     path.mkdir(parents=True, exist_ok=True)
     probe = path / ('.rea-cache-probe-' + uuid.uuid4().hex)
@@ -493,7 +531,7 @@ def _verify_scratch(path):
         probe.unlink(missing_ok=True)
 
 
-def provision(project, *, environ=None, deadline_seconds=90, offline=False, config_path=None,
+def provision(project, *, environ=None, deadline_seconds=180, offline=False, config_path=None,
               node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None):
     """Setup may repair Node; Python-only mode never discovers or installs it."""
     project = Path(project).resolve()
@@ -546,7 +584,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--project', type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument('--config', type=Path, default=None)
-    parser.add_argument('--timeout-seconds', type=int, default=90, choices=range(10, 181), metavar='10..180')
+    parser.add_argument('--timeout-seconds', type=int, default=180, choices=range(10, 181), metavar='10..180')
     parser.add_argument('--offline', action='store_true', help='Use only COPILOT_REA_ARCHIVE and the existing npm cache.')
     parser.add_argument('--node-path', help='Absolute node.exe, extracted portable folder or Windows Node ZIP; accepts S:/UNC paths.')
     parser.add_argument('--prompt-node-path', action='store_true', help='Paste a Node path before continuing setup automatically.')

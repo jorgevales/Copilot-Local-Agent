@@ -40,8 +40,9 @@ class NodeRuntimeTests(unittest.TestCase):
             missing = root / 'missing-alias' / 'node.exe'
             with patch.object(rea, '_node_candidates', return_value=[missing, executable]), \
                  patch.object(rea, '_check_repository', return_value={'version': '6.5.0'}), \
-                 patch.object(rea.subprocess, 'run', return_value=SimpleNamespace(
-                     returncode=0, stdout='v24.13.0\n', stderr='')):
+                 patch('copilot_agent.rea_readiness.native_probe', return_value={
+                     'returncode': 0, 'stdout': 'v24.13.0\n', 'error': None, 'cleanup_uncertain': False}), \
+                 patch.object(rea, '_node_cli_probe', return_value=None):
                 health = rea._node_health({'root': root})
             self.assertTrue(health['available'])
             self.assertEqual(str(executable.resolve()), health['node'])

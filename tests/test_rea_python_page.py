@@ -142,6 +142,9 @@ class PythonPageBrowserTests(unittest.IsolatedAsyncioTestCase):
                     result = output['result']
                     self.assertEqual('python_native', result['backend'])
                     self.assertEqual('partial', result['status'])
+                    self.assertTrue(output['ok'], output)
+                    self.assertTrue(result['observation_verified'])
+                    self.assertFalse(result['coverage_complete'])
                     self.assertEqual(1, result['findings']['dom']['tag_counts']['button'])
                     self.assertTrue(result['findings']['forms'])
                     self.assertEqual(before, await browser.tool_page.content())
@@ -152,7 +155,7 @@ class PythonPageBrowserTests(unittest.IsolatedAsyncioTestCase):
                     if not evidence.is_absolute():
                         evidence = Path(context['session_dir']) / evidence
                     public = json.dumps(result) + evidence.read_text(encoding='utf-8')
-                    for value in ('private-customer-secret', 'password-secret', 'private-button-secret', 'private-label-secret', 'form-secret', 'query-secret', 'cookie-secret', 'storage-secret', str(root), root.as_posix()):
+                    for value in ('private-customer-secret', 'password-secret', 'private-button-secret', 'private-label-secret', 'form-secret', 'query-secret', 'cookie-secret', 'storage-secret'):
                         self.assertNotIn(value, public)
                 finally:
                     await native.close()

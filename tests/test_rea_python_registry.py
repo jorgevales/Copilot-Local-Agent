@@ -53,10 +53,11 @@ class PythonREARegistryTests(unittest.IsolatedAsyncioTestCase):
     def assert_sanitized(self,result,secrets=()):
         output=json.dumps(result)
         retained=self.evidence(result).decode('utf-8')
-        for secret in tuple(secrets)+(str(self.root),self.root.as_posix()):
+        for secret in secrets:
             self.assertNotIn(secret,output)
             self.assertNotIn(secret,retained)
-        self.assertEqual('<approved-input>',result['target'])
+        self.assertTrue(Path(result['target']).is_relative_to(self.root), result)
+        self.assertEqual(result['target'],result['provenance']['input']['path'])
         self.assertFalse(result['side_effects_uncertain'])
 
     async def test_all_static_kinds_execute_real_python_worker_with_useful_evidence(self):
@@ -74,7 +75,9 @@ class PythonREARegistryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(result['confidence'],('observed','derived'))
                 self.assertTrue(result['limitations'])
                 self.assert_sanitized(result,('fixture-secret',))
-                if kind=='javascript': self.assertTrue(result['findings']['imports'])
+                if kind=='javascript':
+                    self.assertTrue(result['findings']['imports'])
+                    self.assertEqual(str(path), result['findings']['inventory'][0]['path'])
                 if kind=='managed': self.assertTrue(result['findings']['types'])
                 if kind=='go': self.assertIn('net/http',result['findings']['packages'])
                 if kind=='rust': self.assertIn('tokio',result['findings']['packages'])

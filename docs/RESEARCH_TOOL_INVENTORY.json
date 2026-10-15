@@ -17266,7 +17266,7 @@
         "Read-only operation"
       ],
       "risk_level": "low",
-      "timeout": 57,
+      "timeout": 237,
       "output_size_limit": 1048576,
       "error_codes": [
         "cancelled",
@@ -17391,11 +17391,13 @@
       "approval_policy": "read_only",
       "side_effects": [],
       "limits": {
-        "timeout_seconds": 57,
+        "timeout_seconds": 237,
         "output_chars": null,
         "legacy_projection_chars": 12000,
         "file_bytes": 20971520,
         "output_bytes": 1048576,
+        "analysis_timeout_seconds": 45,
+        "readiness_timeout_seconds": 180,
         "input_bytes": 20971520,
         "concurrency": 3
       },
@@ -17431,7 +17433,7 @@
         "Read-only operation"
       ],
       "risk_level": "low",
-      "timeout": 57,
+      "timeout": 237,
       "output_size_limit": 1048576,
       "error_codes": [
         "cancelled",
@@ -17561,11 +17563,13 @@
       "approval_policy": "read_only",
       "side_effects": [],
       "limits": {
-        "timeout_seconds": 57,
+        "timeout_seconds": 237,
         "output_chars": null,
         "legacy_projection_chars": 12000,
         "file_bytes": 20971520,
         "output_bytes": 1048576,
+        "analysis_timeout_seconds": 45,
+        "readiness_timeout_seconds": 180,
         "input_bytes": 20971520,
         "concurrency": 3
       },
@@ -17601,7 +17605,7 @@
         "Read-only operation"
       ],
       "risk_level": "low",
-      "timeout": 57,
+      "timeout": 237,
       "output_size_limit": 1048576,
       "error_codes": [
         "cancelled",
@@ -17733,11 +17737,13 @@
       "approval_policy": "read_only",
       "side_effects": [],
       "limits": {
-        "timeout_seconds": 57,
+        "timeout_seconds": 237,
         "output_chars": null,
         "legacy_projection_chars": 12000,
         "file_bytes": 20971520,
         "output_bytes": 1048576,
+        "analysis_timeout_seconds": 45,
+        "readiness_timeout_seconds": 180,
         "input_bytes": 20971520,
         "concurrency": 3
       },

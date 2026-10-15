@@ -1,4 +1,4 @@
-"""Sanitized setup stages and mandatory Python fallback regression coverage."""
+"""Credential-safe setup stages and mandatory Python fallback regression coverage."""
 import contextlib
 import errno
 import importlib.util
@@ -59,15 +59,117 @@ class SetupBackendDiagnosticsTests(unittest.TestCase):
             self.assertEqual(errno.ENOSPC, diagnostics.records[-1]['errno'])
             self.assertEqual('failed', diagnostics.records[-1]['termination'])
 
-    def test_safe_diagnostics_never_expose_paths_or_secrets(self):
+    def test_diagnostics_retain_full_paths_but_not_credentials(self):
         diagnostics = helper.SetupDiagnostics(Path('C:/project'), {'COPILOT_REA_NODE': 'S:/portable/node.exe', 'npm_config_cache': 'S:/cache'})
         value = diagnostics.safe('C:/project/file node=S:/portable/node.exe npm S:/cache/noise\n\\\\server\\share\\private\nC:\\Users\\example\\file\ntoken=secret-value')
-        self.assertIn('<project-root>', value)
-        self.assertIn('<node-runtime>', value)
-        self.assertIn('<npm-cache>', value)
-        for forbidden in ('server', 'share', 'private', 'example', 'secret-value'):
-            self.assertNotIn(forbidden, value)
+        for expected in ('C:/project/file', 'S:/portable/node.exe', 'S:/cache/noise', r'\\server\share\private', r'C:\Users\example\file'):
+            self.assertIn(expected, value)
+        self.assertNotIn('secret-value', value)
         self.assertLessEqual(len(value), 2048)
+
+    def test_sensitive_values_removed_without_masking_company_paths(self):
+        diagnostics = helper.SetupDiagnostics(Path('S:/Company/project'), {})
+        original = ('S:/Company/project/node.exe\nAuthorization: Bearer very-secret\n'
+                    'Cookie: session=private-cookie\npassword="two words" token=hidden-token\n'
+                    'https://user:private-password@internal.example/path')
+        result = diagnostics.safe(original)
+        self.assertIn('S:/Company/project/node.exe', result)
+        for secret in ('very-secret', 'private-cookie', 'two words', 'hidden-token', 'private-password'):
+            self.assertNotIn(secret, result)
+
+    def test_default_setup_and_cli_forward_one_180_second_budget(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.object(helper, '_provision_node', return_value={'available': True}) as install:
+                helper.provision(temporary, environ={})
+            self.assertEqual(180, install.call_args.kwargs['deadline_seconds'])
+        with patch.object(helper.sys, 'argv', ['setup_rea.py', '--non-interactive']), \
+             patch.object(helper, 'provision', return_value={'available': True}) as provision:
+            self.assertEqual(0, helper.main())
+        self.assertEqual(180, provision.call_args.kwargs['deadline_seconds'])
+
+    def test_node_probe_receives_remaining_budget_instead_of_five_seconds(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            node = Path(temporary) / 'node.exe'
+            node.touch()
+            clock = [0]
+            with patch.object(helper.time, 'monotonic', side_effect=lambda: clock[0]):
+                token = helper._BUDGET.set(helper.SetupBudget(180))
+                try:
+                    clock[0] = 40
+                    with patch.object(helper, '_run_command', return_value=SimpleNamespace(returncode=0, stdout='v24.13.0')) as run:
+                        self.assertEqual(node, helper.find_node({'COPILOT_REA_NODE': str(node)}))
+                    self.assertEqual(140, run.call_args.kwargs['timeout'])
+                finally:
+                    helper._BUDGET.reset(token)
+
+    def test_install_beyond_90_seconds_shares_remaining_budget_between_phases(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            target = project / '.runtime' / 'rea'
+            clock, timeouts = [0], []
+            def advance(seconds, result):
+                clock[0] += seconds
+                return result
+            def validate(path, *_):
+                if path.name != 'package':
+                    raise ValueError('missing existing install')
+                return advance(10, True)
+            def extract(archive, root):
+                clock[0] += 15
+                (root / 'package.json').write_text('{}')
+            def run(command, **kwargs):
+                timeouts.append(kwargs['timeout'])
+                return advance(35 if '--offline' in command else 25,
+                               SimpleNamespace(returncode=1 if '--offline' in command else 0))
+            with patch.object(helper.time, 'monotonic', side_effect=lambda: clock[0]), \
+                 patch.object(helper, 'find_node', side_effect=lambda *_: advance(40, project / 'node.exe')), \
+                 patch.object(helper, 'find_npm', side_effect=lambda *_: advance(20, project / 'npm-cli.js')), \
+                 patch.object(helper, 'archive_bytes', side_effect=lambda *_: advance(20, b'archive')), \
+                 patch.object(helper, 'runtime_candidates', return_value=[target]), \
+                 patch.object(helper, 'validate_runtime', side_effect=validate), \
+                 patch.object(helper, 'extract_archive', side_effect=extract), \
+                 patch.object(helper, '_run_command', side_effect=run):
+                result = helper.provision(project, environ={})
+            self.assertTrue(result['available'])
+            self.assertEqual([85, 50], timeouts)
+            self.assertEqual(165, clock[0])
+
+    def test_expired_budget_does_not_start_a_retry(self):
+        clock = [0]
+        with patch.object(helper.time, 'monotonic', side_effect=lambda: clock[0]):
+            token = helper._BUDGET.set(helper.SetupBudget(180))
+            try:
+                clock[0] = 180
+                with patch.object(helper.subprocess, 'Popen') as spawn, self.assertRaises(helper.SetupBudgetExpired):
+                    helper._run_command(['node', '--version'], timeout=180)
+                spawn.assert_not_called()
+            finally:
+                helper._BUDGET.reset(token)
+
+    def test_unconfirmed_cleanup_prevents_any_additional_setup_command(self):
+        diagnostics = helper.SetupDiagnostics(Path('S:/project'), {})
+        diagnostics.record('node_probe', termination='subtree_cleanup_unconfirmed')
+        token = helper._DIAGNOSTICS.set(diagnostics)
+        try:
+            with patch.object(helper.subprocess, 'Popen') as spawn, self.assertRaisesRegex(RuntimeError, 'cleanup is unconfirmed'):
+                helper._run_command(['node', '--version'], timeout=180)
+            spawn.assert_not_called()
+        finally:
+            helper._DIAGNOSTICS.reset(token)
+
+    def test_operator_typing_does_not_consume_node_setup_budget(self):
+        clock = [0]
+        def ask(_):
+            clock[0] += 600
+            return 'S:/portable/node.exe'
+        with patch.object(helper.time, 'monotonic', side_effect=lambda: clock[0]):
+            token = helper._BUDGET.set(helper.SetupBudget(180))
+            try:
+                with patch.object(helper, '_operator_node', return_value=Path('S:/portable/node.exe')):
+                    helper._select_node(Path('S:/project'), {}, prompt_for_node=True, input_fn=ask)
+                self.assertEqual(180, helper._remaining())
+            finally:
+                helper._BUDGET.reset(token)
 
     def test_command_retains_bounded_output_and_safe_identity(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -83,6 +185,7 @@ class SetupBackendDiagnosticsTests(unittest.TestCase):
             self.assertLessEqual(len(record['stdout']), 2048)
             self.assertEqual('npm_probe', record['stage'])
             self.assertEqual('node npm --version', record['command'])
+            self.assertEqual(sys.executable, record['executable'])
             self.assertEqual('completed', record['termination'])
             self.assertGreater(record['duration_seconds'], 0)
             self.assertEqual(5, record['timeout_seconds'])

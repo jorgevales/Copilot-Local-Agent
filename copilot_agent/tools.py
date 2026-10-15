@@ -41,7 +41,7 @@ from .discovery_knowledge import (KNOWLEDGE_SPECS as DISCOVERY_KNOWLEDGE_SPECS,
 from .discovery_contracts import DiscoveryError, DISCOVERY_ERROR_CODES
 from .web_operations import (OPERATION_SPECS, OPERATION_EXAMPLES,
                              validate_operation, execute_operation)
-from .rea import REA_SPECS, rea_health, validate_rea, execute_rea
+from .rea import REA_SPECS, rea_health, validate_rea, execute_rea, observation_usable
 from .research_routing import ROUTING_SPECS, validate_route, route_research
 from .browser_auth import AUTH_SPECS, validate_login, execute_login
 
@@ -417,7 +417,7 @@ class ToolRegistry:
         session so the signed startup catalogue and prompt cannot disagree.
         """
         key = (id(self.config), *(str(config_value(self.config, field, '')) for field in
-               ('root', 'rea_enabled', 'rea_backend', 'rea_repository', 'rea_node_executable')))
+               ('root', 'rea_enabled', 'rea_backend', 'rea_repository', 'rea_node_executable', 'rea_node_readiness_timeout_seconds')))
         if refresh or self._rea_snapshot is None or key != self._rea_snapshot_key:
             self._rea_snapshot = copy.deepcopy(rea_health(self.config))
             self._rea_snapshot_key = key
@@ -483,7 +483,9 @@ class ToolRegistry:
         if name == 'operation.learn': timeout = 95
         if name in {'discovery.manifest', 'navigation.intent'}: timeout = 3605
         if name in REA_SPECS:
-            timeout = config_value(self.config, 'rea_timeout_seconds', 45) + 12
+            readiness = (0 if config_value(self.config, 'rea_backend', 'auto') == 'python_native'
+                         else config_value(self.config, 'rea_node_readiness_timeout_seconds', 180))
+            timeout = config_value(self.config, 'rea_timeout_seconds', 45) + readiness + 12
             result_schema = {'anyOf': [{'type': 'object', 'properties': {
                 'status': {'enum': ['completed', 'partial', 'failed', 'unavailable', 'cancelled', 'timeout', 'output_limit', 'uncertain']},
                 'target': {'type': 'string'}, 'target_type': {'type': 'string'},
@@ -510,6 +512,8 @@ class ToolRegistry:
             definition['availability'] = self.rea_availability()
             definition['output_size_limit'] = config_value(self.config, 'rea_max_output_bytes', 1048576)
             definition['limits'].update(output_bytes=definition['output_size_limit'],
+                analysis_timeout_seconds=config_value(self.config, 'rea_timeout_seconds', 45),
+                readiness_timeout_seconds=readiness,
                 input_bytes=config_value(self.config, 'rea_max_input_bytes', 20971520),
                 concurrency=config_value(self.config, 'rea_max_parallel', 3))
         return definition
@@ -792,9 +796,11 @@ class ToolRegistry:
                 payload = args['manifest'] if name == 'discovery.manifest' else args['intent']
                 timeout = min(3605, payload['budgets']['run_seconds'] + 5)
             if name in REA_SPECS:
-                timeout = config_value(config, 'rea_timeout_seconds', 45) + 12
+                readiness = (0 if config_value(config, 'rea_backend', 'auto') == 'python_native'
+                             else config_value(config, 'rea_node_readiness_timeout_seconds', 180))
+                timeout = config_value(config, 'rea_timeout_seconds', 45) + readiness + 12
             result=await asyncio.wait_for(self._execute(name,args,context,policy),timeout=timeout)
-            if name in REA_SPECS and result.get('status') != 'completed':
+            if name in REA_SPECS and not observation_usable(result):
                 status = result.get('status', 'failed')
                 code = status if status in {'partial', 'unavailable', 'cancelled', 'timeout', 'output_limit', 'uncertain'} else 'operation_failed'
                 return self._limit({'ok': False, 'tool': name, 'result': result,

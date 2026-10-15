@@ -65,6 +65,7 @@ class Config:
     rea_backend: str = 'auto'
     rea_repository: str = ''
     rea_node_executable: str = ''
+    rea_node_readiness_timeout_seconds: int = 180
     rea_timeout_seconds: int = 45
     rea_max_output_bytes: int = 1048576
     rea_max_input_bytes: int = 20971520
@@ -177,6 +178,7 @@ class Config:
             if value and not Path(value).is_absolute():
                 raise ValueError(key + ' must be an absolute administrator-configured path')
         for key, minimum, maximum in (('rea_timeout_seconds', 1, 180),
+                                     ('rea_node_readiness_timeout_seconds', 1, 180),
                                      ('rea_max_output_bytes', 16384, 8388608),
                                      ('rea_max_input_bytes', 1024, 104857600),
                                      ('rea_max_parallel', 1, 8)):

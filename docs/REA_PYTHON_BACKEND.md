@@ -1,5 +1,7 @@
 # Mandatory REA with two analysis backends
 
+Current behavior follows the [confirmed interview agreement](REA_AGREEMENT_UPDATE.md).
+
 `rea_backend` accepts `auto` (default), `node_cli`, or `python_native`.
 Auto prefers the verified rea-agents CLI and selects the bundled Python backend
 when Node, the package, native controls, dependencies or CLI smoke check fail.
@@ -42,9 +44,9 @@ existing storage policy. Cleanup uncertainty blocks replay and fallback.
 
 Known-clean Node analysis failures can fall back within the remaining overall
 time budget; Node gets a reserved share in auto mode. Cancelled or uncertain work
-is never silently retried. Public diagnostics use storage labels; retained
-artifact references are session-relative and input identity retains hashes.
-The private execution context retains actual paths for admission and cleanup.
+is never silently retried. Authorized reports and diagnostics retain exact original paths and input hashes.
+Evidence references and retained scratch locations are complete filesystem paths.
+Existing credential exclusions continue.
 One session snapshot supplies metadata, catalogue entries and routing; a new
 session refreshes it. Actual execution revalidates the runtime.
 
@@ -56,8 +58,8 @@ Records retain safe command identity, duration, timeout, return code, bounded
 sanitized stdout/stderr, termination state and filesystem error codes. A verified
 writable scratch npm cache avoids default-cache ENOSPC; valid explicit caches are
 preserved. Unknown cleanup stops retries and retains owned staging for inspection.
-Diagnostics are retained in the ignored setup cache, with company paths replaced
-by labels. Portable Node path/ZIP selection remains available during Setup.
+Diagnostics are retained in the ignored setup cache with complete useful paths
+and credential filtering. Portable Node path/ZIP selection remains available during Setup.
 
 ## Validation and remaining live checks
 
