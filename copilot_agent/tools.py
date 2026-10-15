@@ -27,6 +27,7 @@ from .downloads import DownloadError
 from .web_navigation import (NAVIGATION_SPECS, validate_navigation, execute_navigation,
                              clear_navigation_state, get_primary_navigation_tab_id)
 from .browser_inspection import INSPECTION_SPECS, execute_inspection
+from .site_discovery import SPEC as SITE_DISCOVERY_SPEC, discover as discover_site
 from .screenshot_evidence import CAPTURE_PROPERTIES, capture_evidence
 from .web_documents import DOCUMENT_SPECS, DOCUMENT_EXAMPLES, validate_documents, execute_documents
 from .site_knowledge import KNOWLEDGE_SPECS, KNOWLEDGE_EXAMPLES, validate_knowledge, execute_knowledge, safe_proposal, KnowledgeValidationError, KnowledgeWriteError, reconcile_knowledge_call
@@ -180,6 +181,7 @@ SPECS = {
 
 SPECS.update(NAVIGATION_SPECS)
 SPECS.update(INSPECTION_SPECS)
+SPECS['browser.discover'] = SITE_DISCOVERY_SPEC
 SPECS.update(DOCUMENT_SPECS)
 SPECS.update(KNOWLEDGE_SPECS)
 SPECS['knowledge.note'] = (obj({'title': {'type': 'string', 'minLength': 1, 'maxLength': 200},
@@ -722,6 +724,8 @@ class ToolRegistry:
                 timeout = min(1805, int(getattr(config, 'automation_max_runtime_seconds', 1800)) + 5)
             if name == 'crawl4ai.crawl':
                 timeout = None  # Page timeouts and session Stop control the crawl.
+            if name == 'browser.discover':
+                timeout = args.get('max_seconds', 90) + 90
             if name in {'discovery.manifest', 'navigation.intent'}:
                 payload = args['manifest'] if name == 'discovery.manifest' else args['intent']
                 timeout = min(3605, payload['budgets']['run_seconds'] + 5)
@@ -809,6 +813,8 @@ class ToolRegistry:
         if name == 'crawl4ai.crawl':
             from .local_crawler import crawl_websites
             return await crawl_websites(args, context)
+        if name == 'browser.discover':
+            return await discover_site(args, context)
         if name == 'crawl4ai.read':
             from .local_crawler import read_knowledge
             return read_knowledge(args, context)

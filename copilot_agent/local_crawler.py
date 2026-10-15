@@ -86,10 +86,23 @@ def crawler_factory(browser, scratch, page_timeout):
         async def __aexit__(self, *_):
             pass  # Only crawl-owned pages are closed; the company browser stays open.
 
-        async def crawl(self, url, **_):
+        async def crawl(self, url, **options):
             page = await browser.context.new_page()
             try:
                 response = await page.goto(url, wait_until='domcontentloaded', timeout=page_timeout)
+                config = options.get('config')
+                script = getattr(config, 'js_code', None)
+                for expression in ([script] if isinstance(script, str) else script or []):
+                    await page.evaluate(expression)
+                condition = getattr(config, 'wait_for', None)
+                if condition:
+                    if condition.startswith('js:'):
+                        await page.wait_for_function(condition[3:], timeout=page_timeout)
+                    else:
+                        await page.wait_for_selector(condition.removeprefix('css:'), timeout=page_timeout)
+                else:
+                    from .site_discovery import settle
+                    await settle(page, time.monotonic() + min(12, page_timeout/1000), [])
                 return AsyncCrawlResponse(html=await page.content(),
                     response_headers={}, status_code=response.status if response else 200,
                     redirected_url=page.url)
