@@ -148,6 +148,10 @@ class Store:
         CREATE TABLE IF NOT EXISTS site_knowledge(
           namespace TEXT PRIMARY KEY, revision INTEGER NOT NULL,
           payload TEXT NOT NULL, hash TEXT NOT NULL, updated REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS site_knowledge_revisions(
+          namespace TEXT NOT NULL, revision INTEGER NOT NULL,
+          payload TEXT NOT NULL, hash TEXT NOT NULL, updated REAL NOT NULL,
+          PRIMARY KEY(namespace,revision));
         CREATE TABLE IF NOT EXISTS operation_heads(
           partition TEXT NOT NULL, name TEXT NOT NULL, revision INTEGER NOT NULL,
           PRIMARY KEY(partition,name));
@@ -521,10 +525,36 @@ class Store:
             if not (valid_new or valid_revision or valid_invalidation):
                 raise DiscoveryError('stale_knowledge_revision')
             new_revision = payload['revision']
+            # Retain exact prior methods/evidence before replacing the active
+            # head, including records created before this additive migration.
+            previous = db.execute('SELECT revision,payload,hash,updated FROM site_knowledge WHERE namespace=?',
+                                  (namespace,)).fetchone()
+            if previous is not None:
+                if hashlib.sha256(previous['payload'].encode('utf-8')).hexdigest() != previous['hash']:
+                    raise DiscoveryError('knowledge_integrity')
+                db.execute('INSERT OR IGNORE INTO site_knowledge_revisions VALUES(?,?,?,?,?)',
+                           (namespace, previous['revision'], previous['payload'], previous['hash'], previous['updated']))
+            db.execute('INSERT OR IGNORE INTO site_knowledge_revisions VALUES(?,?,?,?,?)',
+                       (namespace, new_revision, encoded, payload_hash, time.time()))
             db.execute('INSERT INTO site_knowledge(namespace,revision,payload,hash,updated) '
                        'VALUES(?,?,?,?,?) ON CONFLICT(namespace) DO UPDATE SET '
                        'revision=excluded.revision,payload=excluded.payload,hash=excluded.hash,updated=excluded.updated',
                        (namespace, new_revision, encoded, payload_hash, time.time()))
+
+    def site_knowledge_history(self, namespace, limit=20):
+        """Bounded integrity-checked history for derived previous-method views."""
+        with self.lock:
+            exists = self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='site_knowledge_revisions'").fetchone()
+            if exists is None:
+                return []
+            rows = self.db.execute('SELECT payload,hash FROM site_knowledge_revisions WHERE namespace=? '
+                                   'ORDER BY revision DESC LIMIT ?', (namespace, min(40, max(1, limit)))).fetchall()
+        result = []
+        for row in reversed(rows):
+            if hashlib.sha256(row['payload'].encode('utf-8')).hexdigest() != row['hash']:
+                raise DiscoveryError('knowledge_integrity')
+            result.append(json.loads(row['payload']))
+        return result
 
     def quarantine_site_knowledge(self, namespace):
         """Atomically preserve exact stored bytes before releasing a damaged namespace."""

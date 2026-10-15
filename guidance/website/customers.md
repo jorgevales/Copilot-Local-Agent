@@ -9,7 +9,9 @@ ambiguous matches before extracting customer-specific facts.
 Bind task_id and opaque customer_key to the intended tab. browser.customer_summary requires exact observed identity assertions and a small explicit list of named field locators. Identity mismatch blocks extraction. Output gives observed values, source provenance, missing facts and conflicts. Limit sensitive fields to the task and distinguish facts from inference.
 
 Verify identity after profile navigation and customer-context changes. Requested
-business artifacts and titled Crawl4AI knowledge may retain customer data in
-approved storage. Read complete response attachments for large result batches.
+business artifacts may retain requested customer data in approved task storage.
+Raw Crawl4AI captures retain their separate evidence scope; never automatically
+save identifiable customer records as reusable navigation knowledge. Read complete
+approved response attachments for large result batches.
 Keep generic navigation memory separate from record data. Website tabs share the
 verified Edge profile; complete any missing site sign-in manually there.

@@ -20,6 +20,8 @@ class ApprovalManager:
         self._package_session_grant = False
         self.fast_package_session = False
         self.supervised_session = False
+        self.discovery_session = False
+        self.on_discovery_grant = None
         self.on_revoke = None
 
     def revoke_session_grants(self):
@@ -27,6 +29,7 @@ class ApprovalManager:
         self._package_session_grant = False
         self.fast_package_session = False
         self.supervised_session = False
+        self.discovery_session = False
         if callable(self.on_revoke):
             self.on_revoke()
 
@@ -169,11 +172,6 @@ class ApprovalManager:
         else:
             plan_hash = canonical_hash({'plan': plan, 'prepared_current_call': prepared}) if prepared is not None else canonical_hash(plan)
         call_hash = canonical_hash({'plan_hash': plan_hash, 'call': call})
-        if self.supervised_session:
-            self.state.event('supervised_session_authorization_used', tool=call['name'],
-                             plan_hash=plan_hash, call_hash=call_hash)
-            self.feedback.emit('Session', 'Running supervised plan: ' + str(call['name']) + '.')
-            return True, plan_hash
         grant = self.state.data['approvals'].get(plan_hash)
         package_scope = bool((prepared or {}).get('approval_scope_type') == 'automation_package')
         package_fresh = package_scope and bool((prepared or {}).get('requires_fresh_run_confirmation'))
@@ -204,7 +202,7 @@ class ApprovalManager:
                 'platform handoffs remain active.')
             preview['approval_scope_type'] = 'automation_package'
             preview['choices'] = ['deny', 'once', 'plan', 'supervised']
-        preview['approval_scope'] += ' You may instead enable one fast full-access session grant covering plans and skipping package quality review.'
+        preview['approval_scope'] += ' Option 4 approves this exact action once and enables scoped read-only discovery and automatic sanitized knowledge saves for this session; future writes and target changes still require approval.'
         if prepared_plan is not None:
             preview['prepared_pending_plan'] = prepared_plan
         path = self.state.directory / 'approvals' / (call_hash + '.json')
@@ -224,7 +222,7 @@ class ApprovalManager:
             if hasattr(decision, '__await__'):
                 decision = await decision
         else:
-            prompt_text = 'Choose 1 = Deny, 2 = Allow once, 3 = Allow this plan, 4 = Fast full-access session (skip package and plan review; no file deletion) [1/2/3/4]: '
+            prompt_text = 'Choose 1 = Deny, 2 = Allow once, 3 = Allow this plan, 4 = Allow once + fast scoped discovery session [1/2/3/4]: '
             prompt = self.feedback.prompt('User', prompt_text)
             decision = await asyncio.to_thread(input, prompt)
         decision = str(decision).strip().lower()
@@ -233,7 +231,9 @@ class ApprovalManager:
         if decision not in allowed_decisions:
             decision = 'deny'
         if decision == 'supervised':
-            self.supervised_session = True
+            self.discovery_session = True
+            if callable(self.on_discovery_grant):
+                self.on_discovery_grant()
         elif decision == 'session':
             self._package_session_grant = True
         else:

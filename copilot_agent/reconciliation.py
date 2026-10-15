@@ -126,7 +126,7 @@ def navigation_scope_allows(request, browser, domains, expected_binding=None):
     if (not domains or expected_binding is not None and expected_binding != _binding(browser)):
         return False
     name, args = request.get('name'), request.get('arguments', {})
-    urls = URLPolicy(domains)
+    urls = website_policy(getattr(browser, 'config', {}), domains)
     try:
         if name == 'browser.open':
             urls.resolve(args['url'])

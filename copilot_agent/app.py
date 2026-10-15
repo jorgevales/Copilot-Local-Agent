@@ -315,9 +315,14 @@ async def choose_browser_endpoint(config, args, settings, *, interactive=False,
 async def start_new_session(config, previous, model_label, registry=None):
     """Archive the old conversation and initialize an independent owned UI chat."""
     old = previous.state
-    if old.data['pending_submission'] or any(call['status'] == 'uncertain' and call.get('state_changing', True)
+    if old.data['pending_submission'] or any(call['status'] == 'uncertain' and
+                                             (call.get('state_changing', True) or call.get('request', {}).get('name', '').startswith('rea.'))
                                              for call in old.data['calls'].values()):
         raise RuntimeError('Reconcile uncertain submissions or state-changing calls before starting a new session.')
+    from .session_mode import START_PROMPT, configure_session, discovery_mode
+    renew_discovery = discovery_mode(config) and not getattr(config, '_automation_test_mode', False)
+    if renew_discovery and (await ask(START_PROMPT)).strip().lower() not in {'', 'y', 'yes'}:
+        raise RuntimeError('New session cancelled; the current session remains open.')
     old.event('new_session_requested')
     owned_process = getattr(previous.browser, '_launched_process', None)
     await previous.close(preserve_browser_process=True)
@@ -328,7 +333,7 @@ async def start_new_session(config, previous, model_label, registry=None):
                  '_auto_local_drive_root'):
         if hasattr(config, name):
             setattr(fresh_config, name, getattr(config, name))
-    fresh_config._local_navigation_confirmed = bool(getattr(config, '_local_navigation_confirmed', False))
+    configure_session(fresh_config, renew_discovery)
     directory = config.runtime_dir / 'sessions' / uuid.uuid4().hex
     state = SessionState(directory)
     browser = BrowserAdapter(fresh_config)
@@ -560,8 +565,8 @@ async def run(args):
     system('Agent-owned writes are restricted to the explicit local C: test store.' if getattr(config, '_local_knowledge_test_mode', False)
            else 'Agent-owned writes are restricted to the isolated proof workspace.' if getattr(config, '_automation_test_mode', False)
            else 'Runtime and saved website knowledge use the shared Discoveries store. The fast session option permits ordinary file reads and edits elsewhere, subject to OS access.')
-    system('The fast session option permits navigation across websites without a domain allowlist. Sign in manually when needed.')
-    system('One fast session option skips package quality review and individual plan approvals. Stop remains available.')
+    system('Fast discovery uses your approved target scope and existing signed-in browser; one prefilled login click is allowed, then denial/MFA needs you.')
+    system('Read-only discovery and useful sanitized S: knowledge saves run immediately. Other effects keep concise approval and package validation. Stop remains available.')
     system('Useful Findings are saved on any valid turn; their file is attached every ten messages.')
     system('File delivery: actual Copilot UI downloads and verified ZIP extraction; no Created-folder monitoring.')
     isolated_proof = getattr(config, '_automation_test_mode', False)
@@ -610,7 +615,7 @@ async def run(args):
             persist_runtime_settings(config, settings)
             browser = BrowserAdapter(config)
             await browser.start(resume_request_id=resume_request_id)
-        if not isolated_proof and (not args.yes_setup or _UI_ASK is not None or getattr(args, 'discover_first', False)):
+        if not isolated_proof and getattr(args, 'discover_first', False):
             config._guided_knowledge_paths = await guided_discovery(
                 config, browser, state.directory, ask, system, _UI_CANCEL_EVENT)
         if _UI_ASK is None:
@@ -857,7 +862,7 @@ def main():
     parser.add_argument('--port', type=int)
     parser.add_argument('--profile', type=Path)
     parser.add_argument('--model', help='Exact currently displayed UI label')
-    parser.add_argument('--yes-setup', action='store_true', help='Accept supplied settings and the fast full-access session grant; isolated proof remains separate')
+    parser.add_argument('--yes-setup', action='store_true', help='Accept supplied settings and the fast scoped discovery session grant; isolated proof remains separate')
     parser.add_argument('--setup-only', action='store_true', help='Verify configured per-user storage and Edge without opening Copilot')
     parser.add_argument('--package-mode', choices=['reviewed', 'immediate'],
                         help='Legacy compatibility option; normal startup uses one fast full-access session choice')

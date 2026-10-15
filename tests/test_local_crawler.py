@@ -83,6 +83,28 @@ class LocalCrawlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(2, second['saved_pages'])
         self.assertEqual(1, self.browser.context.visited.count('https://internal.test/'))
 
+    async def test_changed_title_reuses_same_site_folder_and_saved_frontier(self):
+        first = await crawl_websites({'urls': ['https://internal.test/'], 'title': 'First title', 'max_pages': 1}, self.context)
+        second = await crawl_websites({'urls': ['https://internal.test/'], 'title': 'Better title'}, self.context)
+        self.assertEqual(first['index_path'], second['index_path'])
+        self.assertIn('sites', Path(second['index_path']).parts)
+        self.assertEqual(self.browser.context.visited.count('https://internal.test/'), 1)
+        self.assertEqual(second['saved_pages'], 2)
+        self.assertEqual(second['evidence_kind'], 'raw_task_evidence_not_reusable_knowledge')
+
+    async def test_multiple_origin_pages_are_stored_in_their_respective_site_folders(self):
+        result = await crawl_websites({'urls': ['https://first.test/', 'https://second.test/'],
+                                      'title': 'Two sites', 'max_pages': 2}, self.context)
+        index = json.loads(Path(result['index_path']).read_text(encoding='utf-8'))
+        self.assertIn('campaigns', Path(result['index_path']).parts)
+        first = Path(index['pages']['https://first.test/']['path'])
+        second = Path(index['pages']['https://second.test/']['path'])
+        self.assertNotEqual(first.parent, second.parent)
+        self.assertIn('sites', first.parts)
+        self.assertIn('sites', second.parts)
+        self.assertIn('first.test', str(first))
+        self.assertIn('second.test', str(second))
+
     async def test_repeated_cycles_refresh_without_new_browser(self):
         outcome = await crawl_websites({'urls': ['https://internal.test/'], 'title': 'Repeated',
             'cycles': 2, 'refresh_seconds': 0}, self.context)

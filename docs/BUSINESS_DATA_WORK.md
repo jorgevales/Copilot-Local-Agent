@@ -29,17 +29,15 @@ attachments before Copilot submission. Existing file/attachment/resource limits
 still apply; exceeding a real transport budget reports an unsent result rather
 than claiming completion from a truncated preview.
 
-In a fast full-access session, navigation and package URLs may cross websites,
-customer/task tags do not gate owned-tab access, and optional generic knowledge
-namespaces need no manual binding. Ordinary reads do not require a durable research
-grant. Explicitly selected durable grant tools keep their own contract.
+A fast scoped discovery session authorizes reads only within approved target
+scope and preserves exact record-identity checks. New unrelated/private/local
+scope and target mutations require approval. Sanitized reusable knowledge updates
+are automatic; raw business records belong only to explicitly approved task
+artifacts and are never automatically promoted into reusable knowledge.
 
-One startup grant skips package quality review and individual plan approvals.
-Ordinary accessible file reads/edits may cross configured roots; deletion remains
-blocked. Manual sign-in, credentials, valid executable contracts, actual OS access,
-Stop and uncertain-effect reconciliation remain active. Record identity checks in
-specialized summary tools prevent attributing one record's facts to another;
-generic reads remain available for broader discovery.
+One prefilled login-button click is permitted through browser.login_once; denial
+or MFA pauses for the user. Credentials are never extracted or retained. Package
+validation, code approval, protected paths, Stop and uncertainty remain active.
 
 Synthetic tests cover direct customer-tool dispatch, complete long results,
 customer session navigation, internal package hosts and continuing secret

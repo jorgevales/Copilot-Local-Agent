@@ -20,14 +20,14 @@ from .discovery_engine import (Engine, cancelled, correlation, enabled, input_ob
                                testing_gate)
 from .discovery_scope import Scope, origin
 from .discovery_store import Store, digest
-from .site_knowledge import _scope, _safe_label, PURPOSES
+from .site_knowledge import _scope, _safe_label, PURPOSES, session_knowledge_authorized
 
 ID = {'type': 'string', 'pattern': r'^[A-Za-z][A-Za-z0-9_-]{0,63}$'}
 ORIGIN = {'type': 'string', 'format': 'uri', 'maxLength': 280}
 REVISION = {'type': 'integer', 'minimum': 0, 'maximum': 99999}
 KNOWLEDGE_SPECS = {
     'discovery.knowledge_save': (input_object({'run_id': ID, 'origin': ORIGIN, 'expected_revision': REVISION}),
-        'user_approval', 'Testing-only: separately consent to save locally sanitised evidence-backed navigation candidates from one current approved run. Fresh site_knowledge.bind required. CAS revision; no model supplied knowledge or automatic trust.'),
+        'user_approval', 'Save locally sanitized evidence-backed navigation candidates from one current authorized run under the session knowledge grant. CAS revision, duplicate suppression, centralized per-site readable view; no model supplied knowledge or automatic trust.'),
     'discovery.knowledge_lookup': (input_object({'origin': ORIGIN}), 'read_only',
         'Direct paginated scoped knowledge from the shared S:/UNC ledger; bind the exact namespace first. Optional offset and limit (1-40) retrieve every saved route without recrawling. Integrity/freshness checked; knowledge never authorises a browser action.'),
     'discovery.knowledge_invalidate': (input_object({'origin': ORIGIN, 'expected_revision': REVISION}),
@@ -77,6 +77,9 @@ def semantics(value, scope, now=None):
     evidence = {e['id']: e for e in k['evidence']}
     templates = {t['id']: t for t in k['templates']}
     for e in k['evidence']:
+        parsed_source = urlsplit(e['source_url'])
+        if parsed_source.query or parsed_source.fragment or parsed_source.username or parsed_source.password:
+            raise DiscoveryError('knowledge_partition', '$', 'Durable navigation URLs must exclude parameters and credentials')
         scope.resolve(e['source_url'])
         if not e['artifact_ref'].startswith('sha256:') or e['artifact_ref'][7:] != e['content_hash']:
             raise DiscoveryError('knowledge_integrity')
@@ -174,7 +177,9 @@ def candidate(context, args, store):
         except DiscoveryError:
             # Missing/expired evidence cannot silently preserve trusted entries.
             old = None
-    pages = [(m, a) for m, a in selected['artifacts'] if m['type'] == 'page' and a.get('rendering') == 'raw_static_only']
+    pages = [(m, a) for m, a in selected['artifacts']
+             if m['type'] == 'page' and a.get('rendering') == 'raw_static_only'
+             and not urlsplit(m['source_url']).query and not urlsplit(m['source_url']).fragment]
     if not pages:
         raise DiscoveryError('knowledge_unusable')
     # Persistence is a prerequisite: the source evidence commit must be durable
@@ -256,6 +261,29 @@ def candidate(context, args, store):
     semantics(k, scope)
     _proofs(store, k, partition)
     return partition, k
+
+
+def _meaningful_change(previous, candidate_value):
+    if not previous or previous['invalidated']:
+        return True
+    old = previous['value']
+    def signature(value):
+        return {'routes': sorted((route['url'], route['purpose'], route['fingerprint'],
+                                  route['status'], route['confidence']) for route in value['routes']),
+                'actions': sorted((action['from_route'], action['to_route'], action['kind'],
+                                   action['effect'], action['confidence']) for action in value['actions'])}
+    # Freshness renewal halfway through TTL is useful; same fresh evidence and
+    # timestamp churn on repeated equivalent runs is not a new knowledge revision.
+    renewal = time.time() - stamp(old['last_verified']) >= old['revalidation']['ttl_seconds'] / 2
+    return renewal or signature(old) != signature(candidate_value)
+
+
+def _view(context, partition, value):
+    from .knowledge_views import publish_discovery_view
+    try:
+        return publish_discovery_view(context, partition, value)
+    except Exception as error:
+        return {'status': 'view_unavailable', 'diagnostic': type(error).__name__}
 
 
 def validate_knowledge_tool(name, args, context=None):
@@ -430,10 +458,12 @@ def prepare_knowledge_tool(name, args, context):
     try:
         if name == 'discovery.knowledge_save':
             _, k = candidate(context, args, store)
+            unchanged = not _meaningful_change(store.knowledge(partition), k)
             return {'kind': name, 'namespace_id': partition, 'expected_revision': args['expected_revision'],
                     'storage_path_s': paths['s_path'], 'storage_path_unc': paths['unc_path'],
                     'storage_mode': 'local_c_test' if getattr(context.get('config'), '_local_knowledge_test_mode', False) else 'shared_s',
-                    'new_revision': k['revision'], 'payload_sha256': digest(k),
+                    'new_revision': args['expected_revision'] if unchanged else k['revision'],
+                    'unchanged': unchanged, 'payload_sha256': digest(k),
                     'categories': ['routes', 'templates', 'actions', 'evidence'],
                     'route_count': len(k['routes']), 'trusted_routes': sum(r['status'] == 'trusted' for r in k['routes']),
                     'consent_question': ('Save these exact sanitized evidence-backed navigation categories to the explicit local C: test store?'
@@ -500,9 +530,16 @@ async def execute_knowledge_tool(name, args, context):
     store = Store(context, persistent=True)
     try:
         if name == 'discovery.knowledge_save':
-            if context.get('discovery_save_consent') != reviewed:
+            if context.get('discovery_save_consent') != reviewed and not session_knowledge_authorized(context):
                 raise DiscoveryError('save_consent_required')
             _, k = candidate(context, args, store)
+            if reviewed['unchanged']:
+                previous = store.knowledge(partition)['value']
+                return {'status': 'unchanged', 'knowledge_id': previous['knowledge_id'],
+                        'revision': previous['revision'], 'route_count': len(previous['routes']),
+                        'trusted_routes': sum(route['status'] == 'trusted' for route in previous['routes']),
+                        'payload_sha256': digest(previous), 'knowledge_grants_permission': False,
+                        'readable_view': _view(context, partition, previous)}
             consent = {'approval_hash': context['approval_hash'], 'review_sha256': digest(reviewed),
                        'categories': reviewed['categories'], 'binding_namespace': partition,
                        'source_run': args['run_id'],
@@ -531,7 +568,8 @@ async def execute_knowledge_tool(name, args, context):
                 raise DiscoveryError('knowledge_integrity')
             return {'status': 'saved', 'knowledge_id': k['knowledge_id'], 'revision': k['revision'],
                     'payload_sha256': digest(k), 'route_count': len(k['routes']),
-                    'trusted_routes': sum(r['status'] == 'trusted' for r in k['routes']), 'knowledge_grants_permission': False}
+                    'trusted_routes': sum(r['status'] == 'trusted' for r in k['routes']), 'knowledge_grants_permission': False,
+                    'readable_view': _view(context, partition, k)}
         store.invalidate(partition, args['expected_revision'])
         return {'status': 'invalidated', 'namespace_id': partition, 'revision': args['expected_revision']}
     finally:

@@ -50,7 +50,10 @@ class DiscoveryTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn('source', checkpoint['states'][0]['frames'][0]['resources']['scripts'][0])
                     self.assertEqual(5, len(context['pending_file_attachments']))
                     self.assertIn('to_state', checkpoint['actions'][0])
-                    resumed = await discover({'title': 'Fixture', 'max_states': 1, 'explore': False}, context)
+                    resumed = await discover({'title': 'A clearer title', 'max_states': 1, 'explore': False}, context)
+                    self.assertEqual(result['checkpoint'], resumed['checkpoint'])
+                    self.assertIn('sites', Path(resumed['checkpoint']).parts)
+                    self.assertEqual(resumed['evidence_kind'], 'raw_task_evidence_not_reusable_knowledge')
                     self.assertEqual(3, resumed['states_captured'])
         finally:
             await fixture.asyncTearDown()

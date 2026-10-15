@@ -245,6 +245,10 @@ class SessionState:
         if call_id in self.data['calls'] or private_id(call_id) in self.data['calls']:
             raise RuntimeError('Duplicate call ID cannot execute again')
         domains = operation_domains(request['name'])
+        if (not browser_inventory(request) and any(
+                c.get('status') == 'uncertain' and c.get('request', {}).get('name', '').startswith('rea.')
+                for c in self.data['calls'].values())):
+            raise RuntimeError('REA owned-process termination or cleanup remains uncertain; confirm cleanup before another operation')
         if (state_changing and not uncertainty_recovery
                 and any(c['status'] == 'uncertain' and c.get('state_changing', True)
                         and ('global' in domains or 'global' in operation_domains(c['request']['name'])
@@ -330,6 +334,9 @@ class SessionState:
         explicitly_certain = evidence.get('side_effects_uncertain') is False
         uncertain = (call.get('state_changing', True) and not result.get('ok')
                      and code not in {'approval_denied', 'invalid_arguments'} and not explicitly_certain)
+        if (call['request']['name'].startswith('rea.') and
+                evidence.get('side_effects_uncertain') is True):
+            uncertain = True  # Read-only targets can still leave an uncertain owned process.
         if call['request']['name'] == 'copilot.download' and result.get('result', {}).get('status') == 'not_started' and result['result'].get('side_effects_uncertain') is False:
             uncertain = False
         call.update(status='uncertain' if uncertain else 'completed', result=redact(result), finished_at=now())
@@ -342,7 +349,7 @@ class SessionState:
         for call_id, call in self.data['calls'].items():
             if call['status'] != 'executing':
                 continue
-            uncertain = call.get('state_changing', True)
+            uncertain = call.get('state_changing', True) or call.get('request', {}).get('name', '').startswith('rea.')
             call.update(
                 status='uncertain' if uncertain else 'completed',
                 result={'ok': False, 'error': {'code': 'interrupted',

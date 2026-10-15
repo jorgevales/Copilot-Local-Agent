@@ -1,7 +1,7 @@
 """Independent session lifecycle, without real UI messages or deletion."""
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 from copilot_agent.app import start_new_session
 from copilot_agent.orchestrator import Orchestrator
@@ -42,6 +42,21 @@ class SessionBrowser(MockBrowser):
 
 
 class NewSessionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_new_discovery_session_renews_confirmation_without_inheriting_targets(self):
+        from copilot_agent.session_mode import configure_session, START_PROMPT, discovery_mode
+        root, config, state, registry, old_browser, old = self.previous()
+        configure_session(config, True)
+        state.approve_domain('old.example')
+        fresh_browser = SessionBrowser([final_response])
+        with patch('copilot_agent.app.BrowserAdapter', return_value=fresh_browser), \
+             patch('copilot_agent.app.ask', AsyncMock(return_value='yes')) as confirm:
+            new = await start_new_session(config, old, 'Synthetic model', registry)
+        confirm.assert_awaited_once_with(START_PROMPT)
+        self.assertTrue(discovery_mode(new.config))
+        self.assertEqual([], new.state.data['approved_domains'])
+        self.assertFalse(discovery_mode(config))
+        await new.close()
+
     def previous(self):
         root, config, state, registry = make_fixture('independent-session-')
         old_browser = SessionBrowser([final_response])

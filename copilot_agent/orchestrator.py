@@ -29,6 +29,10 @@ from .attachments import AttachmentQueue, SUPPORTED_EXTENSIONS, TEXT_EXTENSIONS,
 class Orchestrator:
     def __init__(self, config, browser, registry, state, approval_decider=None, display=print, event_sink=None, cancel_event=None, steering_poll=None, steering_complete=None):
         self.config, self.browser, self.registry, self.state = config, browser, registry, state
+        if hasattr(registry, 'config'):
+            registry.config = config
+        # Persisted target observations never restore a session authorization.
+        state.data['approved_domains'] = []
         state.data['website_private'] = True
         browser.website_private = True
         self.findings = Findings(state.directory)
@@ -52,9 +56,6 @@ class Orchestrator:
         self.approvals.supervised_session = bool(getattr(config, '_supervised_session', False))
         from .session_mode import configure_session
         self.approvals.on_revoke = lambda: configure_session(self.config, False)
-        from .local_navigation import SessionFileAccessPolicy
-        from .session_mode import fast_mode
-        self.policy = SessionFileAccessPolicy(self.policy, lambda: fast_mode(self.config))
         self.process_registry = ManagedProcessRegistry(state.directory)
         self.live_seen = {}
         self.navigation_domains = set()  # Fresh local browser approval only; never inherited on restart.
@@ -76,6 +77,8 @@ class Orchestrator:
                              'session_path_extensions': [],
                              'active_research_grants': {}, 'research_usage': {}, 'research_context': {'active': False},
                              'discovery_runs': {},
+                             '_rea_runtime': {},
+                             'login_attempts': {},
                              'web_document_tickets': {},
                              'document_catalogues': {}, 'download_manifest_hashes': {},
                              'transferred_attachment_hashes': {},
@@ -97,11 +100,72 @@ class Orchestrator:
         from .local_navigation import SessionNavigationGrant
         self.base_context['local_navigation_grant'] = SessionNavigationGrant(
             bool(getattr(config, '_local_navigation_confirmed', False)))
+        def enable_discovery():
+            from .session_mode import discovery_mode
+            if not discovery_mode(config):
+                configure_session(config, True)
+            self.base_context['local_navigation_grant'].confirm()
+            self._knowledge_authority(self.base_context)
+        self.approvals.on_discovery_grant = enable_discovery
+        def revoke_discovery():
+            configure_session(config, False)
+            self.base_context['local_navigation_grant'].revoke()
+            self.navigation_domains.clear()
+            self.navigation_binding = None
+            self.state.data['approved_domains'].clear()
+            for key in ('knowledge_session_authorized', 'knowledge_session_grant', 'approval_hash'):
+                self.base_context.pop(key, None)
+            if hasattr(browser, 'tool_domains'):
+                browser.tool_domains = set(config.allowed_domains)
+        self.approvals.on_revoke = revoke_discovery
+        self._knowledge_authority(self.base_context)
         authorize = getattr(browser, 'authorize_tool_domain', None)
         if callable(authorize):
             for domain in self.state.data['approved_domains']:
                 authorize(domain)
         self.download_service = None
+
+    def _knowledge_authority(self, context):
+        from .session_mode import discovery_mode
+        if discovery_mode(self.config) and getattr(self.config, '_knowledge_session_confirmed', False):
+            from .site_knowledge import knowledge_session_grant
+            context['knowledge_session_authorized'] = True
+            context['approval_hash'] = canonical_hash({'session': self.state.session_id,
+                                                       'authority': 'sanitized_knowledge_session'})
+            context['knowledge_session_grant'] = knowledge_session_grant(context)
+        return context
+
+    def _authorize_user_targets(self, text):
+        """The session grant covers explicit public targets in the user's request."""
+        from .session_mode import discovery_mode, website_origin
+        import ipaddress
+        from urllib.parse import urlsplit
+        if not discovery_mode(self.config) or not isinstance(text, str):
+            return
+        for value in re.findall(r'https?://[^\s<>"\']+', text):
+            value = value.rstrip('.,;!)]}')
+            try:
+                domain = URLPolicy.website_domain(value)
+                if '.' not in domain or domain.endswith(('.local', '.internal', '.localhost', '.test')):
+                    continue
+                try:
+                    ipaddress.ip_address(domain)
+                except ValueError:
+                    pass
+                else:
+                    continue
+                if urlsplit(value).hostname != domain:
+                    continue
+                self.state.approve_domain(domain)
+                self.navigation_domains.add(domain)
+                self.config._session_approved_origins.add(website_origin(value))
+                authorize = getattr(self.browser, 'authorize_tool_domain', None)
+                if callable(authorize):
+                    authorize(domain)
+            except (PolicyError, ValueError):
+                continue
+        if self.navigation_domains:
+            self.navigation_binding = _binding(self.browser)
 
     def _display_s_path(self, directory):
         import ntpath
@@ -120,73 +184,54 @@ class Orchestrator:
                            'max_output_chars': self.config.max_output_chars})
 
     async def _parallel_readonly_group(self, calls, request_id):
-        """Run only independent, bounded filesystem observations concurrently.
-
-        Browser reads share mutable page state and all approved/effectful tools
-        have ordering semantics, so they stay on the ordinary serial path.
-        These three tools are read-only, have no browser or consent context,
-        and return bounded results without delivery artifacts.
-        """
-        allowed = {'files.exists', 'files.metadata', 'files.hash'}
+        """Execute independent bounded reads, with one page observation per tab."""
+        files = {'files.exists', 'files.metadata', 'files.hash', 'files.read'}
+        passive = {'rea.inspect_page', 'rea.analyze_capture', 'rea.analyze_artifact',
+                   'browser.recon', 'browser.route'}
         if (len(calls) < 2 or self.cancel_event.is_set()
-                or any(call.get('name') not in allowed for call in calls)):
+                or not getattr(self.config, 'bounded_parallelism', True)
+                or any(call.get('name') not in files | passive for call in calls)):
             return None
-        contexts = []
+        contexts, tabs = [], set()
         try:
             for call in calls:
-                definition = self.registry.definition(call['name'])
-                if definition['approval_policy'] != 'read_only':
+                if self.registry.definition(call['name'])['approval_policy'] != 'read_only':
                     return None
-                context = dict(self.base_context)
-                context['source_request_id'] = request_id
-                context['parallel_readonly'] = True
+                if call['name'] in {'rea.inspect_page', 'browser.recon', 'browser.route'}:
+                    tab = call['arguments'].get('tab_id', 'tab-1')
+                    if tab in tabs:
+                        return None
+                    tabs.add(tab)
+                context = self._knowledge_authority(dict(self.base_context))
+                context.update(source_request_id=request_id, source_call_id=call['call_id'], parallel_readonly=True)
                 self.registry.validate_call(call['name'], call['arguments'], context)
                 contexts.append(context)
         except Exception:
-            # Keep normal sequential dispatch authoritative for diagnostics.
-            return None
-
+            return None  # The serial path produces the authoritative diagnostic.
         for call in calls:
             self.state.begin_call(call, state_changing=False)
-
-        def run_one(call, context):
-            try:
-                # ToolRegistry.execute and its allowlisted local-file path are
-                # coroutine-shaped but perform no event-loop-bound work here.
-                return asyncio.run(self.registry.execute(call['name'], call['arguments'], context))
-            except Exception as error:
-                return {'ok': False, 'tool': call['name'],
-                        'error': {'code': 'operation_failed',
-                                  'message': str(error)[:1000]}}
-
-        tasks = [asyncio.to_thread(run_one, call, context)
-                 for call, context in zip(calls, contexts)]
-        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+        semaphore = asyncio.Semaphore(4)
+        async def run_one(call, context):
+            async with semaphore:
+                try:
+                    if call['name'] in files:
+                        result = await asyncio.to_thread(lambda: asyncio.run(
+                            self.registry.execute(call['name'], call['arguments'], context)))
+                        method = 'parallel_thread'
+                    else:
+                        result = await self.registry.execute(call['name'], call['arguments'], context)
+                        method = 'parallel_async'
+                    result.setdefault('result', {}).setdefault('execution_method', method)
+                    return result
+                except Exception:
+                    return {'ok': False, 'tool': call['name'],
+                            'result': {'status': 'failed', 'side_effects_uncertain': False},
+                            'error': {'code': 'operation_failed', 'message': 'Independent read failed; inspect its evidence before changing the method.'}}
+        outcomes = await asyncio.gather(*(run_one(call, context) for call, context in zip(calls, contexts)))
         results = {}
         for call, outcome in zip(calls, outcomes):
-            method = 'parallel_thread'
-            if isinstance(outcome, BaseException):
-                # These operations are strictly read-only, so a worker startup
-                # or marshalling failure can safely fall back to the ordinary
-                # event loop. Never use this retry path for effects or browser
-                # calls, which are excluded above.
-                method = 'serial_fallback'
-                context = dict(self.base_context)
-                context['source_request_id'] = request_id
-                try:
-                    result = await self.registry.execute(call['name'], call['arguments'], context)
-                except Exception as error:
-                    result = {'ok': False, 'tool': call['name'],
-                              'error': {'code': 'operation_failed',
-                                        'message': str(error)[:1000]}}
-            else:
-                result = outcome
-            if isinstance(result, dict):
-                result.setdefault('result', {})
-                if isinstance(result['result'], dict):
-                    result['result'].setdefault('execution_method', method)
-            self.state.finish_call(call['call_id'], result)
-            results[call['call_id']] = result
+            self.state.finish_call(call['call_id'], outcome)
+            results[call['call_id']] = outcome
         return results
 
     def _live_feedback(self, event):
@@ -881,9 +926,6 @@ class Orchestrator:
 
     async def _send(self, kind: str, content, extra_attachments=()):
         self.state.repair_browser_observations()
-        from .session_mode import configure_session, fast_mode
-        if self.approvals.supervised_session or fast_mode(self.config):
-            configure_session(self.config, self.approvals.supervised_session)
         await self._finish_next_turn_preparation()
         from .reconciliation import close_quarantined_tabs
         await close_quarantined_tabs(self.browser)
@@ -1344,6 +1386,7 @@ class Orchestrator:
                                                if self.config.created_sync_enabled and self.config.created_dir else None)
         kind, content = 'user_turn', user_input
         self.base_context['research_user_request'] = user_input
+        self._authorize_user_targets(user_input)
         from .automation_packages import estimate_task
         candidate_route = estimate_task(self._routing_description(user_input), {
             'package_score': self.config.automation_package_score,
@@ -1508,8 +1551,10 @@ class Orchestrator:
                     ('Purpose', call.get('arguments', {}).get('purpose'))])
                 definition = catalog[call['name']]
                 context = dict(self.base_context)
+                self._knowledge_authority(context)
                 context['remaining_attachment_capacity'] = max(0, 10 - len(context['pending_image_attachments']))
                 context['source_request_id'] = response['request_id']
+                context['source_call_id'] = call['call_id']
                 if call['name'] == 'automation.inspect':
                     try:
                         archive, actual_digest = self._local_archive_sha256(call['arguments']['path'])
@@ -1613,6 +1658,15 @@ class Orchestrator:
                     if call['name'] == 'browser.open':
                         self.registry.validate_call(call['name'], call['arguments'], context)
                     prepared = self._browser_preparation(call)
+                    from .session_mode import discovery_mode, website_policy
+                    if discovery_mode(self.config) and call['name'] in {
+                            'browser.scroll', 'browser.screenshot', 'browser.inspect', 'browser.login_once'}:
+                        from .web_navigation import get_navigation_page
+                        owned = get_navigation_page(context, call['arguments'].get('tab_id'))
+                        website_policy(self.config, self.state.data['approved_domains']).resolve(owned.url)
+                        needs_approval = False
+                        context['approved'] = True
+                        context['session_login_authorized'] = call['name'] == 'browser.login_once'
                 if call['name'] in {'permissions.grant','permissions.edit','permissions.renew'}:
                     prepared = prepare_permissions(call['name'],call['arguments'],context)
                 if call['name'].startswith('site_knowledge.'):
@@ -1641,24 +1695,16 @@ class Orchestrator:
                     context['approved'] = True
                     context['approval_hash'] = canonical_hash({'session': self.state.session_id,
                         'authority': 'confirmed_local_navigation_and_knowledge', 'call': call})
+                    if getattr(self.config, '_knowledge_session_confirmed', False):
+                        from .site_knowledge import knowledge_session_grant
+                        context['knowledge_session_authorized'] = True
+                        context['knowledge_session_grant'] = knowledge_session_grant(context)
                     if call['name'].startswith('site_knowledge.'):
                         context['site_knowledge_reviewed'] = prepared
                         context['site_knowledge_consent'] = prepared
                     else:
                         context['discovery_reviewed'] = prepared
                         context['discovery_save_consent'] = prepared
-                if (self.base_context['local_navigation_grant'].approved
-                        and call['name'] in {'files.create', 'files.mkdir'} and prepared
-                        and prepared.get('mapped_s_drive_destination')):
-                    destination = Path(prepared['mapped_s_drive_destination']).resolve()
-                    discoveries = Path(self.prompts.storage_paths['unc_path']).resolve()
-                    if destination != discoveries and discoveries not in destination.parents:
-                        raise PolicyError('The session create grant covers only the canonical S: Discoveries knowledge folder.')
-                    # The user's one run confirmation grants non-destructive
-                    # reads and new-file/folder creation in this exact subtree.
-                    needs_approval = False
-                    context['approved'] = True
-                    context['s_drive_destination'] = prepared['mapped_s_drive_destination']
                 if call['name'] == 'ocr.image':
                     artifact = self._attachment_record(self.policy.resolve(call['arguments']['path'], True))
                     prepared = {'approved_image_attachment': artifact, 'destination': self.config.copilot_url}
@@ -1741,9 +1787,13 @@ class Orchestrator:
                                 results.append({'call_id': call['call_id'], **denied})
                                 break
                             context['consequential_approved_plan_hash'] = digest
-                    if call['name'] == 'browser.open':
-                        domains = [URLPolicy.website_domain(call['arguments']['url']),
+                    if call['name'] in {'browser.open', 'browser.recover_uncertain'}:
+                        from .session_mode import OpenWebsitePolicy, website_origin
+                        approved_url = call['arguments'].get('url') or call['arguments']['checkpoint_url']
+                        domains = [OpenWebsitePolicy.website_domain(approved_url),
                                    *call['arguments'].get('allowed_domains', [])]
+                        self.config._session_approved_origins = set(getattr(self.config, '_session_approved_origins', ()))
+                        self.config._session_approved_origins.add(website_origin(approved_url))
                         authorize = getattr(self.browser, 'authorize_tool_domain', None)
                         for domain in domains:
                             self.state.approve_domain(domain)
@@ -2097,6 +2147,8 @@ class Orchestrator:
                                 'These are user instructions and context. Re-evaluate the pending plan before '
                                 'any further local action; actions from an earlier unexecuted plan are superseded.')}
         self.base_context['research_user_request'] = json.dumps(goal, ensure_ascii=False)
+        for item in message_records:
+            self._authorize_user_targets(item['text'])
         self.feedback.emit('Orchestrator', 'Incorporated ' + str(len(message_records)) +
                            ' steering message(s) into the active goal before continuing.')
         if self.event_sink:
@@ -2119,10 +2171,7 @@ class Orchestrator:
                     'navigation_scope': 'This browser approval also permits continued navigation, navigation-only links, inspection and bounded same-origin new tabs within approved websites for this session. Forms, searches, writes, downloads, scripts and consequential controls still require their normal approval. The grant expires with this agent session.',
                     'managed_tab_only': True, 'dependency_domains': list(args.get('allowed_domains', [])),
                     'limitations': 'Uses an owned tab in the verified Copilot Edge profile; existing site sign-ins are shared. Bounded tabs and exact approved downloads; no unrestricted hosts.'}
-        from .session_mode import fast_mode
-        if fast_mode(self.config):
-            prepared.update(navigation_scope='Session authorization covers navigation, reads and edits across websites without origin binding or individual plan approvals.',
-                            limitations='Uses owned website tabs and the existing signed-in profile. Manual login, OS permissions, valid calls and uncertain-effect reconciliation remain active.')
+        prepared['limitations'] += ' One prefilled login-button click is allowed under the discovery session grant; denied login or MFA pauses for the user. No credentials are extracted.'
         if call['name'] == 'browser.open':
             from .session_mode import website_policy
             prepared.update(website_domain=website_policy(self.config).website_domain(args['url']), includes_subdomains=True)

@@ -8,15 +8,21 @@ Missing-page recovery can establish a fresh approved checkpoint; see
 automatically attaching one labeled PDF of scroll/element/region pictures for Copilot. `browser.javascript` supports
 targeted DOM queries and SPA navigation. See [DOM and visual navigation](docs/DOM_AND_VISUAL_NAVIGATION.md).
 
-Startup offers **one fast full-access option for this session**: skip package quality
-review and individual plan approvals, read and edit ordinary accessible files,
-and navigate across websites without domain or customer-category bindings.
-File deletion stays blocked. Small corrections may retry the same approach;
-unnamed controls support role, CSS, XPath and explicit positions. Quarantined
-owned tabs close after a usable replacement is established. See
-[session behavior](docs/SUPERVISED_SESSIONS.md).
+Startup offers one **fast scoped discovery session**. Read-only tools on the
+approved target and useful sanitized S: knowledge updates run immediately.
+Other file writes, target changes and scope expansions retain concise approval;
+package validation remains active. One prefilled login-button click is allowed
+through `browser.login_once`; denial or MFA pauses for you. The grant expires
+when the session ends. See [session behavior](docs/SUPERVISED_SESSIONS.md).
 
-The local Crawl4AI guide lets you sign in manually, title each website's knowledge,
+[REA integration](docs/REA_INTEGRATION.md) makes REA the preferred broad technical
+inspection capability through three typed ToolRegistry tools. Deterministic
+`research.route` retains the API Anything-inspired public operation adapter,
+Crawl4AI and specialized browser/file tools. Independent bounded reads run in
+parallel. [Centralized knowledge](docs/KNOWLEDGE_PERSISTENCE.md) reuses concise
+per-site views while the S:-backed ledger retains evidence and revisions.
+
+The optional `--discover-first` Crawl4AI guide lets you sign in, title each website campaign,
 explore once or keep refreshing, then pass saved shared-storage paths to the
 agent. See [local discovery](docs/LOCAL_WEBSITE_DISCOVERY.md) and
 [business data work](docs/BUSINESS_DATA_WORK.md). Crawl4AI is directly callable
@@ -32,7 +38,7 @@ sectioned JSON attachments before sending. The chat message stays below the
 editor limit; ordinary batches use one file, with at most 19 total attachments.
 See [large result transport](docs/LARGE_TOOL_RESULTS.md).
 
-Public exploration now defaults to [Crawl4AI](https://github.com/unclecode/crawl4ai)
+Structured public exploration remains available through [Crawl4AI](https://github.com/unclecode/crawl4ai)
 through `discovery.manifest`: continuous bounded parallel expansion, up to 1,000
 pages, and reuse of saved unexplored routes. Update dependencies with `Setup.cmd`.
 Read all saved routes through paginated `discovery.knowledge_lookup` in the shared
@@ -62,9 +68,10 @@ and bytecode writes, then checks package compatibility and the exploration tools
 Before unpacking, it tests an actual nested wheel-file write/read. Missing or
 unusable temporary folders are followed by other S:/UNC project folders and
 available Windows temporary folders; a failed unpack retries the remaining
-packages. If every automatic option fails, Setup asks for **a folder where you
-can save files**, accepts a quoted full folder address, and tries it before
-stopping. Package scratch files are separate from the shared agent knowledge.
+packages. Proven PSDrive/CIM/SMB mappings add S:/UNC aliases and short scratch
+locations after established candidates. If every automatic option fails, Setup
+reports sanitized attempted paths and failure categories with a
+`COPILOT_SETUP_TEMP` recovery instruction, without a folder-choice question. Package scratch files are separate from the shared agent knowledge.
 
 Put the repository on the shared **S:** drive alongside the organisation's Python installation. Double-click **Setup.cmd**, choose **1: Automatic detection** or **2: Paste a path**, and select Python. You may paste the quoted full `python.exe` path or its installation folder. Setup creates or reuses the project's `.venv` and installs the pinned packages from `requirements.lock.txt`; then use **Start Agent.cmd**. On S:, the base Python and virtual environment remain shared on S:. No browser download is needed. See [SHARED_VDI.md](docs/SHARED_VDI.md).
 

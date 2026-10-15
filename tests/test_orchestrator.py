@@ -644,10 +644,10 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(0, state.message_count)
         self.assertEqual(1, len(browser.preloads))
         preload = browser.preloads[0]
-        self.assertEqual(9, len(preload['attachments']))
-        self.assertEqual(1, sum(path.name.startswith('tool-results-') for path in preload['attachments']))
+        self.assertEqual(8, len(preload['attachments']))
+        self.assertEqual(0, sum(path.name.startswith('tool-results-') for path in preload['attachments']))
         self.assertEqual(prepared['request_id'], preload['request_id'])
-        self.assertEqual(9, prepared['attachment_count'])
+        self.assertEqual(8, prepared['attachment_count'])
         self.assertIn(prepared['request_id'], preload['text'])
 
         result = await app.initialize()

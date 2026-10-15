@@ -15,7 +15,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from .policy import PathPolicy, URLPolicy, PolicyError, config_value, is_s_drive_path, resolve_s_drive_output
 from .state import browser_inventory
-from .session_mode import fast_mode, website_policy
+from .session_mode import fast_mode, discovery_mode, website_policy
 from .local_navigation import SessionFileAccessPolicy
 from .local_navigation import (SessionPathPolicy, SessionPathExtensionPolicy, SessionNavigationGrant,
                                FilesystemAccessError, filesystem_diagnostic, prepare_session_path_extension)
@@ -40,6 +40,9 @@ from .discovery_knowledge import (KNOWLEDGE_SPECS as DISCOVERY_KNOWLEDGE_SPECS,
 from .discovery_contracts import DiscoveryError, DISCOVERY_ERROR_CODES
 from .web_operations import (OPERATION_SPECS, OPERATION_EXAMPLES,
                              validate_operation, execute_operation)
+from .rea import REA_SPECS, rea_health, validate_rea, execute_rea
+from .research_routing import ROUTING_SPECS, validate_route, route_research
+from .browser_auth import AUTH_SPECS, validate_login, execute_login
 
 
 def obj(properties, required=None):
@@ -206,6 +209,9 @@ SPECS['automation.run'] = (SPECS['automation.run'][0], SPECS['automation.run'][1
 SPECS.update(DISCOVERY_KNOWLEDGE_SPECS)
 SPECS.update(PERMISSION_SPECS)
 SPECS.update(OPERATION_SPECS)
+SPECS.update(REA_SPECS)
+SPECS.update(ROUTING_SPECS)
+SPECS.update(AUTH_SPECS)
 GUIDANCE_TOPICS = ['index', 'reconnaissance', 'plans', 'customers', 'documents', 'tabs', 'memory', 'recovery', 'privacy', 'testing']
 SPECS['guidance.load'] = (obj({'topics': {'type': 'array', 'minItems': 1, 'maxItems': 3,
                                          'items': {'type': 'string', 'enum': GUIDANCE_TOPICS}}}),
@@ -226,8 +232,15 @@ def configured_path_policy(config, session_dir):
 
 
 def tool_path_policy(name, context):
-    policy = context.get('policy') or configured_path_policy(context.get('config', {}), context['session_dir'])
+    policy = context.get('policy') or context.get('path_policy') or configured_path_policy(context.get('config', {}), context['session_dir'])
     config = context.get('config', {})
+    if context.get('session_path_extensions') and name in {'rea.analyze_artifact', 'rea.analyze_capture', 'research.route'}:
+        return SessionPathExtensionPolicy(policy, context['session_path_extensions'],
+                                          getattr(context.get('session_state'), 'session_id', None))
+    if discovery_mode(config):
+        extensions = context.get('session_path_extensions', [])
+        return (SessionPathExtensionPolicy(policy, extensions,
+                getattr(context.get('session_state'), 'session_id', None)) if extensions else policy)
     if fast_mode(config):
         return policy if isinstance(policy, SessionFileAccessPolicy) else SessionFileAccessPolicy(policy, lambda: fast_mode(config))
     proof_workspace = config_value(config, '_proof_file_workspace')
@@ -390,6 +403,9 @@ def _approved_write_target(name, args, policy, context):
 
 
 class ToolRegistry:
+    def __init__(self, config=None):
+        self.config = config or {}
+
     def definitions(self):
         return [self.definition(name) for name in SPECS]
 
@@ -417,6 +433,8 @@ class ToolRegistry:
         if name in DISCOVERY_SPECS or name in DISCOVERY_KNOWLEDGE_SPECS:
             # Synthetic auto-generated samples cannot establish valid DAGs, current
             # correlation or locally issued knowledge/run references.
+            examples = []
+        if name in REA_SPECS or name in ROUTING_SPECS or name in AUTH_SPECS:
             examples = []
         if name == 'browser.plan':
             examples = [{'arguments': {'task_id': 'navigation', 'steps': [{'id': 'ready', 'op': 'wait', 'locator': {'role': 'heading', 'name': 'Documents'}}],
@@ -447,7 +465,18 @@ class ToolRegistry:
         if name in {'browser.plan', 'browser.download_batch'}: timeout = 125
         if name == 'operation.learn': timeout = 95
         if name in {'discovery.manifest', 'navigation.intent'}: timeout = 3605
-        return {"name":name,"version":"1.0","description":description,"intended_use":description,"preconditions":["Current validated tool call", "Configured filesystem/domain boundaries", "Explicit user grant for side effects" if approval!="read_only" else "Read-only operation"],"risk_level":"low" if approval=="read_only" else "moderate","timeout":timeout,"output_size_limit":None,"error_codes":errors,"input_schema":schema,
+        if name in REA_SPECS:
+            timeout = config_value(self.config, 'rea_timeout_seconds', 45) + 12
+            result_schema = {'anyOf': [{'type': 'object', 'properties': {
+                'status': {'enum': ['completed', 'partial', 'failed', 'unavailable', 'cancelled', 'timeout', 'output_limit', 'uncertain']},
+                'target': {'type': 'string'}, 'target_type': {'type': 'string'},
+                'execution_id': {'type': 'string'}, 'side_effects_uncertain': {'type': 'boolean'}},
+                'required': ['status', 'target', 'target_type', 'execution_id', 'side_effects_uncertain']},
+                {'type': 'object', 'properties': {'status': {'enum': ['not_started', 'failed', 'uncertain']},
+                                                'side_effects_uncertain': {'type': 'boolean'}},
+                 'required': ['status', 'side_effects_uncertain'], 'additionalProperties': False}]}
+            errors = sorted(set(errors) | {'partial', 'cancelled', 'uncertain', 'output_limit'})
+        definition = {"name":name,"version":"1.0","description":description,"intended_use":description,"preconditions":["Current validated tool call", "Configured filesystem/domain boundaries", "Explicit user grant for side effects" if approval!="read_only" else "Read-only operation"],"risk_level":"low" if approval=="read_only" else "moderate","timeout":timeout,"output_size_limit":None,"error_codes":errors,"input_schema":schema,
                 "output_schema":{"type":"object","properties":{"ok":{"type":"boolean"},"tool":{"type":"string"},"result":result_schema,"error":{"type":"object","properties":{"code":{"type":"string"},"message":{"type":"string"}},"required":["code","message"],"additionalProperties":False}},"required":["ok","tool"],"additionalProperties":False},"approval_policy":approval,
                 "side_effects":[] if approval=="read_only" else [
                     "exact separately consented local knowledge write/invalidation" if name in {'discovery.knowledge_save', 'discovery.knowledge_invalidate'}
@@ -460,6 +489,13 @@ class ToolRegistry:
                 "errors":errors,
                 "examples":examples,
                 **({'approval_policy_by_operation': {'list': 'read_only', 'open': 'user_approval', 'close': 'user_approval', 'reset': 'user_approval'}} if name == 'browser.tabs' else {})}
+        if name in REA_SPECS:
+            definition['availability'] = rea_health(self.config)
+            definition['output_size_limit'] = config_value(self.config, 'rea_max_output_bytes', 1048576)
+            definition['limits'].update(output_bytes=definition['output_size_limit'],
+                input_bytes=config_value(self.config, 'rea_max_input_bytes', 20971520),
+                concurrency=config_value(self.config, 'rea_max_parallel', 3))
+        return definition
 
     def validate_input(self, name, args):
         if name=='site_knowledge.save':
@@ -479,6 +515,12 @@ class ToolRegistry:
         self.validate_input(name,args)
         config=context.get("config",{})
         policy=tool_path_policy(name, context)
+        if name in REA_SPECS:
+            return validate_rea(name, args, context, policy)
+        if name in ROUTING_SPECS:
+            return {'target': validate_route(args, context, policy)}
+        if name in AUTH_SPECS:
+            return validate_login(args, context)
         if name in NAVIGATION_SPECS:
             validate_navigation(name, args, context)
         if name in DOCUMENT_SPECS:
@@ -695,6 +737,9 @@ class ToolRegistry:
         return bounded
 
     async def execute(self, name, args, context):
+        if name in REA_SPECS:
+            context['rea_execution_started'] = False
+            context['rea_cleanup_confirmed'] = True
         if name=='research.perform': context['research_effects_started']=False
         if name in {'files.create','files.mkdir','files.append','files.copy','files.replace'}:
             context['filesystem_effect_started']=False
@@ -729,7 +774,18 @@ class ToolRegistry:
             if name in {'discovery.manifest', 'navigation.intent'}:
                 payload = args['manifest'] if name == 'discovery.manifest' else args['intent']
                 timeout = min(3605, payload['budgets']['run_seconds'] + 5)
+            if name in REA_SPECS:
+                timeout = config_value(config, 'rea_timeout_seconds', 45) + 12
             result=await asyncio.wait_for(self._execute(name,args,context,policy),timeout=timeout)
+            if name in REA_SPECS and result.get('status') != 'completed':
+                status = result.get('status', 'failed')
+                code = status if status in {'partial', 'unavailable', 'cancelled', 'timeout', 'output_limit', 'uncertain'} else 'operation_failed'
+                return self._limit({'ok': False, 'tool': name, 'result': result,
+                    'error': {'code': code, 'message': 'REA did not complete; retain evidence and inspect limitations before selecting a safe alternative.'}}, context)
+            if name in AUTH_SPECS and result.get('status') != 'completed':
+                return self._limit({'ok': False, 'tool': name, 'result': result,
+                    'error': {'code': result.get('error', {}).get('code', 'authentication_required'),
+                              'message': 'One login attempt is exhausted or user authentication is needed; pause for the user.'}}, context)
             if name in DISCOVERY_SPECS or name in DISCOVERY_KNOWLEDGE_SPECS:
                 if result.get('outcome') in {'failed', 'incomplete', 'cancelled'}:
                     return self._limit({'ok': False, 'tool': name, 'result': result,
@@ -766,6 +822,8 @@ class ToolRegistry:
             return {'ok': False, 'tool': name, 'result': {'status': 'not_started', 'side_effects_uncertain': False},
                     'error': filesystem_diagnostic(error)}
         except PolicyError as error:
+            if name in REA_SPECS:
+                return self._rea_failure(name, context, 'policy_denied', str(error))
             if name.startswith(('site_knowledge.', 'knowledge.')) and hasattr(error, 'code'):
                 return {'ok': False, 'tool': name, 'error': {'code': error.code, 'message': str(error)},
                         'result': {'status': 'not_started', 'side_effects_uncertain': False}}
@@ -775,6 +833,8 @@ class ToolRegistry:
             return redact({'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {'status':'not_started','side_effects_uncertain':False} if certain_preflight else {},'error':{'code':'policy_denied','message':str(error)}})
         except ReconciliationRequired as error: return {"ok":False,"tool":name,"result":{"status":"uncertain" if error.side_effects_uncertain else "not_started","side_effects_uncertain":error.side_effects_uncertain},"error":{"code":"reconciliation_conflict","message":str(error)}}
         except (ValueError,TypeError) as error:
+            if name in REA_SPECS:
+                return self._rea_failure(name, context, 'invalid_arguments', str(error))
             review = getattr(error, "report", None)
             if name == "automation.inspect" and isinstance(review, dict):
                 return self._limit({"ok": False, "tool": name, "result": {"review": review,
@@ -783,11 +843,17 @@ class ToolRegistry:
                                               "message": review.get("summary", str(error))}}, context)
             return redact({'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {},'error':{'code':'invalid_arguments','message':str(error)}})
         except asyncio.TimeoutError:
+            if name in REA_SPECS:
+                return {'ok': False, 'tool': name,
+                        'result': {'status': 'uncertain', 'side_effects_uncertain': True},
+                        'error': {'code': 'timeout', 'message': 'REA exceeded its cleanup deadline; confirm owned-process termination before any fallback.'}}
             if name in {'files.create','files.mkdir','files.append','files.copy','files.replace'} and not context.get('filesystem_effect_started'):
                 return {'ok':False,'tool':name,'result':{'status':'not_started','side_effects_uncertain':False},
                         'error':{'code':'timeout','message':'File validation timed out before any write was attempted'}}
             return {'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {},'error':{'code':'timeout','message':'Local operation timed out; inspect partial effects before retrying'}}
         except Exception as error:
+            if name in REA_SPECS:
+                return self._rea_failure(name, context, 'operation_failed', 'REA validation, execution or evidence storage failed; inspect its retained state.')
             if name.startswith('knowledge.'):
                 return {'ok': False, 'tool': name, 'error': filesystem_diagnostic(error),
                         'result': {'status': 'uncertain' if context.get('knowledge_note_started') else 'not_started',
@@ -808,8 +874,23 @@ class ToolRegistry:
                         'error': {'code': 'operation_failed', 'message': 'Installed discovery/storage contract failed; no raw diagnostics are exported and no completion is claimed.'}}
             return redact({"ok":False,"tool":name,"error":{"code":"operation_failed","message":str(error)[:1000]}})
 
+    @staticmethod
+    def _rea_failure(name, context, code, message):
+        uncertain = context.get('rea_cleanup_confirmed') is False
+        status = 'uncertain' if uncertain else 'failed' if context.get('rea_execution_started') else 'not_started'
+        return redact({'ok': False, 'tool': name,
+                       'result': {'status': status,
+                                  'side_effects_uncertain': uncertain},
+                       'error': {'code': code, 'message': message}})
+
     async def _execute(self,name,args,context,policy):
         config=context.get("config",{})
+        if name in REA_SPECS:
+            return await execute_rea(name, args, context, policy)
+        if name in ROUTING_SPECS:
+            return route_research(args, context, policy)
+        if name in AUTH_SPECS:
+            return await execute_login(args, context)
         if name == 'crawl4ai.crawl':
             from .local_crawler import crawl_websites
             return await crawl_websites(args, context)

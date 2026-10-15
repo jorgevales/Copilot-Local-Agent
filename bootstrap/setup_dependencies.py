@@ -4,6 +4,8 @@ from __future__ import annotations
 from collections import deque
 from importlib import metadata
 import hashlib
+import json
+import ntpath
 import os
 from pathlib import Path
 import re
@@ -40,13 +42,46 @@ def probe(path):
         child.rmdir()
 
 
+def shared_root(env):
+    """Resolve only the actual S: mapping, with bounded provider fallbacks."""
+    if os.name != 'nt':
+        return None
+    try:
+        root = os.path.realpath('S:\\', strict=True)
+        if root.startswith('\\\\?\\UNC\\'):
+            root = '\\\\' + root[8:]
+        if root.startswith('\\\\') and not root.startswith(('\\\\?\\', '\\\\.\\')):
+            return Path(root)
+    except (OSError, ValueError):
+        pass
+    # Constant commands, never interpolate environment values or path strings.
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$root = $null
+try { $root = (Get-PSDrive -Name S -PSProvider FileSystem -ErrorAction Stop).DisplayRoot } catch { }
+if (-not $root) { try { $root = (Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='S:'" -ErrorAction Stop).ProviderName } catch { } }
+if (-not $root) { try { $root = @(Get-SmbMapping -LocalPath 'S:' -ErrorAction Stop)[0].RemotePath } catch { } }
+if ($root) { ConvertTo-Json -Compress -InputObject ([string]$root) }
+"""
+    try:
+        result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script],
+                                env=env, capture_output=True, text=True, timeout=5)
+        root = json.loads(result.stdout) if result.returncode == 0 and result.stdout.strip() else None
+        if isinstance(root, str) and root.startswith('\\\\') and not root.startswith(('\\\\?\\', '\\\\.\\')):
+            # Require a share identity, never accept a provider's drive-only value.
+            if len([part for part in root.split('\\') if part]) >= 2:
+                return Path(root)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
 def candidates(project, env):
     values = [env.get('COPILOT_SETUP_TEMP')]
     for key in ('TEMP', 'TMP', 'TMPDIR'):
         try:
             candidate = folder(env.get(key) or '')
-            if candidate.is_dir():
-                values.append(candidate)
+            values.append(candidate)  # The nested write/read probe can create it.
         except (OSError, ValueError):
             pass
     values.extend([project / '.setup-cache' / 'temp', project / '.setup-cache' / 'temp-retry'])
@@ -67,17 +102,40 @@ def candidates(project, env):
     if env.get('SystemRoot'):
         values.append(Path(env['SystemRoot']) / 'Temp' / 'CopilotLocalAgent' / key)
     seen = set()
-    for value in values:
-        if not value:
-            continue
-        try:
-            path = folder(value)
-        except ValueError:
-            continue
-        identity = os.path.normcase(str(path))
-        if identity not in seen:
-            seen.add(identity)
-            yield path
+
+    def unique(items):
+        for value in items:
+            if not value:
+                continue
+            try:
+                path = folder(value)
+            except ValueError:
+                continue
+            identity = os.path.normcase(str(path))
+            if identity not in seen:
+                seen.add(identity)
+                yield path
+
+    yield from unique(values)
+    # Keep the established candidates first. Short scratch paths avoid long
+    # redirected project paths. Provider lookup happens only if those fail.
+    values = []
+    root = shared_root(env)
+    if root is not None:
+        project_text = ntpath.normpath(str(project))
+        root_text = ntpath.normpath(str(root))
+        if ntpath.splitdrive(project_text)[0].casefold() == 's:':
+            values.append(root / project_text[3:] / '.setup-cache' / 'temp')
+        elif project_text.casefold().startswith(root_text.casefold().rstrip('\\') + '\\'):
+            relative = project_text[len(root_text.rstrip('\\')) + 1:]
+            values.append(Path('S:/') / relative / '.setup-cache' / 'temp')
+        values.extend([Path('S:/') / '.copilot-setup' / key / 'temp',
+                       root / '.copilot-setup' / key / 'temp'])
+    elif os.name == 'nt' and ntpath.splitdrive(str(project))[0].casefold() == 's:':
+        values.append(Path('S:/') / '.copilot-setup' / key / 'temp')
+    if env.get('LOCALAPPDATA'):
+        values.append(Path(env['LOCALAPPDATA']) / 'Temp' / 'CopilotLocalAgent' / key)
+    yield from unique(values)
 
 
 def pins_from(path):
@@ -128,7 +186,42 @@ def path_failure(output):
         'winerror 2', 'winerror 3', 'error 2]', 'error 3]', 'error 112]',
         'winerror 206', 'file name too long', 'filename or extension is too long',
         'permission denied', 'access is denied', 'no space left', 'not enough space',
+        'winerror 112', 'winerror 39', 'disk quota', 'quota exceeded',
+        'network path was not found', 'network name is no longer available',
+        'winerror 53', 'winerror 64',
         'invalid wheel', 'not a zip file', 'badzipfile'))
+
+
+def failure_category(error):
+    """Classify without echoing raw OS/pip messages that may contain secrets."""
+    text = str(error).lower()
+    code = getattr(error, 'winerror', None)
+    if getattr(error, 'errno', None) in {28, 122} or code in {39, 112} or any(
+            word in text for word in ('no space', 'not enough space', 'quota', 'error 112')):
+        return 'space/quota reported (write probe or installer; not a free-space verdict)'
+    if isinstance(error, PermissionError) or code == 5 or any(word in text for word in ('permission', 'access is denied')):
+        return 'access denied'
+    if code in {53, 64, 67} or 'network' in text:
+        return 'network path unavailable'
+    if any(word in text for word in ('cache', 'invalid wheel', 'not a zip file', 'badzipfile')):
+        return 'cached archive unavailable or invalid'
+    if code == 206 or 'too long' in text:
+        return 'path too long'
+    if isinstance(error, FileNotFoundError) or any(word in text for word in ('no such file', 'cannot find', 'file not found')):
+        return 'path unavailable'
+    return 'filesystem operation failed'
+
+
+def diagnostic_path(path, project, env):
+    value = str(path)
+    for base, label in ((project, '<PROJECT>'), (env.get('LOCALAPPDATA'), '<LOCALAPPDATA>'),
+                        (env.get('USERPROFILE'), '<USERPROFILE>'), (env.get('SystemRoot'), '<SystemRoot>')):
+        if base and value.casefold().startswith(str(base).rstrip('/\\').casefold() + os.sep):
+            value = label + value[len(str(base).rstrip('/\\')):]
+            break
+    value = re.sub(r'(?i)(https?://)[^/\s@]+@', r'\1<REDACTED>@', value)
+    value = value.split('?', 1)[0].split('#', 1)[0]
+    return ''.join(char if char.isprintable() else '?' for char in value)
 
 
 def health_check(pins):
@@ -164,7 +257,10 @@ def install(requirements, prefix, *, versions=installed_versions, run=run_python
         return
 
     cache = None
-    result = run(['-m','pip','cache','dir'], env)
+    try:
+        result = run(['-m','pip','cache','dir'], env)
+    except (OSError, subprocess.TimeoutExpired):
+        result = SimpleNamespace(returncode=1, output='')
     for value in [env.get('PIP_CACHE_DIR'), result.output if result.returncode==0 else None,
                   project/'.setup-cache'/'pip-cache']:
         if value:
@@ -175,29 +271,21 @@ def install(requirements, prefix, *, versions=installed_versions, run=run_python
             except (OSError, ValueError):
                 cache = None
     locations = iter(candidates(project, env))
-    manual = False
     failed_installs = 0
+    failures = []
     while True:
         path = next(locations, None)
         if path is None:
-            if manual:
-                raise RuntimeError('Setup could not use the folder you chose. Existing files were retained.')
-            manual = True
-            try:
-                answer = ask('Setup needs a folder where you can save files to unpack its downloads. '
-                             'Paste the full folder address (for example S:\\Setup files), '
-                             'or press Enter to stop: ')
-            except (EOFError, OSError):
-                answer = ''
-            if not answer.strip():
-                raise RuntimeError('Setup stopped because no usable unpacking folder was available. Existing files were retained.')
-            try:
-                path = folder(answer)
-            except ValueError as error:
-                raise RuntimeError(str(error)) from error
+            details = '; '.join(f'{diagnostic_path(location, project, env)} [{stage}: {category}]'
+                                for location, stage, category in failures)
+            raise RuntimeError('Setup exhausted its automatic unpacking folders. ' + details +
+                               '. Check share connectivity, write permissions or quota; '
+                               'set COPILOT_SETUP_TEMP to a writable absolute scratch folder and rerun Setup. '
+                               'Existing files were retained; durable knowledge remains on S:.')
         try:
             probe_folder(path)
-        except OSError:
+        except OSError as error:
+            failures.append((path, 'write/read probe', failure_category(error)))
             print('That unpacking folder is unavailable. Trying another folder.', flush=True)
             continue
         pending = missing()
@@ -217,6 +305,7 @@ def install(requirements, prefix, *, versions=installed_versions, run=run_python
             raise RuntimeError('Setup could not obtain packages from the configured package source. '
                                'See the message above; existing files were retained.')
         print('A download could not be unpacked. Retrying the remaining packages in another folder.', flush=True)
+        failures.append((path, 'installer', failure_category(result.output)))
         failed_installs += 1
         # Retain verified cached downloads for the first ordinary temp failure.
         # A cache error or repeated failure gets a fresh uncached read instead.

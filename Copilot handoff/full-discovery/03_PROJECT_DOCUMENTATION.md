@@ -95,6 +95,23 @@ Setup runs this archive with the selected Python using `--no-download` and
 `--no-periodic-update`. This creates `.venv` and seeds its pip without modifying
 the base Python installation or requiring administrator rights. Project packages
 are subsequently installed into `.venv` from the configured package index.
+
+`setup_dependencies.py` checks pinned packages before downloading and retains
+successful partial installs on retry. It tests real nested wheel writes and
+readback instead of trusting a drive's reported free space. Existing explicit,
+environment, project, resolved-path, LocalAppData and Windows temporary candidates
+remain first. If they fail, bounded discovery consults the actual S: mapping
+through PowerShell drive data, CIM and SMB mapping, and tries its proven UNC/S:
+aliases and shorter scratch paths. Additional local scratch is allowed for setup
+unpacking and cache only; durable discovery knowledge remains on S:.
+
+Path, access, quota and invalid-cache failures retry remaining packages in another
+verified folder; invalid cached wheels switch to uncached downloads. Package-source
+errors stop promptly. Exhausting all automatic folders produces sanitized path
+and failure categories without asking for a manual unpacking folder. Correct share
+connectivity/permissions or set `COPILOT_SETUP_TEMP` to a writable absolute scratch
+folder, then rerun Setup. Live S:/UNC availability still needs validation on the
+target Windows/VDI environment.
 <!-- END SOURCE: bootstrap/README.md -->
 
 
@@ -644,17 +661,15 @@ attachments before Copilot submission. Existing file/attachment/resource limits
 still apply; exceeding a real transport budget reports an unsent result rather
 than claiming completion from a truncated preview.
 
-In a fast full-access session, navigation and package URLs may cross websites,
-customer/task tags do not gate owned-tab access, and optional generic knowledge
-namespaces need no manual binding. Ordinary reads do not require a durable research
-grant. Explicitly selected durable grant tools keep their own contract.
+A fast scoped discovery session authorizes reads only within approved target
+scope and preserves exact record-identity checks. New unrelated/private/local
+scope and target mutations require approval. Sanitized reusable knowledge updates
+are automatic; raw business records belong only to explicitly approved task
+artifacts and are never automatically promoted into reusable knowledge.
 
-One startup grant skips package quality review and individual plan approvals.
-Ordinary accessible file reads/edits may cross configured roots; deletion remains
-blocked. Manual sign-in, credentials, valid executable contracts, actual OS access,
-Stop and uncertain-effect reconciliation remain active. Record identity checks in
-specialized summary tools prevent attributing one record's facts to another;
-generic reads remain available for broader discovery.
+One prefilled login-button click is permitted through browser.login_once; denial
+or MFA pauses for the user. Credentials are never extracted or retained. Package
+validation, code approval, protected paths, Stop and uncertainty remain active.
 
 Synthetic tests cover direct customer-tool dispatch, complete long results,
 customer session navigation, internal package hosts and continuing secret
@@ -783,14 +798,21 @@ up to eight concurrent reads and four per origin. Suggested deep budgets are
 1,000 pages, depth 10, 5,000 tasks/requests, 512 MiB, 1,800 run seconds, 1,500
 task/branch seconds, 30-second reads, three attempts and two requests per second
 per origin. See `docs/examples/deep-discovery.json`; replace the exact origin,
-seeds and nested request ID. Each full manifest is reviewed locally. Queue
+seeds and nested request ID. Each full manifest is validated locally against the
+current approved target/session scope; any required expansion is approved before
+dispatch. Queue
 exhaustion, resource limits, cancellation and safety boundaries end the loop.
 
 Bind the exact namespace and look up saved knowledge first. Expansion prioritizes
-previously observed unexplored links from a separately consented map with matching
+previously observed unexplored links from a saved map with matching
 scope, intact evidence and unexpired provenance. Each reused candidate receives
-a fresh approved GET. Another run needs its own approval and budgets. Save useful
-runs with `discovery.knowledge_save`; maps are never silently promoted or saved.
+a fresh authorized GET. Each run retains its own exact scope and budgets. Save
+useful runs with `discovery.knowledge_save` under the session knowledge grant,
+without another save confirmation. Prepared payload/evidence integrity, exact
+namespace, expected-revision CAS and independent-observation trust checks remain
+mandatory. An automatic origin namespace can be used under the session grant;
+explicit app/tenant/environment bindings take precedence and must precede a source
+run if its evidence belongs to that distinct namespace.
 `discovery.knowledge_lookup` accepts `offset` and `limit` (1–40), returns
 `next_offset`, and retrieves all 1,000 saved routes without recrawling. Missing,
 invalidated or stale maps require discovery; integrity failures stop reuse.
@@ -803,9 +825,13 @@ Crawl4AI dependencies stop preparation without silently changing engines.
 
 The bounded public-site discovery and static navigation tools are installed in the live agent. The supported flags (`manifest_path`, `persistent_graph`, `bounded_parallelism`, `local_recovery`, `knowledge_write`, `knowledge_reuse`) are enabled by default. `targeted_repair` stays unavailable because no safe browser repair adapter exists. An operator can set these booleans in an explicit configuration file or select a smaller set with `COPILOT_AGENT_DISCOVERY_FLAGS`. Flags expose tools; they never approve a request.
 
-`discovery.shadow` compiles a manifest without network access. `discovery.manifest` runs one bounded, separately approved public HTTPS GET/HEAD manifest with local bootstrap, HTTP, structure, validation, and aggregation workers. It uses exact origins, public DNS and pinned peers, installed route patterns, task/request/byte/deadline limits, and an isolated local graph store. It does not use authenticated browser sessions, generated code, network observers, or autonomous browser actions. A failed or interrupted run retains only committed evidence and marks unfinished tasks terminal.
+`discovery.shadow` compiles a manifest without network access. `discovery.manifest` runs one bounded authorized public HTTPS GET/HEAD manifest with local bootstrap, HTTP, structure, validation, and aggregation workers. It uses exact origins, public DNS and pinned peers, installed route patterns, task/request/byte/deadline limits, and the shared S:/UNC ledger. It does not use authenticated browser sessions, generated code, network observers, or autonomous browser actions. A failed or interrupted run retains only committed evidence and marks unfinished tasks terminal.
 
-Knowledge writes require their own approval and revision check. `navigation.intent` compiles a read-only route from bound, trusted evidence and verifies fresh public fingerprints and links. Its result does not claim an interactive browser transition or authenticated access. Browser discovery and targeted repair remain unavailable.
+Knowledge writes use the in-memory session knowledge grant and exact revision/evidence checks; they do not ask for separate save consent. One independent public observation remains a candidate, and two matching successful runs are required for trusted static knowledge. Equivalent fresh maps return `unchanged` without timestamp-only revisions; meaningful route/fingerprint/trust changes and TTL renewal are retained. Parameter-bearing page captures are omitted from durable map candidates so saved source URLs remain free of queries/fragments without falsifying cryptographic evidence.
+
+`navigation.intent` compiles a read-only route from bound, trusted public evidence and verifies fresh public fingerprints/links. It does not claim an interactive browser transition or authenticated access. Authenticated or internal UI discovery instead uses the separately registered visible-browser/Crawl4AI tools. Browser workers and targeted repair remain unavailable inside the public manifest engine.
+
+Reusable site hints, including internal URLs, system paths and verified navigation methods, use `site_knowledge.save`; see `docs/KNOWLEDGE_PERSISTENCE.md` and `guidance/website/memory.md`. The authoritative ledger is `<resolved Discoveries knowledge>/discovery-v1/ledger.sqlite3`. Canonical site/namespace folders hold concise `current.md`, labeled `methods.md` history and the public `public-static-map.md` view. Reuse current recommended methods before repeating broad discovery. Raw HTML/markdown/DOM/AX/network captures remain scoped task evidence and are never automatically classified as sanitized reusable knowledge. Credentials, tokens, cookies and identifiable customer/personal records must not enter the reusable store.
 
 Copilot replies use one marker pair with plain-text JSON between the markers. The local adapter captures the current assistant chat text after generation ends, validates the complete envelope, and sends a bounded correction request promptly when a finished reply is malformed. It never resends a submission whose delivery is uncertain.
 
@@ -835,10 +861,10 @@ and cookies are not captured by the paired inspection.
 
 Use `browser.javascript` with an explicit expression/function and optional JSON
 `argument` for focused DOM/shadow queries, application state or SPA navigation.
-The current session grant supplies approval. A returned JavaScript value does
+This potentially effectful tool requires its normal concise approval. A returned JavaScript value does
 not prove the user outcome: verify the resulting state with another paired
 inspection. Exceptions/timeouts retain uncertain-effect status and actual error
-details; inspect/reconcile before replay. Login remains manual.
+details; inspect/reconcile before replay. Use browser.login_once for one prefilled login click; denial or MFA requires the user.
 
 Call `browser.screenshot` (or pass the same capture options to `browser.inspect`)
 for a complete batch in one tool call. By default it samples up to three distinct
@@ -1100,63 +1126,41 @@ Edge settings are read through its actual settings UI before link selection. The
 
 # Local navigation and Discoveries persistence
 
-Runtime S: resolution preserves the direct path first, then tries live PowerShell
-drive DisplayRoot, CIM ProviderName and SMB RemotePath providers when strict Python
-resolution fails. Accessible destinations are validated as UNC directories.
-Knowledge and SQLite use the same canonical store; extended UNC I/O spelling is
-applied after logical path validation for long redirected paths. No provider
-permits automatic local C: or OneDrive fallback. Provider lookup is a fixed,
-hidden, read-only command with a ten-second timeout.
+The session confirmation authorizes automatic saving of new, concise, verified, reusable knowledge. No additional run/save question is required for that knowledge. The in-memory grant expires with the session and cannot authorize unrelated targets, arbitrary file writes, executable code or consequential website actions. The orchestrator prepares exact payloads and dispatches registered tools; model consent flags cannot grant authority.
 
-Read saved routes directly with `discovery.knowledge_lookup` and offset/limit
-pagination. Reads validate the exact bound namespace, hashes, evidence and
-freshness. Broad discovery can reuse its consented unexplored frontier.
+## S: root and storage recovery
 
-Each visible run asks once for local filesystem navigation and verified knowledge
-saving. This in-memory grant expires with the process; it does not authorize code
-execution, authentication bypass, website transactions or arbitrary file changes.
-File navigation probes the current local/mapped/network volume and reports sanitized
-OS errors. Browser-profile access remains protected.
+Runtime S: resolution preserves the direct path first, then tries live PowerShell DisplayRoot, CIM ProviderName and SMB RemotePath providers when strict Python resolution fails. Destinations are validated as UNC directories. Extended UNC I/O spelling is applied after logical path validation. No provider permits automatic C: or OneDrive fallback. Provider lookup is fixed, hidden, read-only and bounded at ten seconds. Setup scratch/cache fallbacks have separate rules and never relocate durable knowledge.
 
-Knowledge uses `Discoveries knowledge` beside the project's parent on the live
-S: share. It does not follow runtime, workspace, profile or OneDrive storage. On
-a machine where the project is not on the mapped S: share, the agent stops before
-writing rather than silently falling back. A configured `knowledge_directory`
-must match this canonical folder. Startup creates a unique probe, flushes it,
-checks its hash, removes it, and checks SQLite schema and integrity. The verified
-S: path and resolved UNC filesystem path are included in the startup contract and
-each agent save response.
+Knowledge uses `Discoveries knowledge` beside the project on the live mapped S: share. A configured `knowledge_directory` must match this canonical root. Startup flushes/readback-verifies a unique probe and checks SQLite schema/integrity. Prompt contracts supply exact S: and UNC paths; Copilot must use those supplied paths. If the required share cannot be resolved or written, report the actual diagnostic rather than selecting another drive.
 
-For a local live navigation test only, `app.py --local-knowledge-test-directory`
-can select an empty direct child of `%LOCALAPPDATA%\\CopilotLocalAgent\\live-navigation-tests`.
-The test store is reported explicitly and scoped as the only agent write root for
-that run. This opt-in does not change the normal S:-only production path or act as
-an automatic fallback.
+## Ledger and centralized website views
 
-Website knowledge and discovery records share the SQLite ledger. Compatible JSON
-records already under the selected S: Discoveries root are read through a
-compatibility path and promoted on approved saves. The app no longer searches
-legacy OneDrive or LocalAppData knowledge stores automatically.
-Known columns in newer stores remain readable; incompatible writes return a
-specific diagnostic. Executable website hints retain privacy and authentication
-checks. Custom bounded JSON categories support ordinary knowledge.
+`<root>/discovery-v1/ledger.sqlite3` is the authoritative evidence/revision store. An additive `site_knowledge_revisions` table retains prior website records before active updates. Compatible old JSON records under the root remain readable and are promoted on authorized saves. Legacy OneDrive/LocalAppData knowledge is not searched automatically. Known columns in newer ledgers may remain readable; incompatible writes report a diagnostic.
 
-`knowledge.note` saves ordinary findings in immutable files under Discoveries,
-verifies the bytes, and attempts indexing in the shared ledger. A schema/index
-failure does not invalidate an already verified note: the receipt reports both
-statuses. `knowledge.lookup` lists note identifiers or reads verified content for
-the reasoning agent. Notes are evidence, never execution authority.
+One exact canonical origin owns `<root>/sites/<host>-<origin-hash>/`. Tenant, sharing scope, environment and optional application identity select a namespace under `namespaces/`. Explicit bindings override origin/local-user defaults. Queries, fragments, credentials and caller titles never form the canonical site identity.
 
-Uncertain optional knowledge operations are inspected against retained hashes.
-Proven outcomes become completed/not-executed; unknowable operations are quarantined
-without success credit or replay. Damaged active rows are retained transactionally
-before removal from the active namespace. Materially different safe knowledge
-writes can then proceed. Recovery tools do not depend on operation-learning flags.
+`current.md` contains concise active hints and one recommended verified method per destination. `methods.md` labels `recommended_verified` and `previous_verified`, preferring locally measured shorter duration, then fewer steps where timing is unavailable. Full history stays in SQLite. Derived files are readback-verified views; `view_unavailable` is reported independently if a view fails after the ledger commit.
 
-The local UI journals run events across launches, including failed, cancelled,
-blocked and recovered runs. A visibility choice is no longer offered. Real VDI
-drive mappings, permissions and authentication still require target-environment
-confirmation; synthetic tests do not establish those conditions.
+Look up saved knowledge before broad rediscovery. Exact duplicate fresh site saves return `unchanged` without another revision. Public static-map saves retain meaningful route/fingerprint/trust changes; equivalent repeated runs skip timestamp-only revisions. Renewal halfway through TTL is meaningful. Public lookup supports bounded offset/limit pagination.
+
+## Verified workflows and sanitized content
+
+`site_knowledge.save` accepts generic routes, locators, form labels, document areas, recovery and `navigation_methods`. Methods require current-session `source_call_ids`; local validation checks successful completed browser calls, executed plan steps and the confirmed final destination. Failed, partial, observation-only and uncertain calls cannot verify a method. Untrusted call labels are hashed before persistence. Claimed duration is replaced with measured local ledger timing. A faster verified method becomes recommended while previous methods remain labeled. See `guidance/website/memory.md` for the exact conditional example.
+
+The session grant replaces the extra save question while exact prepared-payload hashes, scope, evidence integrity, CAS, freshness and independent trust checks remain enforced. Knowledge never grants execution permission. A new process/session obtains a fresh grant.
+
+Preserve useful internal URLs, system paths, generic workflows and precise sanitized successful examples. Strip URL queries/fragments and template concrete record parameters. Never save credentials, tokens, cookies or identifiable customer/personal records as reusable knowledge. Structural checks reject common secret/record keys and obvious sensitive text; they supplement the model's sanitization duty and do not claim exhaustive PII classification. Skip empty, noisy or duplicate content.
+
+`knowledge.note` saves bounded immutable sanitized findings in the active site/namespace's `notes` folder. Pre-bind site notes use that site's `unbound/notes`; non-site operational notes retain `<root>/notes`. Equivalent content reuses its note despite changed titles/whitespace. Bytes are verified and ledger indexing is attempted. An index failure reports `indexed: false` while retaining the verified artifact. `knowledge.lookup` reads hash-verified notes, which are non-executable evidence.
+
+Raw crawler HTML/markdown/AX/network captures and requested business artifacts remain separately authorized task evidence. Saving them never labels them sanitized reusable navigation knowledge or authorizes automatic next-session intake.
+
+## Recovery and environment limits
+
+Uncertain knowledge operations are inspected against retained hashes. Proven outcomes become completed/not-executed; unknowable operations are quarantined without success credit or replay. Damaged active rows are transactionally retained before releasing their namespace. Materially different safe saves can then proceed.
+
+An explicit `app.py --local-knowledge-test-directory` run may select an empty direct child of `%LOCALAPPDATA%\\CopilotLocalAgent\\live-navigation-tests`. This reported test store never becomes a production fallback. Real VDI mappings, authenticated navigation, permissions and shared-drive persistence require fresh target evidence; offline tests do not establish those outcomes.
 <!-- END SOURCE: docs/KNOWLEDGE_PERSISTENCE.md -->
 
 
@@ -1332,14 +1336,12 @@ Production storage remains S:-anchored in VDI. This proof used only the explicit
 
 # Local website discovery and session package mode
 
-Start **Start Agent UI.cmd** (or **Start Agent.cmd**). Accept the single fast
-full-access session option to skip package quality review and individual plan
-approvals together. It permits ordinary file reads/edits and cross-website
-navigation for this session only. File deletion remains blocked; credentials,
-manual sign-in, OS permissions and valid executable contracts remain enforced.
-Closing or restarting the agent resets the grant.
+Start **Start Agent UI.cmd** (or **Start Agent.cmd**) and accept the scoped
+read-only discovery/session knowledge grant. Other effects retain concise
+approval. Closing or restarting resets the grant. REA is preferred for broad
+technical inspection; Crawl4AI remains specialized structured extraction.
 
-The startup guide then offers local Crawl4AI discovery:
+The optional `--discover-first` argument opens the startup Crawl4AI guide:
 
 1. Choose Yes and paste a website address.
 2. Give that website knowledge a title.
@@ -1355,8 +1357,11 @@ existing sign-in, opens its own tabs and closes only those tabs. It never launch
 a second crawler browser, copies cookies to files or automates sign-in. The
 normal public static `discovery.manifest` path remains available separately.
 
-Each collection lives in the authoritative **Discoveries knowledge/websites**
-folder, with the chosen title and a stable identifier. `index.json` records URLs,
+Each collection uses the canonical per-site **Discoveries knowledge/sites**
+folder and bound namespace. Multi-site campaign indexes live under **campaigns**;
+each page remains in its own site folder. Titles never create duplicate stores.
+Legacy **websites** collections remain readable. Raw captures are approved task
+evidence, not sanitized reusable knowledge. `index.json` records URLs,
 page file paths, depth, hashes, remaining routes, capture errors and status. Page
 JSON files contain rendered HTML, markdown, links and metadata. Saved HTML
 retains ordinary business field values and notes while omitting scripts, hidden
@@ -1371,9 +1376,8 @@ The agent receives collection titles and index paths in its startup contract.
 It can call `crawl4ai.read` on indexes and page files as needed, following
 `next_offset` to read every window without gaps. It can request more discovery
 through `crawl4ai.crawl`; the orchestrator supplies the connected browser,
-knowledge destination, session directory and Stop event. In immediate mode,
-startup session authorization also covers subsequent crawler requests. In normal
-mode the crawler asks for local authorization.
+knowledge destination, session directory and Stop event. The crawler retains local approval for raw task-evidence writes. Sanitized
+knowledge-tool saves use the automatic session grant.
 
 The crawl tool accepts multiple starting `urls`, a `title`, `concurrency`,
 `max_pages`, `max_depth`, `cycles`, `refresh_seconds`,
@@ -1396,11 +1400,571 @@ the agent later reads is returned to **Microsoft Copilot**, so “local crawling
 not mean the entire agent workflow is local-only. Use only websites/content you
 are authorized to collect and use with the organization's Copilot environment.
 
-For supplied terminal settings, `--yes-setup` accepts the same fast full-access
+For supplied terminal settings, `--yes-setup` accepts the same fast scoped discovery
 session grant and skips the guide. `--discover-first` shows the guide even with
 `--yes-setup`. The legacy `--package-mode` argument no longer adds a separate
 startup choice.
 <!-- END SOURCE: docs/LOCAL_WEBSITE_DISCOVERY.md -->
+
+
+---
+
+<!-- BEGIN VERBATIM SOURCE: docs/REA_IMPLEMENTATION_REPORT.md -->
+## Source: `docs/REA_IMPLEMENTATION_REPORT.md` (verbatim text; line endings normalized to LF)
+
+# REA implementation report
+
+Implementation baseline: `3a22557`. The interview agreement overrides conflicting requirements in the original implementation brief. No project files were removed. External REA dependencies remain in a separate research checkout.
+
+## Architecture implemented
+
+Copilot Chat plans structured calls; the existing orchestrator validates schemas, target/path authority and approvals, dispatches ToolRegistry, retains evidence/uncertainty and returns results. The orchestrator is the sole execution authority. Three passive/static REA CLI tools run fixed argument arrays with bounded managed lifecycle; no model API, raw MCP or second agent authority is exposed. Independent bounded reads run concurrently. Per-session scoped read-only discovery and sanitized knowledge writes are immediate; other effects keep approval. A single prefilled login click is permitted; denial/MFA pauses for the user.
+
+## Integration assessment
+
+See [the pre-change assessment](REA_INTEGRATION_ASSESSMENT.md). Actual REA source revision `d7651b6a0dde6cfe658144cc52794ae6aaf23306`, version6.5.0, MIT was inspected and built. The fixed one-shot CLI supplies passive owned-page inspection, offline HAR/SAZ analysis and static managed/Go/Rust/JavaScript analysis. The existing API integration is the API Anything-inspired public operation adapter (`operation.learn/list/call`), with Crawl4AI and specialized tools preserved. See the exact91-tool [inventory](RESEARCH_TOOL_INVENTORY.json).
+
+## Files changed
+
+- `Copilot handoff/full-discovery/01_PROJECT_BRIEFING.md`: Refreshed source/documentation/interface handoff and hashes.
+- `Copilot handoff/full-discovery/02_CODE_AND_GRAPH_INDEX.md`: Refreshed source/documentation/interface handoff and hashes.
+- `Copilot handoff/full-discovery/03_PROJECT_DOCUMENTATION.md`: Refreshed source/documentation/interface handoff and hashes.
+- `Copilot handoff/full-discovery/04_GUIDANCE_AND_CONFIGURATION.md`: Refreshed source/documentation/interface handoff and hashes.
+- `Copilot handoff/full-discovery/05_HANDOFF_MANIFEST.json`: Refreshed source/documentation/interface handoff and hashes.
+- `Copilot handoff/full-discovery/README.md`: Refreshed source/documentation/interface handoff and hashes.
+- `README.md`: Describe REA, current session policy, knowledge and setup recovery.
+- `agent_ui/tests/test_launch_ui.py`: Regression coverage for the changed behavior.
+- `agent_ui/web/app.js`: Display and recognize the current scoped startup/approval grant.
+- `agent_ui/web/index.html`: Display and recognize the current scoped startup/approval grant.
+- `bootstrap/README.md`: Document installer candidates, mapping recovery and diagnostics.
+- `bootstrap/setup_dependencies.py`: Preserve/expand verified installation scratch and S/UNC fallbacks.
+- `config.example.json`: Document optional bounded REA configuration.
+- `copilot_agent/app.py`: Start/renew scoped sessions and avoid the default pre-discovery question.
+- `copilot_agent/approvals.py`: Keep effects exact-approved and change option4 to scoped discovery.
+- `copilot_agent/browser_auth.py`: One prefilled login-button click with owned target and no secret extraction.
+- `copilot_agent/config.py`: Validate REA dependency/resource configuration.
+- `copilot_agent/discovery_knowledge.py`: Session saves, semantic no-op and readable public-map views.
+- `copilot_agent/discovery_store.py`: Retain authoritative site knowledge revisions.
+- `copilot_agent/knowledge_notes.py`: Sanitize/deduplicate canonical site notes.
+- `copilot_agent/knowledge_views.py`: Canonical site/namespace folders and derived concise method views.
+- `copilot_agent/local_crawler.py`: Centralize per-site raw task evidence while retaining legacy reads.
+- `copilot_agent/orchestrator.py`: Scoped target/session authority, knowledge/login grants, parallel reads and recovery.
+- `copilot_agent/prompts.py`: Precise current routing, knowledge paths, auth rules and compact initialization.
+- `copilot_agent/rea.py`: Bounded actual CLI adapter, immutable local staging and redacted evidence.
+- `copilot_agent/reconciliation.py`: Use the same approved-origin policy during navigation recovery.
+- `copilot_agent/research_routing.py`: Deterministic selection, complementary/fallback recommendations and evidence reuse.
+- `copilot_agent/session_mode.py`: Ephemeral scoped grant and exact separately approved origins.
+- `copilot_agent/site_discovery.py`: Reuse canonical browser campaign evidence folders.
+- `copilot_agent/site_knowledge.py`: Session grants, verified navigation methods, history and concise retrieval.
+- `copilot_agent/state.py`: Retain/gate uncertain REA process or cleanup state.
+- `copilot_agent/tools.py`: Register and dispatch typed REA/routing/login capabilities and normalize failures.
+- `docs/BUSINESS_DATA_WORK.md`: Architecture, operation, exact tool contracts, validation or acceptance documentation.
+- `docs/DISCOVERY_NAVIGATION.md`: Architecture, operation, exact tool contracts, validation or acceptance documentation.
+- `docs/DOM_AND_VISUAL_NAVIGATION.md`: Architecture, operation, exact tool contracts, validation or acceptance documentation.
+- `docs/KNOWLEDGE_PERSISTENCE.md`: Architecture, operation, exact tool contracts, validation or acceptance documentation.
+- `docs/LOCAL_WEBSITE_DISCOVERY.md`: Architecture, operation, exact tool contracts, validation or acceptance documentation.
+- `docs/REA_IMPLEMENTATION_REPORT.md`: Architecture, operation, exact tool contracts, validation or acceptance documentation.
+- `docs/REA_INTEGRATION.md`: Architecture, operation, exact tool contracts, validation or acceptance documentation.
+- `docs/REA_INTEGRATION_ASSESSMENT.md`: Architecture, operation, exact tool contracts, validation or acceptance documentation.
+- `docs/RESEARCH_TOOL_INVENTORY.json`: Architecture, operation, exact tool contracts, validation or acceptance documentation.
+- `docs/SUPERVISED_SESSIONS.md`: Architecture, operation, exact tool contracts, validation or acceptance documentation.
+- `guidance/01-copilot-orchestrator-contract.md`: Align trusted runtime guidance with scoped sessions and centralized knowledge.
+- `guidance/03-tools-and-selection.md`: Align trusted runtime guidance with scoped sessions and centralized knowledge.
+- `guidance/06-session-memory-context.md`: Align trusted runtime guidance with scoped sessions and centralized knowledge.
+- `guidance/07-errors-recovery-retries.md`: Align trusted runtime guidance with scoped sessions and centralized knowledge.
+- `guidance/website/customers.md`: Align trusted runtime guidance with scoped sessions and centralized knowledge.
+- `guidance/website/memory.md`: Align trusted runtime guidance with scoped sessions and centralized knowledge.
+- `guidance/website/privacy.md`: Align trusted runtime guidance with scoped sessions and centralized knowledge.
+- `tests/test_app_sessions.py`: Regression coverage for the changed behavior.
+- `tests/test_browser_auth.py`: Regression coverage for the changed behavior.
+- `tests/test_centralized_knowledge.py`: Regression coverage for the changed behavior.
+- `tests/test_local_crawler.py`: Regression coverage for the changed behavior.
+- `tests/test_orchestrator.py`: Verify compact initialization preserves the exact eight preloaded contract attachments.
+- `tests/test_permissive_mode.py`: Regression coverage for the changed behavior.
+- `tests/test_protocol_state.py`: Verify compact startup and full first-task automation guidance separately.
+- `tests/test_rea.py`: Regression coverage for the changed behavior.
+- `tests/test_rea_registry.py`: Regression coverage for the changed behavior.
+- `tests/test_research_routing.py`: Regression coverage for the changed behavior.
+- `tests/test_scoped_research_session.py`: Regression coverage for the changed behavior.
+- `tests/test_setup_dependencies.py`: Regression coverage for the changed behavior.
+- `tests/test_site_discovery.py`: Regression coverage for the changed behavior.
+- `tests/test_supervised_session.py`: Regression coverage for the changed behavior.
+- `tools/refresh_research_inventory.py`: Regenerate the exact catalogue without machine state.
+
+## REA operations exposed
+
+| Registered name | Input/targets | Approval | Bounds/results |
+| --- | --- | --- | --- |
+| `rea.inspect_page` | optional owned `tab_id`, `observation_ms`0..3000 | read-only within existing target grant |45s default,1MiB output; redacted structural/network Evidence projection |
+| `rea.analyze_capture` | approved `path`, `format`har/saz | read-only within approved roots/exact file grant |20MiB input,45s,1MiB output; offline metadata/source findings, no replay |
+| `rea.analyze_artifact` | approved `path`, `kind`managed/go/rust/javascript | read-only within approved roots/exact file grant |20MiB total input,2,000 directory entries,45s,1MiB output; static findings/locations/unknowns |
+
+Three REA calls may run concurrently by default. Each result carries execution/target identity, timestamps, status, provenance, input hashes, limitations/uncertainty and retained sanitized evidence references. Completed is distinct from partial, failed, unavailable, cancelled, timeout, output-limit and uncertain. Preflight rejections contain a typed not-started result. General native decompilation providers are not exposed. JavaScript semantic recovery can remain partial. Exact schemas are in the inventory. `research.route` performs local selection without executing a target; `browser.login_once` enforces the agreed single prefilled click.
+
+## Research routing rules
+
+Healthy REA is preferred for supported broad investigation. Known public APIs use the API Anything-inspired `operation.list/call` adapter when enabled. Structured extraction uses Crawl4AI. Navigation, screenshots, focused DOM/script and file observations retain specialized tools. Fresh hash-verified evidence can be reused; local input identity is rechecked and later browser effects invalidate snapshots. Actual failed/partial results produce alternative recommendations with their original attempt reference. Denial and uncertainty block fallback. Complementary evidence keeps separate provenance; execution stops when the objective is satisfied.
+
+## Security controls
+
+All execution uses existing target/path/owned-tab policies and strict tool schemas. Copilot cannot supply executables, shell commands, environments or raw REA/MCP arguments. The adapter derives its loopback CDP endpoint and target locally, never exports credentials/cookies, redacts payload values before saving or returning findings, and checks source identity. Windows requires fixed local NTFS; verified temporary snapshots allow S/UNC inputs while original coordinates remain provenance and durable evidence stays in the existing store. Only owned scratch is cleaned after confirmed termination; uncertainty blocks replay and other operations. Shared concurrency, Stop, deadline, output and input limits are enforced. The S-backed ledger remains authoritative; readable per-site files and prior labeled methods are derived views. Sanitized knowledge excludes secrets/identifiable records and skips noise/duplicates. Raw crawler/browser capture is separately approved task evidence.
+
+## Configuration added
+
+`rea_enabled=true`; `rea_repository=''` and `rea_node_executable=''` select trusted discovery; `rea_timeout_seconds=45`(1..180); `rea_max_output_bytes=1048576`(16KiB..8MiB); `rea_max_input_bytes=20971520`(1KiB..100MiB); `rea_max_parallel=3`(1..8). Health verifies the package/build/runtime path and matching Windows native addon identity. Missing/disabled REA remains explicitly unavailable and does not crash startup or disable other tools. Grants are ephemeral and are renewed for new sessions. Actual S/UNC knowledge paths are sent in the runtime instructions.
+
+## Validation performed
+
+- Project Python `-m compileall -q copilot_agent bootstrap agent_ui tests tools`: passed.
+- `git diff --check`: passed after trimming two documentation EOF blank lines.
+- All91 registered input/output JSON schemas checked with Draft202012Validator: passed.
+- Example configuration validated with an explicit offline mapping fixture: passed. Default Config.load could not establish S here; this is an expected environment limitation, not live installation proof.
+- Changed-file machine-path/unfinished-code scan: no findings.
+- REA sibling source: `npm ci`, `npm run build:cached`, matching-version native restoration and `npm run verify:windows-native:artifact`: passed. No external runtime/binaries are vendored.
+- `tools/refresh_research_inventory.py`: generated91 exact tool contracts without machine state.
+
+## Test results
+
+Commands use `.venv/Scripts/python.exe` unless specified. Counts overlap; they are not summed as unique tests.
+
+| Command/suite | Outcome |
+| --- | --- |
+| `-B -m unittest tests.test_setup_dependencies tests.test_launcher tests.test_setup_resources` |60passed; initial global Python attempt failed on missing Pillow, corrected by using project environment |
+| `-m unittest tests.test_centralized_knowledge tests.test_site_knowledge tests.test_discovery_knowledge tests.test_crawl4ai_discovery -q` |55passed; additional earlier knowledge/repair regressions passed |
+| `-B -m unittest tests.test_centralized_knowledge tests.test_local_crawler tests.test_site_discovery tests.test_rea_registry tests.test_research_routing tests.test_scoped_research_session tests.test_permissive_mode tests.test_supervised_session -q` |83run, no failures, one explicitly gated actual REA test skipped in this invocation |
+| `COPILOT_REA_INTEGRATION=1; -B -m unittest tests.test_rea tests.test_rea_registry tests.test_browser_auth tests.test_research_routing -q` |68passed, no skips; actual synthetic HAR/JS/owned Edge and registry dispatch included |
+| `-B -m unittest agent_ui.tests.test_launch_ui agent_ui.tests.test_runtime agent_ui.tests.test_workspace tests.test_web_operations tests.test_web_navigation tests.test_browser_inspection tests.test_crawl4ai_discovery -q` |77passed, including actual offline browser/UI fixtures |
+| `-B -m unittest tests.test_scoped_research_session tests.test_permissive_mode tests.test_supervised_session` |27passed including revocation/file-write/auth dispatch |
+| `-B -m unittest tests.test_orchestrator tests.test_protocol_state tests.test_tools tests.test_app_startup_flow tests.test_reconciliation -q` |Initial165run: one recovery failure, two platform/environment skips. Fresh explicit recovery target authority was fixed and the failed test rerun passed |
+| `-B -m unittest tests.test_reconciliation.RecoveryOrchestrationTests.test_approved_recovery_continues_to_sanitized_site_knowledge_save -q` |1passed after repair |
+| `-B -m unittest tests.test_app_sessions -q` |Initially exposed ninth overflow attachment; compact initialization repaired it. All6passed with unavailable S mapping represented by an offline fixture |
+| Two focused Orchestrator independent-read/effectful-order tests |2passed |
+| Final per-module orchestrator/protocol/tools/startup/reconciliation/session runs |171 tests across final module results:169 passed,2 existing environment skips. Protocol36 rerun passed after checking task guidance in the first task instead of compact initialization. S-mapping absence was an explicit offline fixture except in the tools mapping-contract suite |
+
+A new route-test fixture initially selected a nonexistent external path; corrected to an existing outside-root fixture and all14routing tests passed. A reused knowledge grant survived revocation in an early regression; callback cleanup was fixed and the27-test scoped suite passed. An initial size reduction still exceeded the legacy16000-character composer budget; initialization now sends the established eight contract attachments without an added overflow document. No failure was treated as passed.
+
+## Unresolved limitations
+
+- Live VDI, mapped S/UNC installation/writes and production authenticated Copilot/site behavior cannot be exercised here; this was explicitly accepted for S setup. Synthetic and local real CLI/browser proofs do not establish these outcomes.
+- Matching REA/Node and Windows native controls must be installed on deployment machines as documented; the external runtime is not committed or silently fetched at startup.
+- JavaScript reconstruction can retain real semantic unknowns and is reported partial. Native provider-dependent decompilation is outside this adapter.
+- Secret/record checks supplement structured schemas and the sanitized-knowledge contract; they are not a complete classifier for arbitrary personal prose. Some fixture suites emitted SQLite ResourceWarning messages without test failure.
+- The entire repository-wide unittest discovery and production manual acceptance matrix were not run. Relevant focused/existing suites and actual local synthetic integration were run as listed.
+
+## Exact manual acceptance checks
+
+
+Use synthetic targets and the project's `.venv` Python. These checks require an
+actual agent session; offline tests do not prove production Copilot/VDI/S: state.
+
+1. Build/install the matching REA runtime. Start the agent and inspect the three
+   REA catalogue entries: availability must be true and their limits bounded.
+2. Name an approved synthetic site and request `research.route` with website /
+   investigate. Open its owned tab and run `rea.inspect_page`; confirm REA-first
+   selection, completed source evidence and preserved browser ownership.
+3. Enable `operation_reuse`, list a synthetic site's retained approved operations,
+   and use `operation.call` to verify an endpoint found during REA inspection.
+4. Request crawl objective and run approved `crawl4ai.crawl`; confirm structured
+   coverage complements REA and saved evidence can be read with `crawl4ai.read`.
+5. Request screenshot objective; confirm `browser.screenshot` remains preferred
+   and returns its labeled PDF plus capture evidence.
+6. Request an ordinary file write/target mutation, deny approval and confirm it
+   does not execute. Confirm a useful sanitized knowledge save has no extra prompt.
+7. Add command/env/endpoint/raw-argument fields to a REA request; confirm rejection
+   before process launch. Check invalid enum/timeout/size values too.
+8. Request a path outside configured/exact session roots or an unrelated origin;
+   confirm scope rejection. Approve one exact `files.grant_path` and confirm only
+   that location becomes readable by static analysis.
+9. Temporarily configure a nonexistent REA repository; confirm unavailable
+   diagnostics and continued browser/API/crawler operation, then restore it.
+10. Run the timeout/cancel fixtures in `tests.test_rea`; verify confirmed cleanup
+    gives timeout/cancelled and simulated termination failure gives uncertainty
+    that blocks replay and fallback.
+11. Analyze a synthetic HAR containing an authorization header, cookie, query
+    token and payload identifier. Inspect both returned and retained evidence:
+    credential and payload values must be absent.
+12. Inspect retained REA evidence paths/hashes, the knowledge ledger revision,
+    canonical site folder and resolved S:/UNC paths. Read back the saved knowledge.
+13. Combine two distinct relevant evidence sources; confirm each provenance and
+    gaps remain visible and no duplicate note/revision is created for no new fact.
+14. Supply a failed REA call ID to `research.route`; confirm a safe alternative and
+    original attempt reference. Repeat with denial/uncertainty and confirm blocked.
+15. Set `rea_enabled=false`; restart and confirm unavailable REA entries alongside
+    working API, Crawl4AI and specialized browser tools.
+<!-- END SOURCE: docs/REA_IMPLEMENTATION_REPORT.md -->
+
+
+---
+
+<!-- BEGIN VERBATIM SOURCE: docs/REA_INTEGRATION.md -->
+## Source: `docs/REA_INTEGRATION.md` (verbatim text; line endings normalized to LF)
+
+# REA research and fast scoped discovery
+
+Copilot Chat plans; the existing local orchestrator validates and authorizes
+ToolRegistry calls. REA is a one-shot CLI adapter, never another reasoning agent,
+raw MCP catalogue, or execution authority. No model API is introduced.
+
+## Install the inspected runtime
+
+The adapter was inspected against `morluto/rea` revision
+`d7651b6a0dde6cfe658144cc52794ae6aaf23306`, package `rea-agents` 6.5.0.
+REA uses the MIT license. This integration does not vendor its source or binary;
+retain the upstream copyright/permission notice when redistributing REA.
+
+Install Node in one of REA's declared ranges: `^22.19.0`, `^24.11.0`, or `>=26`.
+From the project's parent directory:
+
+```powershell
+git clone https://github.com/morluto/rea.git "Copilot Local Agent Research/rea"
+git -C "Copilot Local Agent Research/rea" checkout d7651b6a0dde6cfe658144cc52794ae6aaf23306
+Push-Location "Copilot Local Agent Research/rea"
+npm ci
+npm run build:cached
+```
+
+Windows source checkouts omit the native controls from Git. Follow the inspected
+upstream `native/windows/README.md` matching-version recovery:
+
+```powershell
+npm pack rea-agents@6.5.0 --ignore-scripts
+New-Item -ItemType Directory -Force .setup-cache/rea-native | Out-Null
+tar -xzf rea-agents-6.5.0.tgz -C .setup-cache/rea-native package/native/windows/build/manifest.json package/native/windows/build/rea-windows-x64.node
+New-Item -ItemType Directory -Force native/windows/build | Out-Null
+Copy-Item .setup-cache/rea-native/package/native/windows/build/manifest.json native/windows/build/
+Copy-Item .setup-cache/rea-native/package/native/windows/build/rea-windows-x64.node native/windows/build/
+npm run verify:windows-native:artifact
+Pop-Location
+```
+
+The compatible sibling checkout is discovered by project-relative convention.
+Alternatively set an absolute trusted `rea_repository` and native Node executable
+in administrator configuration. Copilot cannot choose these paths or command
+arguments. Optional missing/disabled dependencies produce an unavailable tool
+and leave the rest of the stack working; startup never installs REA implicitly.
+
+## Typed capabilities and limits
+
+| Tool | Input | Behavior |
+| --- | --- | --- |
+| `rea.inspect_page` | optional `tab_id`, `observation_ms` 0–3000 | Passive inspection of an already owned, approved browser page. The adapter obtains the target ID and loopback CDP endpoint. No navigation, login, page text, storage values or script bodies. |
+| `rea.analyze_capture` | approved `path`, `format`: `har` or `saz` | Offline capture metadata/source analysis. Never replays requests; removes headers, payload values and query parameters. |
+| `rea.analyze_artifact` | approved `path`, `kind`: `managed`, `go`, `rust`, `javascript` | Static assembly/binary/JavaScript application analysis. Never executes the target. JavaScript may use a directory/ASAR; admitted directories have a 2,000-entry and total-byte bound. |
+| `research.route` | approved `target`, `target_type`, `objective`, optional `prior_call_id` and `refresh` | Deterministic local selection and evidence/fallback advice; performs no investigation or authorization itself. |
+
+The three REA tools are read-only with respect to the target and require existing
+target/path authority. Default execution is 45 seconds, 1 MiB output, 20 MiB input,
+and three concurrent REA processes. JavaScript helper limits include 256 MiB heap
+and 10,000 semantic nodes; the parent heap is 384 MiB. Time/output limits and
+Stop terminate owned work; uncertain termination/cleanup blocks subsequent
+execution. Results distinguish completed, partial, failed, unavailable, timeout,
+cancelled, output-limit and uncertain outcomes. Unsupported native-provider
+decompilation is not exposed.
+
+Windows native workflows require fixed local NTFS. The adapter snapshots approved
+inputs from S:/UNC into verified LocalAppData or temporary scratch, enforces
+member paths/size/hash identity, and removes only its owned scratch after confirmed
+termination. Original paths/hashes remain provenance; durable evidence stays in
+the existing session store. If local scratch is unavailable, report the limitation
+and use a relevant existing tool. Uncertain cleanup retains the exact scratch
+location for diagnosis and never reports success.
+
+## Routing and combined research
+
+User requests with explicit URLs receive deterministic routing hints. Copilot can
+request `research.route` for an exact target/objective and receives the preferred
+capability, prerequisites, complementary tools, alternatives and reasons.
+
+- General supported investigation prefers healthy REA.
+- Known API questions prefer the **API Anything-inspired public operation
+  adapter**, `operation.list`/`operation.call` in `web_operations.py`. This opt-in
+  adapter uses retained verified public GET operations; enable `operation_reuse`
+  with `persistent_graph` to use it. `operation.learn` retains its exact approval.
+- Structured extraction/crawling prefers `crawl4ai.crawl`; `crawl4ai.read`
+  retrieves saved task evidence.
+- Navigation, screenshots, focused DOM/script queries and file metadata use
+  their specialized registered tools. Discovery manifests remain public-static
+  evidence collection; browser campaigns remain separately approved navigation.
+- Combine REA, API observations, crawling and browser artifacts only when each
+  contributes distinct evidence. Independent bounded reads run concurrently;
+  same-tab dependent work and target mutations remain ordered.
+- An actual prior failed/partial call can select an existing alternative while
+  preserving the original attempt. Denial and uncertain effects block fallback.
+  Hash-verified recent evidence can be reused; local input identity is rechecked.
+  Refresh and later browser effects prevent inappropriate snapshot reuse.
+
+No route invokes every tool or silently turns a failed inspection into success.
+Each contributing result keeps its own provenance. See
+`RESEARCH_TOOL_INVENTORY.json` for exact current registered schemas and families.
+
+## Session, evidence and knowledge
+
+The initial session confirmation enables scoped read-only discovery and automatic
+useful sanitized knowledge saves. Other file writes, transactions, code and new
+unrelated/private/local target scopes retain concise approval. Grants expire on
+close/restart/resume and can be revoked. `browser.login_once` permits one visible
+prefilled login-button click per approved origin; it never reads/types/exports
+credentials and stops for denial, failed verification or MFA.
+
+REA uses fixed argument vectors, no shell/raw MCP forwarding, a restricted child
+environment and bounded output. Redaction occurs before persistence and Copilot
+exposure. Its session JSON is a redacted projection of upstream Evidence, with
+execution ID, original input identity, timestamps, status, confidence/unknowns,
+source locations, artifact references and retained evidence hash. It is not a raw
+re-importable REA bundle. Absence of evidence remains distinct from evidence of
+absence; partial JavaScript recovery remains partial.
+
+The authoritative S:-backed ledger holds evidence/revisions. Canonical site
+folders and namespace files provide concise readable knowledge. Explicit
+app/tenant/environment binds override defaults. Save new verified workflows,
+precise sanitized URLs/paths and successful examples; skip empty/noisy/duplicate
+notes, label prior methods, and prefer a faster method only with local proof.
+Credentials/tokens/cookies and identifiable records never belong in automatic
+knowledge. Raw Crawl4AI/browser captures are separately approved task evidence.
+Copilot receives the actual resolved S: and UNC knowledge root paths.
+
+## Configuration and troubleshooting
+
+`config.example.json` documents `rea_enabled` (true), `rea_repository` and
+`rea_node_executable` (empty means discovered), `rea_timeout_seconds` (45, 1–180),
+`rea_max_output_bytes` (1 MiB, 16 KiB–8 MiB), `rea_max_input_bytes` (20 MiB,
+1 KiB–100 MiB), and `rea_max_parallel` (3, 1–8). Invalid settings are rejected.
+Disabling REA marks its catalogue entries unavailable without changing other
+tool registration. Health verifies the package/build/Node path and matching
+Windows addon version/hash; the upstream runtime validates Node compatibility.
+
+For missing runtime, follow the installation above. For scope denial, obtain the
+target/path grant instead of changing tool or forwarding raw arguments. For
+partial evidence, inspect limitations and combine a relevant tool. For uncertain
+process state, verify owned-process termination/cleanup before continuing. For
+knowledge errors, inspect S:/UNC identity/write/readback diagnostics; no C: fallback
+is invented. Setup scratch fallbacks are separate and preserve existing installs.
+
+## Exact manual acceptance checks
+
+Use synthetic targets and the project's `.venv` Python. These checks require an
+actual agent session; offline tests do not prove production Copilot/VDI/S: state.
+
+1. Build/install the matching REA runtime. Start the agent and inspect the three
+   REA catalogue entries: availability must be true and their limits bounded.
+2. Name an approved synthetic site and request `research.route` with website /
+   investigate. Open its owned tab and run `rea.inspect_page`; confirm REA-first
+   selection, completed source evidence and preserved browser ownership.
+3. Enable `operation_reuse`, list a synthetic site's retained approved operations,
+   and use `operation.call` to verify an endpoint found during REA inspection.
+4. Request crawl objective and run approved `crawl4ai.crawl`; confirm structured
+   coverage complements REA and saved evidence can be read with `crawl4ai.read`.
+5. Request screenshot objective; confirm `browser.screenshot` remains preferred
+   and returns its labeled PDF plus capture evidence.
+6. Request an ordinary file write/target mutation, deny approval and confirm it
+   does not execute. Confirm a useful sanitized knowledge save has no extra prompt.
+7. Add command/env/endpoint/raw-argument fields to a REA request; confirm rejection
+   before process launch. Check invalid enum/timeout/size values too.
+8. Request a path outside configured/exact session roots or an unrelated origin;
+   confirm scope rejection. Approve one exact `files.grant_path` and confirm only
+   that location becomes readable by static analysis.
+9. Temporarily configure a nonexistent REA repository; confirm unavailable
+   diagnostics and continued browser/API/crawler operation, then restore it.
+10. Run the timeout/cancel fixtures in `tests.test_rea`; verify confirmed cleanup
+    gives timeout/cancelled and simulated termination failure gives uncertainty
+    that blocks replay and fallback.
+11. Analyze a synthetic HAR containing an authorization header, cookie, query
+    token and payload identifier. Inspect both returned and retained evidence:
+    credential and payload values must be absent.
+12. Inspect retained REA evidence paths/hashes, the knowledge ledger revision,
+    canonical site folder and resolved S:/UNC paths. Read back the saved knowledge.
+13. Combine two distinct relevant evidence sources; confirm each provenance and
+    gaps remain visible and no duplicate note/revision is created for no new fact.
+14. Supply a failed REA call ID to `research.route`; confirm a safe alternative and
+    original attempt reference. Repeat with denial/uncertainty and confirm blocked.
+15. Set `rea_enabled=false`; restart and confirm unavailable REA entries alongside
+    working API, Crawl4AI and specialized browser tools.
+<!-- END SOURCE: docs/REA_INTEGRATION.md -->
+
+
+---
+
+<!-- BEGIN VERBATIM SOURCE: docs/REA_INTEGRATION_ASSESSMENT.md -->
+## Source: `docs/REA_INTEGRATION_ASSESSMENT.md` (verbatim text; line endings normalized to LF)
+
+# REA integration assessment
+
+Assessment baseline: `3a22557`; inspected before implementation on 2026-10-15.
+The implementation follows the supplied REA brief with the subsequent interview
+agreement taking precedence where the two differ.
+
+## Existing architecture and research inventory
+
+The Python application uses visible Copilot Chat for reasoning. `Orchestrator`
+in `copilot_agent/orchestrator.py` validates the response envelope and tool
+arguments, prepares exact effects, obtains local approval where needed, invokes
+`ToolRegistry.execute`, records results and uncertainty, and returns evidence to
+Copilot. `copilot_agent/tools.py` owns registered schemas and dispatch.
+`approvals.py`, `policy.py`, `state.py`, `reconciliation.py`, and the managed
+process registry remain the execution and recovery boundaries.
+
+The actual API integration is the **API Anything-inspired public operation
+adapter**, implemented in `web_operations.py`: `operation.learn`,
+`operation.list`, and `operation.call`. It uses the existing pinned public HTTPS
+transport, retains verified GET specifications, and never exports browser
+credentials. The external API Anything project is not itself an unrestricted
+registered runner. Crawl4AI is implemented by `local_crawler.py` through
+`crawl4ai.crawl` and `crawl4ai.read`; discovery manifests also use its extractor.
+
+The existing catalogue supplies browser navigation, owned tabs, DOM/structure,
+JavaScript, screenshots/PDF, network observations, discovery campaigns, document
+inspection, file reads/hashes, knowledge, and recovery tools. The generated
+`RESEARCH_TOOL_INVENTORY.json` records their exact schemas, approval classes,
+implementation families, output contracts, limits, and complementary roles.
+Specialized API calls, structured crawling, retained fresh knowledge, exact
+screenshots, and narrow file observations remain preferred for their specific
+operations. Existing bounded parallel reads and package browser waves are reused.
+
+## Inspected REA source and selected interface
+
+REA was obtained as a separate sibling research checkout from
+`https://github.com/morluto/rea.git`, revision
+`d7651b6` (package version 6.5.0). Its MIT license permits this separate adapter;
+redistributed upstream code must retain its copyright and permission notice.
+No REA source is vendored. Node versions supported by its package include
+22.19+, 24.11+, and 26+ (within the upstream declared ranges). Optional native
+analysis providers have their own runtime/platform requirements.
+
+Select the one-shot CLI, using fixed argument arrays and deterministic JSON.
+Its passive owned-page inspection, offline HAR/SAZ inspection, and static
+managed/Go/Rust/JavaScript inspection provide a small useful boundary without
+starting REA's agent or raw MCP server. Page inspection uses the existing owned
+browser target and orchestrator-managed loopback CDP endpoint. Captures are
+analyzed offline; analysis targets are never executed. Deep native provider
+support is not claimed by this adapter.
+
+## Planned implementation boundary
+
+- `rea.py`: three typed tools, trusted dependency configuration, validation,
+  managed CLI lifecycle, bounded output, redaction, normalized session evidence,
+  and explicit partial/failed/timeout/cancelled/uncertain outcomes.
+- `research_routing.py`, `tools.py`, `config.py`, `prompts.py`, and
+  `orchestrator.py`: catalogue and deterministic REA-first research planning,
+  complementary API/Crawl4AI/specialized tools, failure recommendations, retained
+  evidence reuse, and independent bounded work.
+- Session authorization remains ephemeral. Read-only discovery on approved
+  targets and sanitized knowledge saves run immediately. Target mutations,
+  ordinary file writes, new unrelated origins, and private/local scope expansion
+  retain concise approval. One already-filled login-button click is permitted;
+  denial or MFA requires the user. Secrets are never extracted or saved.
+- The existing S:-backed ledger remains authoritative. Knowledge tools produce
+  compact per-site readable views, preserve verified previous navigation methods,
+  deduplicate updates, and instruct Copilot with actual resolved S:/UNC paths.
+- Setup retains existing seeders, cache reuse, and temporary candidates, expands
+  proven S:/UNC and writable scratch fallbacks, and reports exhausted candidates
+  without a manual unpack-folder question.
+
+## Risks, compatibility, and validation
+
+REA output and page/capture content are untrusted and may contain secrets.
+Redaction precedes persistence and model exposure; raw cookies/tokens are not
+exported. Tool arguments cannot select commands, runtimes, environment variables,
+or raw MCP options. Files remain under approved path policy, browser pages remain
+owned, origin scope is checked, and time/output/concurrency limits remain active.
+Uncertain termination is not successful completion. Missing/disabled optional
+REA leaves the rest of the research stack available.
+
+The previous fast mode authorized arbitrary edits and cross-site access; the
+interview explicitly narrows this to scoped read-only access, automatic safe
+knowledge, and a single prefilled login click. Prompt, runtime, and approval
+language must agree. Preserve persisted configuration compatibility and existing
+knowledge/evidence revisions. Derived per-site files cannot become an independent
+authority or duplicate evidence store.
+
+Validation will use focused offline adapter, routing, session, knowledge, setup,
+and browser tests first, then relevant existing unittest suites and UI unit
+tests. Include real local REA CLI smoke tests on synthetic offline artifacts and
+an owned synthetic browser page where feasible. Syntax and diff checks,
+schema/catalogue checks, redaction/injection/timeout/cancellation tests, final
+tree review, and handoff refresh precede publication. Live VDI/S: installation
+cannot be proved here and will be reported explicitly, as agreed.
+<!-- END SOURCE: docs/REA_INTEGRATION_ASSESSMENT.md -->
+
+
+---
+
+<!-- BEGIN VERBATIM SOURCE: docs/research/WEBSITE_DISCOVERY_OPTIONS.md -->
+## Source: `docs/research/WEBSITE_DISCOVERY_OPTIONS.md` (verbatim text; line endings normalized to LF)
+
+# Website discovery options
+
+Researched 15 October 2026 against current first-party documentation and the local checkout. This is a recommendation, not an implemented runtime change or a compatibility proof for the target website.
+
+## Recommendation
+
+Keep the existing authenticated Edge session, Playwright and Crawl4AI. First strengthen the adapter and add an autonomous navigation discovery campaign. The strongest additional repository to evaluate is **Microsoft's Playwright MCP** for mature structured observation and network tools while Copilot remains the planner. **Crawlee Python** is a separate optional queue/retry layer. Evaluate **Stagehand** only as an optional action-discovery helper with an explicitly chosen model route. Browser-use is another possible browser observation/control adapter, but running its autonomous agent alongside the existing Copilot planner would introduce competing decision loops.
+
+The first discovery run should require only a website and an authenticated browser, not a user-written list of workflows. It should learn the main navigation automatically, including menus, tabs, dropdowns, accordions, nested panels, frames, popups and scroll-revealed controls; infer central screens and route templates; then learn reusable workflows from that map. Optional user goals can guide later prioritization.
+
+## What the current implementation misses
+
+- [`ConnectedEdgeStrategy.crawl`](../../copilot_agent/local_crawler.py#L89) ignores crawler run options, creates a fresh page for each URL, captures HTML immediately after `domcontentloaded`, then closes the page. Passing upstream Crawl4AI session, JavaScript or settling options alone would therefore not enable those capabilities in this adapter.
+- The [current frontier](../../copilot_agent/local_crawler.py#L180) follows extracted links. It does not explore the states revealed by buttons, menus, tabs, panels or application history changes at the same URL.
+- [`_boundary`](../../copilot_agent/web_navigation.py#L398) waits at most three seconds for loading/blank states and immediately treats a detected server error as an intervention boundary. A temporary error followed by the intended destination can therefore be classified too early.
+- The [inspection collector](../../copilot_agent/browser_inspection.py#L35) traverses the main document and open shadow roots, lists frames, and reports resource timing. It does not recursively capture each frame or correlate an action with response statuses and API payload schemas. Browser-observed interfaces reveal the client/server contract, not the server implementation.
+
+## Ranked options for this Python/VDI stack
+
+| Priority | Option | Verified capabilities and integration implication |
+| --- | --- | --- |
+| 1 | Existing Playwright + Crawl4AI | Upstream Crawl4AI exposes CDP, persistent session IDs, JavaScript-only updates, CSS/JS waits, iframe extraction, shadow flattening, scrolling and recursive link crawling. Wire the required behavior through the authenticated adapter, with a nonmutating observation path where possible. A persistent page is needed for SPA state; HTML extraction alone cannot learn navigation semantics. [Crawl4AI configuration](https://docs.crawl4ai.com/api/parameters/) |
+| 2 | Microsoft Playwright MCP (`microsoft/playwright-mcp`) | Local tool server with structured accessibility snapshots, scoped targets, depth/boxes, screenshots, network request lists/details, JavaScript/Playwright control, and optional vision/PDF/DevTools capabilities. Supports `--cdp-endpoint`, `msedge` and Python code generation. Node.js 18+ adds a runtime/process and MCP bridge to the Python orchestrator; it does not require a second LLM. Apache-2.0 license. Bridge selected tools into the current tool contract, or reuse the relevant native Python Playwright APIs to avoid another process. This server alone does not learn the site's transition graph or establish readiness. [Official repository and tool catalogue](https://github.com/microsoft/playwright-mcp) |
+| 3 | Crawlee Python (`apify/crawlee-python`) | `BasicCrawler` manages queue processing, retries, concurrency, sessions and storage; Playwright integration has browser lifecycle extension points. This adds useful orchestration without requiring another reasoning model or hosted deployment. Reusing the exact existing Edge context requires a deliberate adapter/lifecycle contract, rather than allowing its browser pool to replace the signed-in session. [Crawlee extension contracts](https://crawlee.dev/python/docs/guides/extending-crawlee) |
+| 4 | Stagehand (`browserbase/stagehand`) | Current v4 has Python as well as TypeScript/Go. It can connect to existing Chromium over CDP; its runtime discovers or loads a bundled browser extension, which requires a shared filesystem. Company extension policy and the redirected S:/UNC installation must be tested. Treat `observe`/`act`/`extract` as optional primitives under the current orchestrator, with deterministic control for learned steps. [Stagehand browser configuration](https://docs.stagehand.dev/v4/configuration/browser) |
+| 5 | Browser-use (`browser-use/browser-use`) | The open-source browser configuration supports an existing `cdp_url`, profiles, vision highlights and optional cross-origin iframe support (off by default). It is Python, but replacing the current browser adapter or introducing its agent adds another browser state/lifecycle system. Evaluate observation/control narrowly before adopting the autonomous loop. [Browser-use browser parameters](https://docs.browser-use.com/open-source/customize/browser/all-parameters) |
+
+Stagehand's local browser does **not** give access to its hosted Model Gateway. AI primitives need a provider key or a custom client-side LLM callback. Its managed action cache requires a Browserbase browser and is unavailable for a local browser, so local deterministic replay must be stored and verified by this project. These are material differences from older Stagehand recommendations. [Model routing](https://docs.stagehand.dev/v4/configuration/models), [caching requirements](https://docs.stagehand.dev/v4/best-practices/caching).
+
+Browser-use documents usage telemetry that may include instructions, visited URLs, action traces, errors and results; it provides `ANONYMIZED_TELEMETRY=false` to opt out. Its documentation identifies the library as MIT licensed. Local installation alone does not establish local-only data handling. Review model routing, telemetry and recordings before using a new component for company data; other repository/dependency licenses were not audited here. [Browser-use telemetry](https://docs.browser-use.com/open-source/development/monitoring/telemetry).
+
+## Discovery campaign to build
+
+1. **Inventory before acting.** Capture an accessibility/DOM control map, landmark/navigation hierarchy, open-shadow paths, frame tree, visible and scrollable regions, route/history state, and a labeled multi-image evidence PDF. Take structural and visual observations concurrently against the same observation ID, then detect/repeat if the page changes between them. Track capture limits explicitly and request targeted detail instead of silently truncating navigation.
+2. **Explore navigation automatically.** Prioritize untried navigation controls and central hub screens, expand nested controls, discover popups/frames and virtualized content, and deduplicate equivalent screen states. Store state fingerprints using route, landmarks, selected tabs and panel identity, so ten different screens at one URL are not collapsed into one page. Keep one writer per browser page/session; parallelize observation or independently safe pages, not competing clicks in the same tab.
+3. **Observe transitions until an outcome is known.** One click starts a timeline of URLs, history changes, frame events, relevant response statuses, DOM landmarks and screenshots. Use bounded adaptive settling and expected-target conditions rather than a fixed sleep or network-idle alone. Distinguish `error -> target`, `error -> home`, persistent error and unresolved transition. Do not reclick while the first transition is still advancing. Only choose a retry after observing the outcome; a click returning without error is not success.
+4. **Persist an action/state/outcome graph.** For each edge save the control and frame/shadow locator chain, preconditions, expected destination, observed intermediate states, timing distribution, successful/failed attempts and linked evidence. Keep API endpoint/method/status/schema observations tied to the triggering action, without treating an observed endpoint as a stable supported API or a discovered credential as reusable tool input. Resume the campaign from saved coverage/frontier, not from the home page every time.
+5. **Generate tools from verified routes.** Convert successful sequences into small parameterized local Playwright functions, with semantic locators, fallback locators, readiness predicates and destination assertions. Replay from known starting states before publishing a tool; preserve confidence and last-verified metadata. A route that sometimes returns home needs an explicit recovery branch, not a blanket retry. Use supported APIs when their contract and authorization are established; browser traffic alone does not establish that.
+
+This should produce a useful first-pass navigation map automatically, followed by progressively stronger tools. Measure unique screen/navigation coverage, unresolved transitions, successful replay rate and time per learned route. Do not promise complete understanding of every website: role-specific screens, data-dependent routes, closed shadow roots, browser policy, expired authentication and server defects require target-specific evidence.
+
+## First-few-pass capture contract
+
+The requested output is **up to 20 attached files in one Copilot message**, not 20 messages. Treat this as an entire-message ceiling, including protocol and automatically added context files. The existing uploader permits 20 files, while `outbound_results.MAX_TOTAL_FILES` deliberately packs at most 19. Retain that spare slot. A discovery exporter must calculate its remaining slots after other attachments, rather than independently emitting 20 files.
+
+Expose one resumable local operation, provisionally `site.discover`, so the local process can collect a coherent result without a Copilot round trip for every small observation. Start network, navigation, console and script observation before opening or exploring the target. Reuse the authenticated website context, preserve a persistent page for application state, and keep the Copilot chat page separate.
+
+- **Pass 1: coordinated inventory.** Capture current HTML, structured DOM and accessibility controls, frame/shadow coverage, forms and selected/expanded states, scroll containers, visible image metadata and labeled screenshots. Record loaded script/style/resource URLs and obtain delivered source or resource bodies where the browser interface permits. Correlate network method/status/redirect and response-schema evidence with the same observation and action IDs. HTML, the DOM and the accessibility tree are complementary: none substitutes for all three. Browser-delivered JavaScript is not server-side source code.
+- **Pass 2: automatic reveal.** Expand the main navigation, tabs, menus and accordions; inspect frames and popups; scroll the page and nested panels; capture lazy-loaded and virtualized content incrementally. Store distinct application states even when their URL is unchanged. Select exploration actions using their observed purpose, with one writer per page and the session's applicable edit/delete controls.
+- **Pass 3 and later: close measured gaps.** Revisit missing frame captures, failed resource reads, newly loaded scripts, changing panels and unsettled transitions. Each collector returns an independent success/partial/failure record; one failed capture does not discard the other evidence. Persist the frontier and already captured content, deduplicate by content hash, and retry only missing or changed portions. These are adaptive passes, not a guarantee that every possible screen appears in three visits.
+
+Capture completeness must be explicit: expected/observed frame counts; resource capture status; DOM traversal limits; explored/unexplored controls; navigation outcomes; and remaining gaps. Set completion from this ledger, not merely from a successful tool exit. Never silently clip a long DOM, claim inaccessible source was captured, or report a temporary error page as the final destination without observing the rest of the transition. Playwright documents that modern pages continue loading after load events and that hydration can make early interactions ineffective. [Navigation and hydration](https://playwright.dev/python/docs/navigations), [network observation](https://playwright.dev/python/docs/network), [structured accessibility snapshots](https://playwright.dev/python/docs/aria-snapshots).
+
+## Evidence files for one message
+
+Build a small mandatory core and use remaining slots for useful detail. An illustrative bundle has 12 logical sections, which can be combined or split within the actual available attachment budget:
+
+1. `00-READ-FIRST.md`: site title, goals, confirmed navigation, important findings and the order to read the evidence.
+2. `01-COVERAGE-AND-MANIFEST.json`: observation IDs, capture status, gaps, file sections, byte counts, hashes and durable S:/UNC knowledge paths.
+3. `02-NAVIGATION-MAP.json`: screens, controls, locator chains, transitions, outcomes and replay confidence.
+4. `03-DOM-AND-CONTROLS.json`: indexed controls, semantic roles, attributes, state and relationships, with frame/shadow paths.
+5. `04-HTML.txt`: captured HTML grouped by observation/frame, with exact section references. Native HTML files may require the existing text-upload staging path.
+6. `05-ACCESSIBILITY.json`: structured accessibility snapshots grouped by observed state.
+7. `06-JAVASCRIPT.txt`: captured delivered source, deduplicated and indexed by URL/hash; explicitly list unavailable bodies.
+8. `07-NETWORK-AND-API.json`: action-correlated requests, response statuses, redirect chains and useful response schemas/content sections.
+9. `08-IMAGES-STYLES-RESOURCES.json`: image/CSS/resource inventory, dimensions, labels, source references and capture status.
+10. `09-VISUAL-EVIDENCE.pdf`: all captured screenshots in one file, clearly labeled with observation, action, frame, scroll/clip and page state; optionally include an indexed image-asset gallery.
+11. `10-TRANSITIONS-AND-ERRORS.json`: event timelines distinguishing error-to-target, error-to-home and persistent failures, with console evidence and retry results.
+12. `11-LEARNED-ROUTES.md`: verified navigation recipes, expected landmarks, fallback branches and candidates for generated local tools.
+
+Prefer fewer useful files to filling every slot. Write collector artifacts incrementally, serialize without another model call, and reuse immutable content instead of repeatedly copying full source. Keep the complete evidence under the existing authoritative shared knowledge directory, with the established mapped-drive/UNC fallbacks; this is not permission to introduce another durable local knowledge copy. Large JavaScript/resource sets can exceed a message's combined file-size budget even below 20 files. In that case, attach the core and the most useful indexed chunks, record exactly which artifacts were not transferred, and expose their durable paths for targeted follow-up. Do not use ZIP as a substitute for readable Copilot attachments. The agent should receive an organized reading guide and coverage report, not an unranked source dump.
+
+Finally, Playwright explicitly describes CDP attachment as lower fidelity than its own protocol and warns that externally launched browsers can lack required settings. Retaining Edge/CDP is appropriate for the existing signed-in company session, but each proposed feature still needs a small compatibility check in that actual VDI. A framework feature list cannot prove that it will fix the difficult site. [Playwright CDP limitations](https://playwright.dev/python/docs/api/class-browsertype#browser-type-connect-over-cdp).
+<!-- END SOURCE: docs/research/WEBSITE_DISCOVERY_OPTIONS.md -->
 
 
 ---
@@ -1576,48 +2140,74 @@ Atomic approval previews and other retained JSON records use extended Windows fi
 
 ---
 
+<!-- BEGIN VERBATIM SOURCE: docs/SITE_DISCOVERY.md -->
+## Source: `docs/SITE_DISCOVERY.md` (verbatim text; line endings normalized to LF)
+
+# Coordinated website discovery
+
+After `browser.open` and any manual sign-in, request:
+
+```json
+{"name":"browser.discover","arguments":{"title":"Website navigation","max_states":12,"max_seconds":90,"explore":true,"resume":true}}
+```
+
+Use this as an ordinary tool request in the existing response envelope. The current session authorization applies. No additional crawler service, Node runtime, external model or browser is installed.
+
+The campaign captures each frame's sanitized HTML, structured DOM (including accessible open-shadow observations), accessibility snapshot, inline scripts, delivered JavaScript/CSS sources, image metadata, action-correlated response evidence and console-independent navigation timelines. Script/style retrieval is bounded to 24 URLs per frame and 1 MiB per body; unavailable/CORS/size-limited sources remain explicit. Existing DOM collectors report their 2,000-control limit. Backend implementation and inaccessible browser content are not inferred as captured source.
+
+Screenshots begin alongside structural reads. Sampled page scrolling preserves additional DOM observations and labeled pictures; all campaign pictures are compiled into one PDF. Main navigation links/buttons, tabs, expanded controls and summaries are explored locally. Destructive, submit and sign-out candidates are excluded. Nested panel scrolling and custom precise shots remain available through `browser.inspect`/`browser.screenshot`; this campaign does not exhaust every possible application state.
+
+The transition observer waits through temporary server-error pages and records URL/error sequences. Stable content is an observation, not proof of reaching a requested business destination. The action graph links the next captured state to the triggering control. Failed clicks are observed before another attempt; a final action without a later observation remains uncertain. These records are candidates for later verified automation, not automatically trusted generated tools.
+
+Checkpoints, source sections, file hashes and the PDF use the authoritative shared Discoveries website directory and existing S:/UNC resolution. A title and website origin identify a resumable campaign, including when its current route changes. `resume:false` starts fresh observations under that identity. Stop/time/state budgets retain completed checkpoints. A running frame collector may finish its bounded timeout before Stop is observed.
+
+Copilot receives a reading guide, coverage, page evidence, network/source evidence and one PDF. Large JSON sections are split into valid indexed JSON envelopes whose `content` fields reconstruct the section in part order. Existing pending files and images count against a conservative 18-file discovery transport budget, reserving result-envelope/UI space. Oversized or excess files remain in shared storage and are explicitly listed as not attached; the tool result contains the manifest. PDF delivery permits the existing 20 MiB uploader limit; other evidence files target 8 MiB or less.
+
+Validation: real local Chromium tests cover frame/source/DOM capture, navigation, shared artifacts, one PDF, resume, transient-error observation, schema registration and attachment budget calculation. Actual signed-in company Edge, S:/UNC and the difficult production site still require live verification. Installing Playwright MCP, a full breadth-first application-state frontier, exhaustive nested-panel exploration and automatic replay-verified tool generation are further extensions, not implemented by this first campaign.
+<!-- END SOURCE: docs/SITE_DISCOVERY.md -->
+
+
+---
+
 <!-- BEGIN VERBATIM SOURCE: docs/SUPERVISED_SESSIONS.md -->
 ## Source: `docs/SUPERVISED_SESSIONS.md` (verbatim text; line endings normalized to LF)
 
-# Fast full-access sessions
+# Fast scoped discovery sessions
 
-Normal startup asks one question: start a fast full-access session, skipping
-package quality review and individual plan approvals? Accepting grants both for
-this session. There is no second package-mode question. `--yes-setup` accepts
-this same startup grant; the legacy `--package-mode` argument no longer adds a
-separate startup decision. Isolated proof mode retains its own approvals.
+Normal startup asks once for the current investigation/session. `--yes-setup`
+accepts this same grant. It is in memory and is never restored from persisted
+state; restart and resume obtain a new confirmation. Revocation removes target
+and automatic knowledge authority.
 
-The grant covers valid current plans, revisions, packages, generated local Python,
-attachment transfers, downloads and consequential plans. Ordinary accessible file
-reads and edits can cross configured directory roots without another grant.
-Website navigation, internal HTTP/non-default ports and owned popups are allowed
-without an origin allowlist or task/customer tag restriction. Knowledge namespaces
-can be inferred automatically. Shared runtime and durable discovery storage still
-use Discoveries knowledge and its S:/UNC fallbacks.
+The grant runs read-only discovery immediately on explicit public HTTPS targets
+named by the user and their approved domain/subdomain scope. Private/local
+resources, unrelated origins and custom HTTP/port origins need explicit scope
+approval. All requests still use ToolRegistry and the existing orchestrator.
+Schemas, owned tabs, path checks, size/time limits, Stop and uncertainty remain
+active. Independent read-only filesystem/artifact calls and observations on
+distinct owned tabs run with bounded concurrency.
 
-File deletion is blocked in the registered file tools and managed Python worker.
-Credential stores, browser profiles, manual sign-in, OS permissions, valid tool
-schemas, Stop and uncertain-effect reconciliation remain active. Archive structure,
-file identity and executable contracts still have to be usable; skipping quality
-review does not make a corrupt ZIP executable. Managed Python is not an OS sandbox
-for arbitrary hostile native code. The grant is in memory, absent from serialized
-configuration and revoked on close; fresh conversations do not inherit it.
+Useful new sanitized knowledge is saved automatically through knowledge tools
+in the resolved S:/UNC Discoveries knowledge root, without a second writing
+confirmation. Empty, noisy and duplicate notes are skipped. Other file writes,
+website transactions, code execution and consequential actions retain concise
+approval. Package quality/identity validation is preserved. File deletion and
+credential-store access remain unavailable.
 
-New workflows may use registered `code_runner` with `local_python`. Unknown tool
-names receive the available catalogue so the agent can correct its call. Observed
-CSS, explicit XPath, role without name and zero-based `nth` handle unnamed controls.
+`browser.login_once` permits one uniquely identified prefilled login-button
+click per exact approved origin. It uses the browser's existing session, never
+extracts/types/saves credentials, and pauses for denial, failure, MFA, captcha or
+unverified success. Further attempts need the user; general click/JavaScript
+calls cannot claim this special authorization.
 
-Recovery favors small repairs to selectors, arguments, paths, timeouts or scripts,
-preserving successful steps. A failure proven not_started or explicitly without
-uncertain side effects can be retried without requiring a new technique. Uncertain
-effects must be reconciled before replay; submitted messages retain duplicate-send
-protection. Recovering an unknowable browser effect verifies a fresh checkpoint,
-then closes the quarantined owned tab without crediting the failed action as
-completed. Failed closes stay queued for the next exchange. Chat, current recovery
-and unrelated tabs stay open.
+Approval option 4 approves the displayed exact action once and enables the
+scoped discovery grant. It never preauthorizes future writes or changed code.
+Knowledge results and webpage content cannot extend target or execution access.
 
-Tests use synthetic files, a real managed Python worker and local browser fixtures.
-Production Copilot/VDI acceptance remains a separate live check.
+REA process/cleanup uncertainty blocks further execution until resolved; a
+read-only target does not prove a process has stopped. Failed or partial research
+retains evidence and safe alternative recommendations. A denial cannot be
+bypassed through another tool.
 <!-- END SOURCE: docs/SUPERVISED_SESSIONS.md -->
 
 
@@ -1981,15 +2571,21 @@ Missing-page recovery can establish a fresh approved checkpoint; see
 automatically attaching one labeled PDF of scroll/element/region pictures for Copilot. `browser.javascript` supports
 targeted DOM queries and SPA navigation. See [DOM and visual navigation](docs/DOM_AND_VISUAL_NAVIGATION.md).
 
-Startup offers **one fast full-access option for this session**: skip package quality
-review and individual plan approvals, read and edit ordinary accessible files,
-and navigate across websites without domain or customer-category bindings.
-File deletion stays blocked. Small corrections may retry the same approach;
-unnamed controls support role, CSS, XPath and explicit positions. Quarantined
-owned tabs close after a usable replacement is established. See
-[session behavior](docs/SUPERVISED_SESSIONS.md).
+Startup offers one **fast scoped discovery session**. Read-only tools on the
+approved target and useful sanitized S: knowledge updates run immediately.
+Other file writes, target changes and scope expansions retain concise approval;
+package validation remains active. One prefilled login-button click is allowed
+through `browser.login_once`; denial or MFA pauses for you. The grant expires
+when the session ends. See [session behavior](docs/SUPERVISED_SESSIONS.md).
 
-The local Crawl4AI guide lets you sign in manually, title each website's knowledge,
+[REA integration](docs/REA_INTEGRATION.md) makes REA the preferred broad technical
+inspection capability through three typed ToolRegistry tools. Deterministic
+`research.route` retains the API Anything-inspired public operation adapter,
+Crawl4AI and specialized browser/file tools. Independent bounded reads run in
+parallel. [Centralized knowledge](docs/KNOWLEDGE_PERSISTENCE.md) reuses concise
+per-site views while the S:-backed ledger retains evidence and revisions.
+
+The optional `--discover-first` Crawl4AI guide lets you sign in, title each website campaign,
 explore once or keep refreshing, then pass saved shared-storage paths to the
 agent. See [local discovery](docs/LOCAL_WEBSITE_DISCOVERY.md) and
 [business data work](docs/BUSINESS_DATA_WORK.md). Crawl4AI is directly callable
@@ -2005,7 +2601,7 @@ sectioned JSON attachments before sending. The chat message stays below the
 editor limit; ordinary batches use one file, with at most 19 total attachments.
 See [large result transport](docs/LARGE_TOOL_RESULTS.md).
 
-Public exploration now defaults to [Crawl4AI](https://github.com/unclecode/crawl4ai)
+Structured public exploration remains available through [Crawl4AI](https://github.com/unclecode/crawl4ai)
 through `discovery.manifest`: continuous bounded parallel expansion, up to 1,000
 pages, and reuse of saved unexplored routes. Update dependencies with `Setup.cmd`.
 Read all saved routes through paginated `discovery.knowledge_lookup` in the shared
@@ -2035,9 +2631,10 @@ and bytecode writes, then checks package compatibility and the exploration tools
 Before unpacking, it tests an actual nested wheel-file write/read. Missing or
 unusable temporary folders are followed by other S:/UNC project folders and
 available Windows temporary folders; a failed unpack retries the remaining
-packages. If every automatic option fails, Setup asks for **a folder where you
-can save files**, accepts a quoted full folder address, and tries it before
-stopping. Package scratch files are separate from the shared agent knowledge.
+packages. Proven PSDrive/CIM/SMB mappings add S:/UNC aliases and short scratch
+locations after established candidates. If every automatic option fails, Setup
+reports sanitized attempted paths and failure categories with a
+`COPILOT_SETUP_TEMP` recovery instruction, without a folder-choice question. Package scratch files are separate from the shared agent knowledge.
 
 Put the repository on the shared **S:** drive alongside the organisation's Python installation. Double-click **Setup.cmd**, choose **1: Automatic detection** or **2: Paste a path**, and select Python. You may paste the quoted full `python.exe` path or its installation folder. Setup creates or reuses the project's `.venv` and installs the pinned packages from `requirements.lock.txt`; then use **Start Agent.cmd**. On S:, the base Python and virtual environment remain shared on S:. No browser download is needed. See [SHARED_VDI.md](docs/SHARED_VDI.md).
 

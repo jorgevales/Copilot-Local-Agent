@@ -507,6 +507,9 @@ class StateAndPromptTests(unittest.TestCase):
         self.assertIn('files.grant_path', description)
         self.assertIn('Package Python source is shown in full with its SHA-256', description)
         self.assertIn('fresh one-run approval', description)
+        self.assertIn('Detailed task strategies follow', message['execution_strategy']['planning'])
+        text, _ = builder.build('user_turn', 'Inspect a synthetic automation package.', 'automation-task-request')
+        message = json.loads(text)
         strategy = message['execution_strategy']['automation_packages']
         self.assertIn('can cover declared registered tools', strategy)
         self.assertIn('session grants cannot authorize executable package code', strategy)

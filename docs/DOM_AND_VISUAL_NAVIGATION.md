@@ -15,10 +15,10 @@ and cookies are not captured by the paired inspection.
 
 Use `browser.javascript` with an explicit expression/function and optional JSON
 `argument` for focused DOM/shadow queries, application state or SPA navigation.
-The current session grant supplies approval. A returned JavaScript value does
+This potentially effectful tool requires its normal concise approval. A returned JavaScript value does
 not prove the user outcome: verify the resulting state with another paired
 inspection. Exceptions/timeouts retain uncertain-effect status and actual error
-details; inspect/reconcile before replay. Login remains manual.
+details; inspect/reconcile before replay. Use browser.login_once for one prefilled login click; denial or MFA requires the user.
 
 Call `browser.screenshot` (or pass the same capture options to `browser.inspect`)
 for a complete batch in one tool call. By default it samples up to three distinct

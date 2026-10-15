@@ -1,5 +1,6 @@
 """Installer path/reuse regressions; simulated VDI error, actual offline pip proof."""
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -7,6 +8,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 import zipfile
 
 
@@ -61,10 +63,10 @@ class DependencySetupTests(unittest.TestCase):
             self.assertIn('--no-deps',calls[1][0])
             self.assertIn('--no-compile',calls[1][0])
 
-    def test_final_fallback_question_is_plain_and_successful(self):
+    def test_missing_environment_folder_is_created_without_prompt(self):
         with tempfile.TemporaryDirectory() as root:
             chosen=Path(root)/'chosen folder'
-            questions,installed=[],{}
+            installed={}
             def probe(path):
                 if path!=chosen:
                     raise FileNotFoundError('No usable folder')
@@ -74,13 +76,11 @@ class DependencySetupTests(unittest.TestCase):
                     installed.update(jsonschema='4.26.0',lxml='6.1.3')
                     self.assertEqual(str(chosen),env['TEMP'])
                 return SimpleNamespace(returncode=0,output='')
-            def ask(question):
-                questions.append(question)
-                return '"'+str(chosen)+'"'
             self.helper.install(self.fixture(root),Path(root),versions=lambda:dict(installed),
-                run=runner,health=lambda:None,probe_folder=probe,ask=ask,environ={})
-            self.assertEqual(1,len(questions))
-            self.assertIn('folder where you can save files',questions[0])
+                run=runner,health=lambda:None,probe_folder=probe,
+                ask=lambda _:self.fail('Automatic setup must never ask for a folder'),
+                environ={'TEMP':str(chosen)})
+            self.assertTrue(chosen.is_dir())
 
     def test_mirror_failure_does_not_reinstall_in_every_folder(self):
         with tempfile.TemporaryDirectory() as root:
@@ -100,16 +100,136 @@ class DependencySetupTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.helper.folder(value)
 
-    def test_all_folder_failures_offer_final_choice_before_stopping(self):
+    def test_all_folder_failures_report_categories_and_paths_without_prompt(self):
         with tempfile.TemporaryDirectory() as root:
-            questions=[]
-            def denied(path): raise PermissionError('denied')
-            def ask(q): questions.append(q); return ''
-            with self.assertRaisesRegex(RuntimeError,'folder'):
+            def denied(path): raise PermissionError('secret raw OS text https://name:password@example.test/?token=secret')
+            with self.assertRaisesRegex(RuntimeError,'automatic unpacking folders') as raised:
                 self.helper.install(self.fixture(root),Path(root),versions=lambda:{},
                     run=lambda args,env:SimpleNamespace(returncode=0,output='') if 'install' not in args else self.fail('Unverified folder used'),health=lambda:None,
-                    probe_folder=denied,ask=ask,environ={})
-            self.assertEqual(1,len(questions))
+                    probe_folder=denied,ask=lambda _:self.fail('Must not ask for a folder'),environ={})
+            message=str(raised.exception)
+            self.assertIn('<PROJECT>',message)
+            self.assertIn('write/read probe: access denied',message)
+            self.assertIn('COPILOT_SETUP_TEMP',message)
+            self.assertNotIn('password',message)
+            self.assertNotIn('token',message)
+            self.assertNotIn('secret raw',message)
+
+    def test_misleading_space_error_tries_next_folder_and_keeps_partial_install(self):
+        with tempfile.TemporaryDirectory() as root:
+            installed,calls={},[]
+            def runner(args,env):
+                if 'install' in args:
+                    calls.append((args,env['TEMP']))
+                    if len(calls)==1:
+                        installed['lxml']='6.1.3'
+                        return SimpleNamespace(returncode=1,output='ERROR: [WinError 112] There is not enough space on the disk')
+                    installed['jsonschema']='4.26.0'
+                return SimpleNamespace(returncode=0,output='')
+            self.helper.install(self.fixture(root),Path(root),versions=lambda:dict(installed),
+                run=runner,health=lambda:None,environ={},ask=lambda _:self.fail('Wrong prompt'))
+            self.assertEqual(2,len(calls))
+            self.assertNotEqual(calls[0][1],calls[1][1])
+            self.assertNotIn('lxml==6.1.3',calls[1][0])
+
+    def test_invalid_cached_wheel_retries_uncached_in_another_folder(self):
+        with tempfile.TemporaryDirectory() as root:
+            installed,calls={},[]
+            def runner(args,env):
+                if 'install' in args:
+                    calls.append(args)
+                    if len(calls)==1:
+                        return SimpleNamespace(returncode=1,output='ERROR: invalid wheel in cache')
+                    installed.update(jsonschema='4.26.0',lxml='6.1.3')
+                return SimpleNamespace(returncode=0,output='')
+            self.helper.install(self.fixture(root),Path(root),versions=lambda:dict(installed),
+                run=runner,health=lambda:None,environ={},ask=lambda _:self.fail('Wrong prompt'))
+            self.assertIn('--cache-dir',calls[0])
+            self.assertIn('--no-cache-dir',calls[1])
+
+    def test_cache_location_failure_does_not_prevent_install(self):
+        with tempfile.TemporaryDirectory() as root:
+            installed={}
+            def runner(args,env):
+                if args==['-m','pip','cache','dir']:
+                    raise FileNotFoundError('redirected cache unavailable')
+                if 'install' in args:
+                    installed.update(jsonschema='4.26.0',lxml='6.1.3')
+                return SimpleNamespace(returncode=0,output='')
+            self.helper.install(self.fixture(root),Path(root),versions=lambda:dict(installed),
+                run=runner,health=lambda:None,environ={},ask=lambda _:self.fail('Wrong prompt'))
+
+    def test_provider_discovery_is_deferred_until_established_candidates_are_used(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(self.helper,'shared_root') as lookup:
+            locations=iter(self.helper.candidates(Path(root),{'TEMP':str(Path(root)/'new temp')}))
+            self.assertEqual(Path(root)/'new temp',next(locations))
+            self.assertEqual(Path(root)/'.setup-cache'/'temp',next(locations))
+            lookup.assert_not_called()
+
+    @unittest.skipUnless(os.name=='nt','Windows mapping-provider fallbacks')
+    def test_live_mapping_provider_output_adds_unc_alias_and_short_scratch(self):
+        share=Path(r'\\server\proven-share')
+        with patch.object(self.helper.os.path,'realpath',side_effect=OSError('mapping API unavailable')), \
+             patch.object(self.helper.subprocess,'run',return_value=SimpleNamespace(returncode=0,stdout=json.dumps(str(share)))) as provider:
+            locations=list(self.helper.candidates(Path('S:/workspace/agent'),{}))
+        self.assertIn(share/'workspace'/'agent'/'.setup-cache'/'temp',locations)
+        self.assertTrue(any(str(path).startswith('S:\\.copilot-setup\\') for path in locations))
+        self.assertTrue(any(str(path).startswith(str(share/'.copilot-setup')) for path in locations))
+        command=provider.call_args.args[0]
+        self.assertIn('-NonInteractive',command)
+        self.assertIn('Get-PSDrive',command[-1])
+        self.assertIn('Get-CimInstance',command[-1])
+        self.assertIn('Get-SmbMapping',command[-1])
+        self.assertEqual(5,provider.call_args.kwargs['timeout'])
+        self.assertNotIn('shell',provider.call_args.kwargs)
+
+    @unittest.skipUnless(os.name=='nt','Windows mapping-provider fallbacks')
+    def test_each_mapping_provider_fallback_executes_when_prior_providers_fail(self):
+        # Run the exact provider script with offline PowerShell fixture functions.
+        # No actual share, CIM service or SMB mapping is contacted.
+        with patch.object(self.helper.os.path,'realpath',side_effect=OSError('unavailable')), \
+             patch.object(self.helper.subprocess,'run',return_value=SimpleNamespace(returncode=0,stdout='')) as capture:
+            self.helper.shared_root(dict(os.environ))
+        command=capture.call_args.args[0]
+        providers=('Get-PSDrive','Get-CimInstance','Get-SmbMapping')
+        fields=('DisplayRoot','ProviderName','RemotePath')
+        for chosen,field in zip(providers,fields):
+            functions=[]
+            for name in providers:
+                body="[pscustomobject]@{"+field+"='\\\\server\\fixture-share'}" if name==chosen else "throw 'fixture unavailable'"
+                functions.append('function '+name+' { '+body+' }')
+            with self.subTest(provider=chosen):
+                result=subprocess.run(command[:-1]+['\n'.join(functions)+'\n'+command[-1]],
+                                      capture_output=True,text=True,timeout=10)
+                self.assertEqual(0,result.returncode,result.stderr)
+                self.assertEqual(r'\\server\fixture-share',json.loads(result.stdout))
+
+    @unittest.skipUnless(os.name=='nt','Windows mapping-provider fallbacks')
+    def test_unrelated_unc_project_is_never_aliased_to_s(self):
+        with patch.object(self.helper,'shared_root',return_value=Path(r'\\server\proven-share')):
+            locations=list(self.helper.candidates(Path(r'\\server\proven-share-other\agent'),{}))
+        self.assertNotIn(Path('S:/agent/.setup-cache/temp'),locations)
+
+    @unittest.skipUnless(os.name=='nt','Windows mapping-provider fallbacks')
+    def test_mapping_timeout_and_invalid_provider_output_keep_local_fallback(self):
+        with tempfile.TemporaryDirectory() as root:
+            for result in (subprocess.TimeoutExpired('powershell',5),
+                           SimpleNamespace(returncode=0,stdout=json.dumps('S:')),
+                           SimpleNamespace(returncode=0,stdout='invalid json')):
+                with self.subTest(result=result), \
+                     patch.object(self.helper.os.path,'realpath',side_effect=OSError('unavailable')), \
+                     patch.object(self.helper.subprocess,'run',**({'side_effect':result} if isinstance(result,Exception) else {'return_value':result})):
+                    locations=list(self.helper.candidates(Path(root),{'LOCALAPPDATA':root}))
+                self.assertTrue(any(path.parent==Path(root)/'Temp'/'CopilotLocalAgent' for path in locations))
+
+    def test_exhausted_installer_space_errors_are_reported_without_guessing_capacity(self):
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaisesRegex(RuntimeError,'space/quota reported') as raised:
+                self.helper.install(self.fixture(root),Path(root),versions=lambda:{},
+                    run=lambda args,env:SimpleNamespace(returncode=1,output='[WinError 112] not enough space') if 'install' in args else SimpleNamespace(returncode=0,output=''),
+                    probe_folder=lambda path:None,health=lambda:None,environ={},
+                    ask=lambda _:self.fail('Wrong prompt'))
+            self.assertIn('not a free-space verdict',str(raised.exception))
 
     def test_actual_pip_install_offline_with_broken_temp_spaces_and_repeat(self):
         repo=Path(__file__).resolve().parents[1]

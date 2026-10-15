@@ -1,8 +1,8 @@
-"""Consent-bound, per-device navigation memory; no customer observations.
+"""Session-authorized navigation memory; no credentials or customer records.
 
 This module is synchronous. The orchestrator alone injects approval context,
-``site_knowledge_reviewed`` and (for saves) ``site_knowledge_consent`` after its
-real local approval prompt. Tool arguments cannot supply these capabilities.
+``site_knowledge_reviewed`` and a session-bound knowledge grant, or an exact
+per-save grant for compatibility. Tool arguments cannot supply capabilities.
 Bindings live only in the current session's shared ``site_knowledge_bindings``
 dictionary. A resumed/new session must obtain a fresh local namespace grant.
 """
@@ -25,7 +25,7 @@ from .protocol import validate_schema
 SCHEMA_VERSION = 1
 MAX_BYTES = 131072
 MAX_ITEMS = 40
-CATEGORIES = ("routes", "locators", "forms", "document_areas", "recovery")
+CATEGORIES = ("routes", "locators", "forms", "document_areas", "recovery", "navigation_methods")
 EXCLUDED_DATA = [
     "Customer identities, names, identifiers, contact details and document content",
     "Concrete customer/account/case/document route parameters, URL queries and fragments",
@@ -76,12 +76,22 @@ RECOVERY = _object({"path": PATH,
                               "items": _enum(("reinspect_page", "wait_ready", "use_locator_fallback",
                                               "return_to_safe_route", "ask_user", "stop"))}})
 CATEGORY_SCHEMAS = dict(zip(CATEGORIES, (ROUTE, LOCATOR, FORM, DOCUMENT_AREA, RECOVERY)))
+METHOD_STEP = _object({'path': PATH, 'strategy': _enum(('navigate', 'role', 'label', 'test_id', 'css')),
+                       'value': LABEL, 'role': LOCATOR['properties']['role']}, ['path', 'strategy'])
+METHOD = _object({'path': PATH, 'purpose': _enum(PURPOSES), 'label': LABEL,
+                  'steps': {'type': 'array', 'minItems': 1, 'maxItems': 12, 'items': METHOD_STEP},
+                  'source_call_ids': {'type': 'array', 'minItems': 1, 'maxItems': 20,
+                                      'uniqueItems': True, 'items': _string(200)},
+                  'duration_ms': {'type': 'integer', 'minimum': 1, 'maximum': 3600000}},
+                 ['path', 'purpose', 'label', 'steps', 'source_call_ids'])
+CATEGORY_SCHEMAS['navigation_methods'] = METHOD
 KNOWLEDGE = {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "object"}, "minItems": 1, "maxItems": MAX_ITEMS}}
 ORIGIN = _string(280)
 SCOPE_LABEL = {"type": "string", "minLength": 1, "maxLength": 64,
                "pattern": r"^[a-z][a-z0-9-]{0,63}$"}
 BIND = _object({"origin": ORIGIN, "tenant": SCOPE_LABEL, "user_scope": SCOPE_LABEL,
-                "environment": _enum(("production", "test", "staging", "development"))})
+                "environment": _enum(("production", "test", "staging", "development")),
+                "application": SCOPE_LABEL}, ['origin', 'tenant', 'user_scope', 'environment'])
 SAVE = _object({"origin": ORIGIN,
                 "allow_partial": {"type": "boolean"},
                 "categories": {"type": "array", "items": _string(100), "minItems": 1,
@@ -95,7 +105,7 @@ KNOWLEDGE_SPECS = {
     "site_knowledge.bind": (BIND, "user_approval", "Select the current HTTPS site's exact tenant, user/sharing scope and environment through local approval. Scope labels are user-declared; never infer an authenticated identity. No website knowledge is saved."),
     "site_knowledge.retrieve": (_object({"origin": ORIGIN}), "read_only", "Retrieve unexpired approved navigation knowledge for the current locally selected site namespace; a namespace must first be bound by the user."),
     "site_knowledge.query": (QUERY, "read_only", "Filter approved fresh navigation knowledge by category and/or exact generic route template inside the selected namespace."),
-    "site_knowledge.save": (SAVE, "user_approval", "Review and merge sanitized navigation knowledge into this Windows user's site namespace. Valid discovered items can be saved when other items are rejected; the exact saved payload and exclusions are shown before approval."),
+    "site_knowledge.save": (SAVE, "user_approval", "Merge concise sanitized navigation knowledge under the session knowledge grant without another save prompt. Skip duplicates; source_call_ids for navigation_methods must reference completed successful local browser evidence. Ledger retains revisions and centralized per-site readable views."),
     "site_knowledge.invalidate": (_object({"origin": ORIGIN}), "user_approval", "After local approval, mark the selected namespace's knowledge unusable. It remains on disk as an invalidated record; never automatically re-use it."),
     "site_knowledge.export": (_object({"origin": ORIGIN}), "read_only", "Return a bounded structured summary of fresh knowledge for the approved namespace through the tool result; no arbitrary file export."),
 }
@@ -201,6 +211,24 @@ def _session(context):
     return _hash(str(Path(directory).absolute()))
 
 
+def knowledge_session_grant(context):
+    """Bind a locally issued in-memory grant to this session and approval hash."""
+    if not _digest(context.get('approval_hash')):
+        raise PolicyError('A local session approval hash is required')
+    return {'session': _session(context), 'approval_hash': context['approval_hash']}
+
+
+def session_knowledge_authorized(context):
+    from .policy import config_value
+    if (context.get('knowledge_session_authorized') is not True
+            or config_value(context.get('config', {}), '_knowledge_session_confirmed', False) is not True):
+        return False
+    try:
+        return context.get('knowledge_session_grant') == knowledge_session_grant(context)
+    except PolicyError:
+        return False
+
+
 def knowledge_directory(context):
     """Resolve the single durable knowledge root beside the S: project."""
     # This private context hook exists only for isolated unit fixtures. It is
@@ -250,26 +278,30 @@ def _scope(name, args, context):
     if origin != _current_origin(context):
         raise PolicyError("Website memory origin differs from the current owned tab")
     if name == "site_knowledge.bind":
-        return {"origin": origin, "tenant": args["tenant"], "user_scope": args["user_scope"],
-                "environment": args["environment"], "schema_version": SCHEMA_VERSION}
+        selected = {"origin": origin, "tenant": args["tenant"], "user_scope": args["user_scope"],
+                    "environment": args["environment"], "schema_version": SCHEMA_VERSION}
+        if 'application' in args:
+            selected['application'] = args['application']
+        return selected
     from .session_mode import fast_mode
-    if fast_mode(context.get('config', {})):
+    bindings = context.get("site_knowledge_bindings")
+    binding = bindings.get(origin) if type(bindings) is dict else None
+    if binding is None and (fast_mode(context.get('config', {})) or session_knowledge_authorized(context)):
         # Namespace organization is automatic, not a separate access grant.
         scope = {'origin': origin, 'tenant': 'signed-in-account',
                  'user_scope': 'local-' + _hash(getpass.getuser())[:24],
                  'environment': 'session', 'schema_version': SCHEMA_VERSION}
         return scope
-    bindings = context.get("site_knowledge_bindings")
-    binding = bindings.get(origin) if type(bindings) is dict else None
     if (type(binding) is not dict or binding.get("session") != _session(context)
             or not _digest(binding.get("approval_hash")) or not _digest(binding.get("review_sha256"))
             or type(binding.get("scope")) is not dict):
         raise PolicyError("The local user must bind this site's tenant, user scope and environment first")
     scope = binding["scope"]
     expected = {"origin", "tenant", "user_scope", "environment", "schema_version"}
-    if set(scope) != expected or scope.get("origin") != origin or scope.get("schema_version") != SCHEMA_VERSION:
+    if (not expected <= set(scope) <= expected | {'application'}
+            or scope.get("origin") != origin or scope.get("schema_version") != SCHEMA_VERSION):
         raise PolicyError("The website namespace binding is invalid; obtain a fresh local grant")
-    if validate_schema({key: scope[key] for key in BIND["properties"]}, BIND):
+    if validate_schema({key: scope[key] for key in BIND["properties"] if key in scope}, BIND):
         raise PolicyError("The website namespace binding is invalid; obtain a fresh local grant")
     return deepcopy(scope)
 
@@ -372,6 +404,9 @@ class KnowledgeWriteError(RuntimeError):
 def _sanitize_knowledge(args):
     """Validate bounded JSON structure; content approval belongs to the safety layer."""
     knowledge = args["knowledge"]
+    from .knowledge_views import reusable_value
+    if reusable_value(knowledge) != knowledge:
+        raise ValueError('Knowledge must use normalized sanitized URLs and nonempty content')
     categories = args["categories"]
     if type(knowledge) is not dict or set(categories) != set(knowledge):
         raise ValueError("Knowledge categories must match the approved payload")
@@ -403,6 +438,13 @@ def _sanitize_knowledge(args):
                 if category == 'recovery' and item['failure'] in {'auth_expired', 'access_denied', 'captcha'}:
                     if any(step not in {'ask_user', 'stop'} for step in item['steps']):
                         raise ValueError('Authentication and access recovery require user intervention')
+                if category == 'navigation_methods':
+                    for step in item['steps']:
+                        _safe_route(step['path'])
+                        if step['strategy'] != 'navigate':
+                            if 'value' not in step:
+                                raise ValueError('Locator method steps require a sanitized locator value')
+                            _safe_locator(step)
     try:
         encoded = _canonical(knowledge).encode("utf-8")
     except (ValueError, TypeError, RecursionError) as error:
@@ -422,11 +464,16 @@ def safe_proposal(args):
     for category, items in args['knowledge'].items():
         for index, item in enumerate(items):
             try:
-                candidate = deepcopy(item)
+                from .knowledge_views import reusable_value
+                candidate = reusable_value(deepcopy(item))
                 if category in CATEGORY_SCHEMAS:
                     for key in ('path', 'parent_path'):
                         if isinstance(candidate.get(key), str):
                             candidate[key] = _template_route(candidate[key], args['origin'])
+                    if category == 'navigation_methods':
+                        for step in candidate.get('steps', []):
+                            if isinstance(step.get('path'), str):
+                                step['path'] = _template_route(step['path'], args['origin'])
                 _sanitize_knowledge({'categories': [category], 'knowledge': {category: [candidate]}})
                 safe.setdefault(category, []).append(candidate)
             except ValueError as error:
@@ -456,6 +503,137 @@ def validate_knowledge(name, args, context, policy=None):
     knowledge_directory(context)
     if name == "site_knowledge.save":
         _sanitize_knowledge(args)
+
+
+def _verified_methods(incoming, context, scope):
+    """Bind method claims to successful local navigation and final URL evidence."""
+    methods = incoming.get('navigation_methods', [])
+    if not methods:
+        return incoming
+    state = context.get('session_state')
+    calls = getattr(state, 'data', {}).get('calls', {})
+    for method in methods:
+        observations = []
+        elapsed = 0
+        for identifier in method['source_call_ids']:
+            call = calls.get(identifier)
+            if (type(call) is not dict or call.get('status') != 'completed'
+                    or call.get('result', {}).get('ok') is not True
+                    or call.get('request', {}).get('name') not in {
+                        'browser.open', 'browser.plan', 'browser.click',
+                        'browser.tabs.open', 'browser.tabs'}):
+                raise ValueError('Verified methods require completed successful local navigation call IDs')
+            name = call['request']['name']
+            output = call['result'].get('result', {})
+            if (output.get('side_effects_uncertain') or output.get('error')
+                    or name == 'browser.plan' and output.get('status') != 'verified'
+                    or name == 'browser.tabs' and call['request'].get('arguments', {}).get('operation') != 'open'):
+                raise ValueError('A partial, failed or observation-only result cannot verify a navigation method')
+            observations.append(call)
+            try:
+                start = datetime.fromisoformat(call['started_at'].replace('Z', '+00:00'))
+                finish = datetime.fromisoformat(call['finished_at'].replace('Z', '+00:00'))
+                elapsed += max(0, int((finish - start).total_seconds() * 1000))
+            except (KeyError, TypeError, ValueError):
+                pass
+        def urls(value):
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    if key in {'url', 'final_url', 'target_url', 'current_url'} and isinstance(item, str):
+                        yield item
+                    elif isinstance(item, (list, dict)):
+                        yield from urls(item)
+            elif isinstance(value, list):
+                for item in value:
+                    yield from urls(item)
+        observed = set()
+        for call in observations:
+            output = call.get('result', {}).get('result', {})
+            destination = output.get('last_verified_state', {}) if call['request']['name'] == 'browser.plan' else output
+            for url in urls(destination):
+                try:
+                    observed.add(_template_route(url, scope['origin']))
+                except ValueError:
+                    pass
+        if method['path'] not in observed:
+            raise ValueError('Method destination must be confirmed by successful local navigation output')
+        requests = []
+        for call in observations:
+            args = call['request'].get('arguments', {})
+            if call['request']['name'] != 'browser.plan':
+                requests.append(args)
+                continue
+            results = call['result']['result'].get('results', [])
+            def executed_steps(items, prefix=''):
+                for item in items:
+                    path = prefix + item.get('id', '')
+                    if any(result.get('step_id') == path and result.get('verification') == 'passed'
+                           for result in results):
+                        # Branch/loop containers contain unexecuted alternatives;
+                        # only their individually verified child steps count.
+                        if item.get('op') not in {'branch', 'loop'}:
+                            yield item
+                    if item.get('op') == 'branch':
+                        for branch in ('then', 'else'):
+                            yield from executed_steps(item.get(branch, []), path + '/' + branch + '/')
+                    elif item.get('op') == 'loop':
+                        for index in range(min(100, item.get('max_iterations', 0))):
+                            yield from executed_steps(item.get('steps', []), path + '/' + str(index) + '/')
+            requests.extend(executed_steps(args.get('steps', [])))
+        encoded_requests = _canonical(requests)
+        # Intermediate plan destinations count for the steps, while only its
+        # final verified state can establish the method's stated destination.
+        steps_observed = set(observed)
+        for call in observations:
+            for url in urls(call['result'].get('result', {}).get('results', [])):
+                try:
+                    steps_observed.add(_template_route(url, scope['origin']))
+                except ValueError:
+                    pass
+        for step in method['steps']:
+            if step['strategy'] == 'navigate':
+                if step['path'] not in encoded_requests and step['path'] not in steps_observed:
+                    raise ValueError('Every navigation method step requires observed local evidence')
+            else:
+                def matches(request):
+                    locator = request.get('locator', {})
+                    if step['strategy'] == 'role':
+                        return locator.get('role') == step.get('role') and locator.get('name') == step['value']
+                    key = {'test_id': 'testid', 'label': 'label', 'css': 'css'}[step['strategy']]
+                    return locator.get(key) == step['value'] or key == 'css' and request.get('selector') == step['value']
+                if not any(matches(request) for request in requests):
+                    raise ValueError('Every method locator must match an executed successful local navigation step')
+        # Measured elapsed time comes from the local ledger, never a claimed
+        # model speedup. Hash untrusted call labels before durable persistence.
+        method.pop('duration_ms', None)
+        if elapsed:
+            method['duration_ms'] = min(elapsed, 3600000)
+        method['source_call_ids'] = [_hash(identifier) for identifier in method['source_call_ids']]
+    return incoming
+
+
+def _item_identity(category, item):
+    if category == 'navigation_methods':
+        from .knowledge_views import method_identity
+        return method_identity(item)
+    if category == 'recovery':
+        return item.get('path'), item.get('failure')
+    if category == 'locators':
+        return item.get('path'), item.get('strategy'), item.get('role'), item.get('value')
+    if category == 'forms':
+        return item.get('path'), item.get('purpose')
+    return (item.get('path'),) if item.get('path') is not None else (_hash(item),)
+
+
+def _semantic_knowledge(knowledge):
+    """Ignore method proof labels/timing when deciding whether intake changed."""
+    result = deepcopy(knowledge)
+    for method in result.get('navigation_methods', []):
+        method.pop('source_call_ids', None)
+        # A newly measured faster method is meaningful; ordinary repeated
+        # timings for an otherwise identical method are not new knowledge.
+        method.pop('duration_ms', None)
+    return {key: sorted(items, key=_canonical) for key, items in result.items()}
 
 
 
@@ -505,26 +683,21 @@ def prepare_knowledge(args, context, name=None):
                 paths = {'s_path': str(Path('S:/') / Path(relative)), 'unc_path': str(directory)}
     prepared.update(storage_path_s=paths['s_path'], storage_path_unc=paths['unc_path'])
     if name == "site_knowledge.save":
-        incoming = _sanitize_knowledge(args)
+        incoming = _verified_methods(_sanitize_knowledge(args), context, scope)
         existing = _retrieve(context, scope)
         prior = existing['knowledge'] if existing['status'] == 'fresh' else {}
         knowledge = {key: deepcopy(items) for key, items in prior.items()}
         for category, items in incoming.items():
             current = knowledge.setdefault(category, [])
             for item in items:
-                identity = ((item.get('path'), item.get('failure')) if category == 'recovery'
-                            else (item.get('path'), item.get('strategy'), item.get('role'), item.get('value')) if category == 'locators'
-                            else (item.get('path'), item.get('purpose')) if category == 'forms'
-                            else (item.get('path'),) if item.get('path') is not None else (_hash(item),))
-                current[:] = [old for old in current if
-                              (((old.get('path'), old.get('failure')) if category == 'recovery'
-                                else (old.get('path'), old.get('strategy'), old.get('role'), old.get('value')) if category == 'locators'
-                                else (old.get('path'), old.get('purpose')) if category == 'forms'
-                                else (old.get('path'),) if old.get('path') is not None else (_hash(old),)) != identity)]
+                identity = _item_identity(category, item)
+                current[:] = [old for old in current if _item_identity(category, old) != identity]
                 current.append(deepcopy(item))
         _sanitize_knowledge({'categories': list(knowledge), 'knowledge': knowledge})
+        unchanged = bool(prior) and _semantic_knowledge(prior) == _semantic_knowledge(knowledge)
         prepared.update(categories=sorted(knowledge), knowledge=knowledge, rejected_items=rejected,
-                        revision=existing.get('revision',0)+1,
+                        revision=existing.get('revision',0) + (0 if unchanged else 1),
+                        unchanged=unchanged,
                         prior_payload_sha256=_hash(prior) if prior else None,
                         payload_sha256=_hash(knowledge),
                         item_counts={key: len(knowledge[key]) for key in sorted(knowledge)},
@@ -544,7 +717,8 @@ def _approval(name, args, context):
             or type(context.get("site_knowledge_reviewed")) is not dict
             or context["site_knowledge_reviewed"] != prepared):
         raise PolicyError("A real local user grant must match the exact displayed website knowledge scope")
-    if name == "site_knowledge.save" and context.get("site_knowledge_consent") != prepared:
+    if (name == "site_knowledge.save" and context.get("site_knowledge_consent") != prepared
+            and not session_knowledge_authorized(context)):
         raise PolicyError("Explicit local save consent is required; an LLM consent flag is never authority")
     return prepared
 
@@ -681,9 +855,12 @@ def _read(context, scope):
 
 def _fingerprint(scope):
     # Namespace labels need not appear in stored documents or file names.
-    return {"origin": scope["origin"], "tenant_sha256": _hash(scope["tenant"]),
-            "user_scope_sha256": _hash(scope["user_scope"]),
-            "environment": scope["environment"], "schema_version": SCHEMA_VERSION}
+    value = {"origin": scope["origin"], "tenant_sha256": _hash(scope["tenant"]),
+             "user_scope_sha256": _hash(scope["user_scope"]),
+             "environment": scope["environment"], "schema_version": SCHEMA_VERSION}
+    if 'application' in scope:
+        value['application_sha256'] = _hash(scope['application'])
+    return value
 
 
 def _sources(scope, knowledge):
@@ -832,6 +1009,23 @@ def _retrieve(context, scope):
                 provenance=deepcopy(value["provenance"]))
 
 
+def _publish_view(context, scope, record):
+    """Report a failed derived view honestly without hiding a committed ledger."""
+    from .knowledge_views import publish_site_view
+    from .discovery_store import Store
+    store = None
+    try:
+        store = Store(context, persistent=True, readonly=True)
+        history = store.site_knowledge_history(_hash(scope))
+        return publish_site_view(context, scope, _hash(scope), record, history)
+    except Exception as error:
+        return {'status': 'view_unavailable', 'diagnostic': type(error).__name__,
+                'authoritative_store': 'discovery-v1/ledger.sqlite3'}
+    finally:
+        if store is not None:
+            store.close()
+
+
 def execute_knowledge(name, args, context, policy=None):
     """Execute synchronously; return the raw result for ToolRegistry's envelope."""
     validate_knowledge(name, args, context, policy)
@@ -851,6 +1045,13 @@ def execute_knowledge(name, args, context, policy=None):
                 "knowledge_saved": False, "binding_lifetime": "current local session only"}
     if name == "site_knowledge.save":
         prepared = _approval(name, args, context)
+        if prepared['unchanged']:
+            previous = _read(context, scope)
+            return {'status': 'unchanged', 'namespace_id': _hash(scope),
+                    'revision': previous['revision'], 'payload_sha256': previous['payload_sha256'],
+                    'locally_verified': True, 'item_counts': prepared['item_counts'],
+                    'readable_view': _publish_view(context, scope, previous),
+                    'reason': 'No new reusable knowledge; duplicate revision skipped'}
         knowledge = deepcopy(prepared['knowledge'])
         now = _now(context)
         value = {"schema_version": SCHEMA_VERSION, "namespace_id": _hash(scope), 'revision':prepared['revision'],
@@ -867,7 +1068,8 @@ def execute_knowledge(name, args, context, policy=None):
         return {"status": "saved", "namespace_id": _hash(scope), "categories": prepared["categories"],
                 'revision':prepared['revision'],'rejected_items':prepared['rejected_items'],
                 "item_counts": prepared["item_counts"], "expires_at": value["expires_at"],
-                "payload_sha256": value["payload_sha256"], "locally_verified": True}
+                "payload_sha256": value["payload_sha256"], "locally_verified": True,
+                "readable_view": _publish_view(context, scope, value)}
     if name == "site_knowledge.invalidate":
         _approval(name, args, context)
         value = _read(context, scope)
@@ -876,10 +1078,17 @@ def execute_knowledge(name, args, context, policy=None):
         value["invalidated_at"] = _timestamp(_now(context))
         _verified_write(context, scope, value)
         return {"status": "invalidated", "namespace_id": _hash(scope),
-                "invalidated_at": value["invalidated_at"], "retained_locally": True}
+                "invalidated_at": value["invalidated_at"], "retained_locally": True,
+                "readable_view": _publish_view(context, scope, value)}
     result = _retrieve(context, scope)
     if result["status"] != "fresh":
         return result
+    if result['knowledge'].get('navigation_methods'):
+        from .knowledge_views import recommended_methods
+        methods = result['knowledge']['navigation_methods']
+        preferred = recommended_methods(methods)
+        result['knowledge']['navigation_methods'] = preferred
+        result['previous_methods_retained'] = len(methods) - len(preferred)
     if name == "site_knowledge.query":
         category = args.get("category")
         route = args.get("route")

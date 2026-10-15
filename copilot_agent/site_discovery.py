@@ -16,6 +16,7 @@ from .persistence import io_path, write_json
 from .screenshot_evidence import _pdf, MASK, METRICS
 from .policy import PolicyError
 from .web_navigation import get_navigation_page, _install_origin_guard
+from .knowledge_views import evidence_folder, website_storage_root
 
 SPEC = ({'type': 'object', 'properties': {
     'title': {'type': 'string', 'minLength': 1, 'maxLength': 120},
@@ -76,12 +77,12 @@ async def discover(args, context):
     page = get_navigation_page(context, args.get('tab_id'))
     await _install_origin_guard(page, context, page.url)
     start_url = page.url
-    parsed = urlsplit(start_url)
-    key = hashlib.sha256((args['title'] + parsed.scheme + '://' + parsed.netloc).encode()).hexdigest()[:16]
-    folder = knowledge_root(context['config']) / ('discovery-' + key)
+    folder = evidence_folder(context, start_url, 'browser',
+                             root=website_storage_root(knowledge_root(context['config'])))
     io_path(folder).mkdir(parents=True, exist_ok=True)
     checkpoint = folder / 'checkpoint.json'
-    data = {'states': [], 'actions': [], 'network': [], 'gaps': [], 'attempted': []}
+    data = {'states': [], 'actions': [], 'network': [], 'gaps': [], 'attempted': [],
+            'evidence_kind': 'raw_task_evidence_not_reusable_knowledge'}
     if args.get('resume', True) and io_path(checkpoint).exists():
         data = json.loads(io_path(checkpoint).read_text(encoding='utf-8'))
     data.setdefault('frontier', [])
@@ -265,7 +266,7 @@ async def discover(args, context):
                                       'reading': 'Concatenate content fields in part order to reconstruct section JSON.'})
                     files.append(path)
         guide = folder / '00-READ-FIRST.md'
-        io_path(guide).write_text('# '+args['title']+'\n\nRead coverage first, then page evidence (HTML, DOM, accessibility, scripts/images), then network sources.\n\nKnowledge checkpoint: '+str(checkpoint)+'\nNavigation actions are observations, not replay-verified automation tools.\n', encoding='utf-8')
+        io_path(guide).write_text('# '+args['title']+'\n\nRead coverage first, then scoped task evidence (HTML, DOM, accessibility, scripts/images), then network sources. These captures are not sanitized reusable knowledge.\n\nTask evidence checkpoint: '+str(checkpoint)+'\nNavigation actions are observations, not replay-verified automation tools.\n', encoding='utf-8')
         files.insert(0, guide)
         attachments = context.setdefault('pending_file_attachments', [])
         reserved_images = len(context.get('pending_image_attachments', []))
@@ -294,6 +295,7 @@ async def discover(args, context):
         write_json(checkpoint, data)
         uncertain = bool(data['actions'] and 'to_state' not in data['actions'][-1])
         return {'status': 'uncertain' if uncertain else 'partial', 'knowledge_directory': str(folder), 'checkpoint': str(checkpoint),
+                'evidence_kind': 'raw_task_evidence_not_reusable_knowledge',
                 'states_captured': len(data['states']), 'actions': len(data['actions']), 'files': manifest,
                 'visual': visual, 'gaps': data['gaps'], 'side_effects_uncertain': uncertain,
                 'next_action': 'Read attached evidence and coverage. Resume browser.discover for untried controls; independently replay routes before generating tools.'}

@@ -12,23 +12,30 @@ from copilot_agent.config import Config
 from copilot_agent.local_navigation import SessionFileAccessPolicy
 from copilot_agent.policy import PathPolicy, PolicyError
 from copilot_agent.reconciliation import close_quarantined_tabs
-from copilot_agent.session_mode import configure_session, fast_mode, website_policy
+from copilot_agent.session_mode import configure_session, discovery_mode, fast_mode, website_policy
 from copilot_agent.site_knowledge import _scope
 from copilot_agent.tools import ToolRegistry
 from copilot_agent.web_navigation import _same_origin, get_navigation_page
 
 
 class PermissiveModeTests(unittest.IsolatedAsyncioTestCase):
-    def test_single_ephemeral_choice_enables_all_execution_and_skips_review(self):
+    def test_single_ephemeral_choice_enables_scoped_discovery_and_keeps_package_review(self):
         config = Config()
         configure_session(config, True)
-        self.assertTrue(fast_mode(config))
-        self.assertTrue(config._supervised_session)
-        self.assertTrue(config._continuous_package_session)
-        self.assertFalse(config._package_review_enabled)
+        self.assertTrue(discovery_mode(config))
+        self.assertFalse(fast_mode(config))
+        self.assertTrue(config._knowledge_session_confirmed)
+        self.assertTrue(config._local_navigation_confirmed)
+        self.assertFalse(config._supervised_session)
+        self.assertFalse(config._continuous_package_session)
+        self.assertTrue(config._package_review_enabled)
         self.assertNotIn('_permissive_session', config.as_dict())
+        self.assertNotIn('_discovery_session', config.as_dict())
         configure_session(config, False)
         self.assertFalse(fast_mode(config))
+        self.assertFalse(discovery_mode(config))
+        self.assertFalse(config._knowledge_session_confirmed)
+        self.assertFalse(config._local_navigation_confirmed)
         self.assertTrue(config._package_review_enabled)
 
     def test_navigation_is_not_bound_to_a_website_or_https_default_port(self):

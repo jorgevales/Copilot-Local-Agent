@@ -61,6 +61,13 @@ class Config:
     knowledge_reuse: bool = True
     targeted_repair: bool = False
     operation_reuse: bool = False
+    rea_enabled: bool = True
+    rea_repository: str = ''
+    rea_node_executable: str = ''
+    rea_timeout_seconds: int = 45
+    rea_max_output_bytes: int = 1048576
+    rea_max_input_bytes: int = 20971520
+    rea_max_parallel: int = 3
     max_attachment_bytes: int = 20 * 1024 * 1024
     download_timeout: float = 90
     max_download_bytes: int = 20 * 1024 * 1024
@@ -149,7 +156,7 @@ class Config:
             raise ValueError('debug_port must be an integer from 1024 to 65535')
         for key in ('visible', 'attach_existing', 'created_sync_enabled', 'manifest_path', 'customer_data_work',
                     'persistent_graph', 'bounded_parallelism', 'local_recovery',
-                    'knowledge_write', 'knowledge_reuse', 'targeted_repair', 'operation_reuse'):
+                    'knowledge_write', 'knowledge_reuse', 'targeted_repair', 'operation_reuse', 'rea_enabled'):
             if type(getattr(self, key)) is not bool:
                 raise ValueError(key + ' must be boolean')
         if self.targeted_repair:
@@ -158,6 +165,18 @@ class Config:
             raise ValueError('knowledge_write/knowledge_reuse require persistent_graph and its runtime gates')
         if self.operation_reuse and not self.persistent_graph:
             raise ValueError('operation_reuse requires persistent_graph')
+        for key in ('rea_repository', 'rea_node_executable'):
+            value = getattr(self, key)
+            if not isinstance(value, str) or any(ord(char) < 32 for char in value):
+                raise ValueError(key + ' must be a trusted path string')
+            if value and not Path(value).is_absolute():
+                raise ValueError(key + ' must be an absolute administrator-configured path')
+        for key, minimum, maximum in (('rea_timeout_seconds', 1, 180),
+                                     ('rea_max_output_bytes', 16384, 8388608),
+                                     ('rea_max_input_bytes', 1024, 104857600),
+                                     ('rea_max_parallel', 1, 8)):
+            if type(getattr(self, key)) is not int or not minimum <= getattr(self, key) <= maximum:
+                raise ValueError(f'{key} must be an integer from {minimum} to {maximum}')
         if (self.persistent_graph or self.bounded_parallelism or self.local_recovery) and not self.manifest_path:
             raise ValueError('persistent_graph/bounded_parallelism/local_recovery require manifest_path')
         for key in ('startup_timeout', 'response_timeout', 'response_max_duration', 'poll_interval', 'tool_timeout', 'sync_timeout', 'sync_poll_interval', 'download_timeout'):

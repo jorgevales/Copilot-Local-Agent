@@ -54,8 +54,8 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `bootstrap/setup_dependencies.py`
 
 - Role: Repeat-safe package setup. Scratch files only; agent knowledge stays on S:.
-- Direct imports: `__future__`, `collections`, `hashlib`, `importlib`, `os`, `pathlib`, `re`, `subprocess`, `sys`, `types`, `uuid`
-- Public symbols: `candidates(project, env)`; `folder(value)`; `health_check(pins)`; `install(requirements, prefix, *, versions=installed_versions, run=run_python, health=None, environ=None, probe_folder=probe, ask=input)`; `installed_versions()`; `main()`; `path_failure(output)`; `pins_from(path)`; `probe(path)`; `run_python(args, env)`
+- Direct imports: `__future__`, `collections`, `hashlib`, `importlib`, `json`, `ntpath`, `os`, `pathlib`, `re`, `subprocess`, `sys`, `types`, `uuid`
+- Public symbols: `candidates(project, env)`; `diagnostic_path(path, project, env)`; `failure_category(error)`; `folder(value)`; `health_check(pins)`; `install(requirements, prefix, *, versions=installed_versions, run=run_python, health=None, environ=None, probe_folder=probe, ask=input)`; `installed_versions()`; `main()`; `path_failure(output)`; `pins_from(path)`; `probe(path)`; `run_python(args, env)`; `shared_root(env)`
 
 ### `copilot_agent/__init__.py`
 
@@ -96,6 +96,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Role: Visible Edge/Copilot UI adapter with bounded waits and owned-page isolation.
 - Direct imports: `.`, `.protocol`, `__future__`, `asyncio`, `collections`, `hashlib`, `inspect`, `json`, `os`, `pathlib`, `re`, `time`, `urllib.parse`, `uuid`
 - Public symbols: `class BrowserAdapter; method names: __init__, set_feedback, _feedback, endpoint, _acquire_controller, _navigate_copilot, _claim_chat_page, _claim_committed_request_page, _connect_running_edge_fallback, _connect_direct_edge_fallback, _authentication_required, start, _evaluate, _configure_tool_context, new_tool_page, focus_chat, authorize_tool_domain, _safe_url, _visible, _editor, _open_picker, _providers, _open_provider, discover_models, discover_models_on_auxiliary_page, select_model, _stop_present, _generation_state, attach_files, _attachment_signature, _attachment_signatures, _attachment_identities, _remove_preloaded_attachments, _reconcile_preloaded_attachments, preload_attachments, composer_character_limit, _composer_limit_from_editor, _editor_text, _expand_response_code, _response_code_groups, _copy_response_code, _safe_dom_code_response, _prepare_submission, preload_exchange, _consume_preloaded_exchange, verify_interaction_ready, read_reconciled_draft, _verified_unsent_retry_control, capture_committed_response, exchange, diagnostics, close`; `class BrowserUIError(RuntimeError)`; `class CaptureTimeoutError(BrowserUIError)`; `class ExistingEdgeUnavailable(BrowserUIError)`; `class ModelAccessError(BrowserUIError)`; `class ModelUnavailableError(BrowserUIError)`; `class SubmissionAmbiguousError(BrowserUIError)`; `class SubmissionNotSentError(BrowserUIError)`; `composer_comparison(expected: str, actual: str) -> dict`; `copied_code_response(text: str, request_id: str) -> str`; `fresh_assistant(messages: list[dict], baseline: dict, user_key, request_id: str) -> str`; `model_access_exhausted(text)`; `model_rank(models: list[dict]) -> list[dict]`; `public_progress(messages: list[dict], user_key, request_id: str) -> list[dict]`; `response_envelope_closed(text: str) -> bool`; `upload_alert_is_error(text: str) -> bool`; `uploads_verified(snapshot: dict, names: list[str], send_enabled: bool) -> bool`
+
+### `copilot_agent/browser_auth.py`
+
+- Role: One approved login click using browser-held credentials; no credential handling.
+- Direct imports: `.policy`, `.protocol`, `.session_mode`, `.web_navigation`, `__future__`, `asyncio`, `urllib.parse`
+- Public symbols: `_boundary(state) [private helper]`; `_safe_url(url) [private helper]`; `_scope(context, url) [private helper]`; `execute_login(args, context)`; `validate_login(args, context=None)`
 
 ### `copilot_agent/browser_inspection.py`
 
@@ -167,7 +173,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Bound evidence/CAS knowledge and locally compiled static read-only intents.
 - Direct imports: `.discovery_contracts`, `.discovery_engine`, `.discovery_scope`, `.discovery_store`, `.site_knowledge`, `__future__`, `copy`, `datetime`, `heapq`, `json`, `math`, `pathlib`, `time`, `urllib.parse`
-- Public symbols: `_proofs(store, knowledge, partition) [private helper]`; `_purpose(url) [private helper]`; `_run(context, run_id, site_origin) [private helper]`; `candidate(context, args, store)`; `check_plan(plan, knowledge)`; `compile_intent(args, context)`; `execute_intent(args, context, reviewed)`; `execute_knowledge_tool(name, args, context)`; `lookup(context, site_origin, scope=None)`; `namespace(context, site_origin)`; `prepare_knowledge_tool(name, args, context)`; `reliable_route(knowledge, start, target, now=None)`; `semantics(value, scope, now=None)`; `stamp(value)`; `validate_knowledge_tool(name, args, context=None)`
+- Public symbols: `_meaningful_change(previous, candidate_value) [private helper]`; `_proofs(store, knowledge, partition) [private helper]`; `_purpose(url) [private helper]`; `_run(context, run_id, site_origin) [private helper]`; `_view(context, partition, value) [private helper]`; `candidate(context, args, store)`; `check_plan(plan, knowledge)`; `compile_intent(args, context)`; `execute_intent(args, context, reviewed)`; `execute_knowledge_tool(name, args, context)`; `lookup(context, site_origin, scope=None)`; `namespace(context, site_origin)`; `prepare_knowledge_tool(name, args, context)`; `reliable_route(knowledge, start, target, now=None)`; `semantics(value, scope, now=None)`; `stamp(value)`; `validate_knowledge_tool(name, args, context=None)`
 
 ### `copilot_agent/discovery_scope.py`
 
@@ -179,7 +185,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Versioned local SQLite ledger; no synced session/customer data or auth state.
 - Direct imports: `.discovery_contracts`, `.persistence`, `.policy`, `.site_knowledge`, `__future__`, `contextlib`, `datetime`, `hashlib`, `json`, `os`, `pathlib`, `threading`, `time`
-- Public symbols: `alias(value)`; `class Store; 39 public methods`; `digest(value)`; `directory(context)`
+- Public symbols: `alias(value)`; `class Store; 40 public methods`; `digest(value)`; `directory(context)`
 
 ### `copilot_agent/document_catalogue.py`
 
@@ -238,13 +244,19 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `copilot_agent/knowledge_notes.py`
 
 - Role: Immutable, verified Discoveries artifacts independent of site schemas.
-- Direct imports: `.policy`, `.site_knowledge`, `hashlib`, `json`, `os`, `re`, `uuid`
+- Direct imports: `.knowledge_views`, `.policy`, `.site_knowledge`, `hashlib`, `json`, `os`, `re`, `uuid`
 - Public symbols: `_bytes(value) [private helper]`; `execute_note(name, args, context)`
+
+### `copilot_agent/knowledge_views.py`
+
+- Role: Sanitized, bounded website views derived from the authoritative ledger.
+- Direct imports: `.persistence`, `.policy`, `__future__`, `getpass`, `hashlib`, `json`, `pathlib`, `re`, `urllib.parse`
+- Public symbols: `_write_view(path, text) [private helper]`; `canonical_site_origin(value)`; `evidence_folder(context, site_url, collector, *, root)`; `evidence_namespace(context, site_origin)`; `method_identity(method)`; `publish_discovery_view(context, partition, record)`; `publish_site_view(context, scope, namespace, record, history=())`; `recommended_methods(methods)`; `reusable_value(value, depth=0)`; `site_folder(context, site_origin, *, root=None)`; `website_storage_root(legacy_websites_root)`
 
 ### `copilot_agent/local_crawler.py`
 
 - Role: Local Crawl4AI, using owned tabs in the already connected Edge session.
-- Direct imports: `.persistence`, `.policy`, `__future__`, `asyncio`, `collections`, `contextlib`, `hashlib`, `json`, `os`, `pathlib`, `re`, `time`, `urllib.parse`, `uuid`
+- Direct imports: `.knowledge_views`, `.persistence`, `.policy`, `__future__`, `asyncio`, `collections`, `contextlib`, `hashlib`, `json`, `os`, `pathlib`, `re`, `time`, `urllib.parse`, `uuid`
 - Public symbols: `crawl_websites(args, context, *, factory=None)`; `crawler_factory(browser, scratch, page_timeout)`; `knowledge_root(config)`; `open_login_page(browser, url)`; `read_knowledge(args, context)`; `saved_html(document)`; `website_url(value)`
 
 ### `copilot_agent/local_navigation.py`
@@ -275,7 +287,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Implementation module; responsibilities are identified by its public symbols and imports.
 - Direct imports: `.approvals`, `.attachments`, `.browser`, `.code_runner`, `.feedback`, `.findings`, `.local_python_runner`, `.logging_utils`, `.policy`, `.presentation`, `.prompts`, `.protocol`, `.reconciliation`, `.research_permissions`, `.state`, `.sync`, `__future__`, `asyncio`, `copy`, `hashlib`, `json`, `pathlib`, `re`, `threading`, `time`, `uuid`
-- Public symbols: `class Orchestrator; method names: __init__, _display_s_path, _code_runner, _parallel_readonly_group, _live_feedback, _action_text, _emit_validated_response, _emit_tool_result, _package_run_stage_details, _package_run_repair_instruction, _latest_failed_package_run, _recovered_package_run_failure, _package_review_repair_instruction, _package_local_build_rejection, _routing_description, _route_for_turn, _review_passed, _record_package_delivery, _prior_package_review, _ensure_package_review, _local_archive_sha256, _queue_reviewed_package_run, _inspect_downloaded_package, _download_recovery_instruction, _attachment_record, attachment_queue, _bounded_hash, _direction_independent_attachments, prepare_pending_attachments, _schedule_next_turn_preparation, _finish_next_turn_preparation, _stage_approved, _send, _record_raw_response, _pack_outbound_response, prepare_initialization, _validated_exchange, _preflight, initialize, recover_capture_failed_turn, _recover_uncertain_knowledge, turn, _turn, _prepare_user_attachments, _take_steering, _browser_preparation, _delivery_result, _delivery_verified, close`
+- Public symbols: `class Orchestrator; method names: __init__, _knowledge_authority, _authorize_user_targets, _display_s_path, _code_runner, _parallel_readonly_group, _live_feedback, _action_text, _emit_validated_response, _emit_tool_result, _package_run_stage_details, _package_run_repair_instruction, _latest_failed_package_run, _recovered_package_run_failure, _package_review_repair_instruction, _package_local_build_rejection, _routing_description, _route_for_turn, _review_passed, _record_package_delivery, _prior_package_review, _ensure_package_review, _local_archive_sha256, _queue_reviewed_package_run, _inspect_downloaded_package, _download_recovery_instruction, _attachment_record, attachment_queue, _bounded_hash, _direction_independent_attachments, prepare_pending_attachments, _schedule_next_turn_preparation, _finish_next_turn_preparation, _stage_approved, _send, _record_raw_response, _pack_outbound_response, prepare_initialization, _validated_exchange, _preflight, initialize, recover_capture_failed_turn, _recover_uncertain_knowledge, turn, _turn, _prepare_user_attachments, _take_steering, _browser_preparation, _delivery_result, _delivery_verified, close`
 
 ### `copilot_agent/outbound_results.py`
 
@@ -312,6 +324,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `__future__`, `json`, `math`, `pathlib`, `re`
 - Public symbols: `_object_pairs(pairs) [private helper]`; `class ProtocolError(ValueError); method names: __init__`; `correction_message(exc: ProtocolError) -> str`; `parse_response(raw: str, session_id: str, request_id: str, registry=None, seen_response_ids=()) -> dict`; `validate_schema(value, schema: dict, root=None, path='$') -> list[str]`
 
+### `copilot_agent/rea.py`
+
+- Role: Bounded, passive REA CLI capabilities owned by the existing ToolRegistry.
+- Direct imports: `.logging_utils`, `.persistence`, `.policy`, `__future__`, `asyncio`, `hashlib`, `ipaddress`, `json`, `os`, `pathlib`, `re`, `shutil`, `subprocess`, `tempfile`, `time`, `urllib.parse`, `uuid`
+- Public symbols: `_artifact_identity(path, kind, policy, limit) [private helper]`; `_bounded(config, name, default, minimum, maximum) [private helper]`; `_capture_metadata(value) [private helper]`; `_clean_scratch(path) [private helper]`; `_copy_bounded(source, target, limit) [private helper]`; `_endpoint(browser) [private helper]`; `_file_identity(path, policy, limit) [private helper]`; `_fixed_local(path) [private helper]`; `_incomplete(value) [private helper]`; `_json_object(data) [private helper]`; `_normalize(data, returncode) [private helper]`; `_page_scope(args, context) [private helper]`; `_repository(config) [private helper]`; `_restore_source_paths(value, staging) [private helper]`; `_run(command, *, cwd, timeout, output_limit, context) [private helper]`; `_safe(value, depth=0) [private helper]`; `_save(result, context) [private helper]`; `_schema(properties, required=()) [private helper]`; `_stage_input(prepared, kind, context, policy) [private helper]`; `execute_rea(name, args, context, policy)`; `rea_health(config)`; `validate_rea(name, args, context, policy)`
+
 ### `copilot_agent/reconciliation.py`
 
 - Role: Fresh, model-requested reconciliation of navigation-only browser effects.
@@ -323,6 +341,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Role: Independent per-user consent store and bounded, locally enforced research tools.
 - Direct imports: `.logging_utils`, `.persistence`, `.policy`, `.protocol`, `.site_knowledge`, `.web_navigation`, `__future__`, `asyncio`, `copy`, `datetime`, `getpass`, `hashlib`, `json`, `os`, `pathlib`, `re`, `threading`, `urllib.parse`
 - Public symbols: `active(context, grant_id)`; `audit(context, event, grant_id, **details)`; `bind_namespace(context, record)`; `bound(maximum)`; `collection(page, strategy, context)`; `directory(context)`; `execute_permissions(name, args, context)`; `guard_customer_read(context, capability='structured_summaries')`; `list_grants(context)`; `load(context, grant_id)`; `manage(context, grant_id, action)`; `obj(properties, required=None)`; `perform(args, context)`; `prepare_permissions(name, args, context)`; `save(context, record)`; `user_identity(context)`; `verify_scope(context, record, tab_id=None)`
+
+### `copilot_agent/research_routing.py`
+
+- Role: Deterministic capability selection; execution stays with ToolRegistry.
+- Direct imports: `.policy`, `.rea`, `.session_mode`, `__future__`, `datetime`, `hashlib`, `importlib.util`, `pathlib`, `re`, `urllib.parse`
+- Public symbols: `_clean_url(value) [private helper]`; `_fresh_evidence(target, selected, context, args, policy) [private helper]`; `_target(args, context, policy) [private helper]`; `request_routes(text, context, policy)`; `route_research(args, context, policy)`; `validate_route(args, context, policy)`
 
 ### `copilot_agent/reused_browser.py`
 
@@ -340,7 +364,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: One ephemeral, permissive session choice; never restored from saved state.
 - Direct imports: `.policy`, `urllib.parse`
-- Public symbols: `class OpenWebsitePolicy(URLPolicy); 3 public methods`; `configure_session(config, allowed)`; `fast_mode(config)`; `website_policy(config, domains=())`
+- Public symbols: `class ApprovedWebsitePolicy(URLPolicy); 2 public methods`; `class OpenWebsitePolicy(URLPolicy); 3 public methods`; `configure_session(config, allowed)`; `discovery_mode(config)`; `fast_mode(config)`; `website_origin(url)`; `website_policy(config, domains=())`
 
 ### `copilot_agent/session_setup.py`
 
@@ -354,11 +378,17 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `.`, `.storage`, `pathlib`
 - Public symbols: `choice(label, ask, emit)`; `choose_edge(config, settings, ask, emit, force=False)`; `pasted_path(text)`
 
+### `copilot_agent/site_discovery.py`
+
+- Role: Resumable, evidence-first discovery on the existing owned website page.
+- Direct imports: `.browser_inspection`, `.knowledge_views`, `.local_crawler`, `.persistence`, `.policy`, `.screenshot_evidence`, `.web_navigation`, `__future__`, `asyncio`, `hashlib`, `io`, `json`, `pathlib`, `PIL`, `re`, `time`, `urllib.parse`
+- Public symbols: `attachment_slots(pending)`; `discover(args, context)`; `settle(page, deadline, events)`
+
 ### `copilot_agent/site_knowledge.py`
 
-- Role: Consent-bound, per-device navigation memory; no customer observations.
+- Role: Session-authorized navigation memory; no credentials or customer records.
 - Direct imports: `.policy`, `.protocol`, `__future__`, `copy`, `datetime`, `getpass`, `hashlib`, `json`, `ntpath`, `pathlib`, `re`, `urllib.parse`, `uuid`
-- Public symbols: `_approval(name, args, context) [private helper]`; `_canonical(value) [private helper]`; `_current_origin(context) [private helper]`; `_digest(value) [private helper]`; `_enum(values) [private helper]`; `_fingerprint(scope) [private helper]`; `_hash(value) [private helper]`; `_json_pairs(pairs) [private helper]`; `_now(context) [private helper]`; `_object(properties, required=None) [private helper]`; `_origin(value) [private helper]`; `_read(context, scope) [private helper]`; `_record_path(context, scope) [private helper]`; `_reject_json_constant(value) [private helper]`; `_retrieve(context, scope) [private helper]`; `_safe_label(value) [private helper]`; `_safe_locator(item) [private helper]`; `_safe_route(value) [private helper]`; `_sanitize_knowledge(args) [private helper]`; `_scope(name, args, context) [private helper]`; `_session(context) [private helper]`; `_sources(scope, knowledge) [private helper]`; `_string(length=160) [private helper]`; `_template_route(value, origin) [private helper]`; `_timestamp(value) [private helper]`; `_verified_write(context, scope, value) [private helper]`; `_write(context, scope, value) [private helper]`; `class _KnowledgeStageError(OSError); 1 public methods`; `class KnowledgeStorageError(PolicyError); 1 public methods`; `class KnowledgeValidationError(ValueError); 1 public methods`; `class KnowledgeWriteError(RuntimeError); 1 public methods`; `execute_knowledge(name, args, context, policy=None)`; `knowledge_directory(context)`; `prepare_knowledge(args, context, name=None)`; `quarantine_knowledge_record(context, namespace_id)`; `reconcile_knowledge_call(state, context, call_id)`; `reconciliation_baseline(args, context, prepared)`; `safe_proposal(args)`; `storage_error_code(error)`; `validate_knowledge(name, args, context, policy=None)`
+- Public symbols: `_approval(name, args, context) [private helper]`; `_canonical(value) [private helper]`; `_current_origin(context) [private helper]`; `_digest(value) [private helper]`; `_enum(values) [private helper]`; `_fingerprint(scope) [private helper]`; `_hash(value) [private helper]`; `_item_identity(category, item) [private helper]`; `_json_pairs(pairs) [private helper]`; `_now(context) [private helper]`; `_object(properties, required=None) [private helper]`; `_origin(value) [private helper]`; `_publish_view(context, scope, record) [private helper]`; `_read(context, scope) [private helper]`; `_record_path(context, scope) [private helper]`; `_reject_json_constant(value) [private helper]`; `_retrieve(context, scope) [private helper]`; `_safe_label(value) [private helper]`; `_safe_locator(item) [private helper]`; `_safe_route(value) [private helper]`; `_sanitize_knowledge(args) [private helper]`; `_scope(name, args, context) [private helper]`; `_semantic_knowledge(knowledge) [private helper]`; `_session(context) [private helper]`; `_sources(scope, knowledge) [private helper]`; `_string(length=160) [private helper]`; `_template_route(value, origin) [private helper]`; `_timestamp(value) [private helper]`; `_verified_methods(incoming, context, scope) [private helper]`; `_verified_write(context, scope, value) [private helper]`; `_write(context, scope, value) [private helper]`; `class _KnowledgeStageError(OSError); 1 public methods`; `class KnowledgeStorageError(PolicyError); 1 public methods`; `class KnowledgeValidationError(ValueError); 1 public methods`; `class KnowledgeWriteError(RuntimeError); 1 public methods`; `execute_knowledge(name, args, context, policy=None)`; `knowledge_directory(context)`; `knowledge_session_grant(context)`; `prepare_knowledge(args, context, name=None)`; `quarantine_knowledge_record(context, namespace_id)`; `reconcile_knowledge_call(state, context, call_id)`; `reconciliation_baseline(args, context, prepared)`; `safe_proposal(args)`; `session_knowledge_authorized(context)`; `storage_error_code(error)`; `validate_knowledge(name, args, context, policy=None)`
 
 ### `copilot_agent/state.py`
 
@@ -393,8 +423,8 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `copilot_agent/tools.py`
 
 - Role: Versioned local capabilities. Browser tools use guarded owned Edge tabs.
-- Direct imports: `.archives`, `.browser_inspection`, `.code_runner`, `.discovery_contracts`, `.discovery_engine`, `.discovery_knowledge`, `.downloads`, `.local_navigation`, `.logging_utils`, `.policy`, `.reconciliation`, `.research_permissions`, `.screenshot_evidence`, `.session_mode`, `.site_knowledge`, `.state`, `.sync`, `.web_documents`, `.web_navigation`, `.web_operations`, `asyncio`, `ctypes`, `hashlib`, `importlib.metadata`, `json`, `os`, `pathlib`, `platform`, `re`, `shutil`, `sys`, `urllib.parse`, `uuid`
-- Public symbols: `_approved_write_target(name, args, policy, context) [private helper]`; `_atomic_replace(path, payload, expected_sha256, context, policy, *, operation_name='files.replace') [private helper]`; `_require_extended_read(path, policy) [private helper]`; `_swap_replacement_file(path, temp) [private helper]`; `_write_target(name, args, policy, context) [private helper]`; `class ToolRegistry; method names: definitions, definition, validate_input, validate_call, _limit, execute, _execute`; `configured_path_policy(config, session_dir)`; `definitions()`; `execute(name, args, context)`; `obj(properties, required=None)`; `schema_example(schema)`; `tool_path_policy(name, context)`; `validate(value, schema)`
+- Direct imports: `.archives`, `.browser_auth`, `.browser_inspection`, `.code_runner`, `.discovery_contracts`, `.discovery_engine`, `.discovery_knowledge`, `.downloads`, `.local_navigation`, `.logging_utils`, `.policy`, `.rea`, `.reconciliation`, `.research_permissions`, `.research_routing`, `.screenshot_evidence`, `.session_mode`, `.site_discovery`, `.site_knowledge`, `.state`, `.sync`, `.web_documents`, `.web_navigation`, `.web_operations`, `asyncio`, `ctypes`, `hashlib`, `importlib.metadata`, `json`, `os`, `pathlib`, `platform`, `re`, `shutil`, `sys`, `urllib.parse`, `uuid`
+- Public symbols: `_approved_write_target(name, args, policy, context) [private helper]`; `_atomic_replace(path, payload, expected_sha256, context, policy, *, operation_name='files.replace') [private helper]`; `_require_extended_read(path, policy) [private helper]`; `_swap_replacement_file(path, temp) [private helper]`; `_write_target(name, args, policy, context) [private helper]`; `class ToolRegistry; method names: __init__, definitions, definition, validate_input, validate_call, _limit, execute, _rea_failure, _execute`; `configured_path_policy(config, session_dir)`; `definitions()`; `execute(name, args, context)`; `obj(properties, required=None)`; `schema_example(schema)`; `tool_path_policy(name, context)`; `validate(value, schema)`
 
 ### `copilot_agent/web_documents.py`
 
@@ -502,7 +532,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Independent session lifecycle, without real UI messages or deletion.
 - Direct imports: `copilot_agent.app`, `copilot_agent.orchestrator`, `json`, `tests.test_orchestrator`, `tests.test_protocol_state`, `unittest`, `unittest.mock`
-- Public symbols: `class NewSessionTests(unittest.IsolatedAsyncioTestCase); 6 public methods`; `class SessionBrowser(MockBrowser); 7 public methods`
+- Public symbols: `class NewSessionTests(unittest.IsolatedAsyncioTestCase); 7 public methods`; `class SessionBrowser(MockBrowser); 7 public methods`
 
 ### `tests/test_app_startup_flow.py`
 
@@ -546,6 +576,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `asyncio`, `copilot_agent`, `copilot_agent.browser`, `copilot_agent.protocol`, `copilot_agent.reused_browser`, `hashlib`, `json`, `pathlib`, `sys`, `tempfile`, `types`, `unittest`, `unittest.mock`
 - Public symbols: `class CodeExpansionTests(unittest.IsolatedAsyncioTestCase); 2 public methods`; `class CorrelationTests(unittest.TestCase); 3 public methods`; `class ExchangeTests(unittest.IsolatedAsyncioTestCase); 16 public methods`; `class FakeButton; 3 public methods`; `class FakeEditor; 3 public methods`; `class InteractionReadinessTests(unittest.IsolatedAsyncioTestCase); 3 public methods`; `class OfflineAdapter(BrowserAdapter); 12 public methods`; `class PreloadedOfflineAdapter(OfflineAdapter); 3 public methods`; `class ReadinessAdapter(BrowserAdapter); 7 public methods`; `class ReadinessControl; 1 public methods`; `class RemainingCorrelationTests(unittest.TestCase); 14 public methods`; `class StartupRecoveryTests(unittest.IsolatedAsyncioTestCase); 9 public methods`; `class ToolContextTests(unittest.IsolatedAsyncioTestCase); 10 public methods`
 
+### `tests/test_browser_auth.py`
+
+- Role: Offline single-click authentication contracts; no credentials or live sites.
+- Direct imports: `asyncio`, `copilot_agent.browser_auth`, `copilot_agent.policy`, `types`, `unittest`, `unittest.mock`
+- Public symbols: `class LoginBrowserTests(unittest.IsolatedAsyncioTestCase); 3 public methods`; `class LoginTests(unittest.IsolatedAsyncioTestCase); 20 public methods`; `observation(**changes)`
+
 ### `tests/test_browser_bootstrap_ledger.py`
 
 - Role: Implementation module; responsibilities are identified by its public symbols and imports.
@@ -581,6 +617,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Role: Customer/company data is usable; effects and record identity remain checked.
 - Direct imports: `copilot_agent.automation_packages`, `copilot_agent.policy`, `copilot_agent.reconciliation`, `copilot_agent.tools`, `json`, `pathlib`, `tempfile`, `types`, `unittest`, `unittest.mock`
 - Public symbols: `class BusinessDataTests(unittest.IsolatedAsyncioTestCase); 6 public methods`
+
+### `tests/test_centralized_knowledge.py`
+
+- Role: Offline contracts for session grants, concise intake and method evolution.
+- Direct imports: `copilot_agent.discovery_store`, `copilot_agent.knowledge_notes`, `copilot_agent.knowledge_views`, `copilot_agent.policy`, `copilot_agent.site_knowledge`, `copy`, `json`, `os`, `tests.test_site_knowledge`, `types`, `unittest`, `unittest.mock`
+- Public symbols: `class CentralizedKnowledgeTests(unittest.TestCase); 12 public methods`; `class DiscoveryKnowledgeNoopTests(unittest.IsolatedAsyncioTestCase); 1 public methods`
 
 ### `tests/test_code_runner.py`
 
@@ -700,7 +742,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Implementation module; responsibilities are identified by its public symbols and imports.
 - Direct imports: `asyncio`, `copilot_agent.local_crawler`, `copilot_agent.session_setup`, `copilot_agent.tools`, `json`, `pathlib`, `tempfile`, `threading`, `types`, `unittest`, `unittest.mock`
-- Public symbols: `class EdgeContext; 2 public methods`; `class LocalCrawlerTests(unittest.IsolatedAsyncioTestCase); 19 public methods`; `class Page; 5 public methods`
+- Public symbols: `class EdgeContext; 2 public methods`; `class LocalCrawlerTests(unittest.IsolatedAsyncioTestCase); 21 public methods`; `class Page; 5 public methods`
 
 ### `tests/test_local_navigation.py`
 
@@ -750,23 +792,53 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `asyncio`, `copilot_agent.approvals`, `copilot_agent.config`, `copilot_agent.findings`, `copilot_agent.prompts`, `copilot_agent.protocol`, `copilot_agent.state`, `copy`, `json`, `os`, `pathlib`, `tempfile`, `unittest`, `unittest.mock`
 - Public symbols: `class FixtureRegistry; 3 public methods`; `class ProtocolTests(unittest.TestCase); 8 public methods`; `class StateAndPromptTests(unittest.TestCase); 31 public methods`; `encoded(value)`; `envelope(session='session', request='request', **changes)`; `make_fixture(prefix='contract-')`; `retained_root(prefix)`
 
+### `tests/test_rea.py`
+
+- Role: REA boundary contracts; ordinary tests use no internet or model credentials.
+- Direct imports: `asyncio`, `copilot_agent.policy`, `copilot_agent.rea`, `hashlib`, `json`, `os`, `pathlib`, `shutil`, `socket`, `sys`, `tempfile`, `types`, `unittest`, `unittest.mock`
+- Public symbols: `class REALocalIntegrationTests(unittest.TestCase); 2 public methods`; `class REATests(unittest.TestCase); 22 public methods`; `evidence(**changes)`
+
+### `tests/test_rea_registry.py`
+
+- Role: Public registry/routing/ledger integration contracts for the REA adapter.
+- Direct imports: `asyncio`, `copilot_agent.logging_utils`, `copilot_agent.policy`, `copilot_agent.rea`, `copilot_agent.research_routing`, `copilot_agent.state`, `copilot_agent.tools`, `hashlib`, `json`, `jsonschema`, `os`, `pathlib`, `tempfile`, `tests.test_rea`, `unittest`, `unittest.mock`
+- Public symbols: `class REARegistryActualTests(unittest.IsolatedAsyncioTestCase); 1 public methods`; `class REARegistryTests(unittest.IsolatedAsyncioTestCase); 11 public methods`; `request(name, arguments, call_id='read')`; `write_har(path)`
+
 ### `tests/test_reconciliation.py`
 
 - Role: Automatic reconciliation uses the original owned tab and fresh page state.
 - Direct imports: `copilot_agent.reconciliation`, `copilot_agent.state`, `copilot_agent.tools`, `pathlib`, `tempfile`, `unittest`
 - Public symbols: `class Browser; 2 public methods`; `class Page; 5 public methods`; `class ReconciliationTests(unittest.IsolatedAsyncioTestCase); 21 public methods`; `class RecoveryOrchestrationTests(unittest.IsolatedAsyncioTestCase); 2 public methods`
 
+### `tests/test_research_routing.py`
+
+- Role: Implementation module; responsibilities are identified by its public symbols and imports.
+- Direct imports: `copilot_agent.config`, `copilot_agent.logging_utils`, `copilot_agent.policy`, `copilot_agent.research_routing`, `copilot_agent.tools`, `hashlib`, `json`, `pathlib`, `tempfile`, `types`, `unittest`, `unittest.mock`
+- Public symbols: `class ResearchRoutingTests(unittest.IsolatedAsyncioTestCase); 17 public methods`
+
+### `tests/test_scoped_research_session.py`
+
+- Role: Scoped session behavior through real orchestration, registry and local grants.
+- Direct imports: `copilot_agent.approvals`, `copilot_agent.orchestrator`, `copilot_agent.policy`, `copilot_agent.session_mode`, `copilot_agent.site_knowledge`, `copilot_agent.state`, `copilot_agent.tools`, `json`, `pathlib`, `tests.test_orchestrator`, `tests.test_protocol_state`, `types`, `unittest`, `unittest.mock`
+- Public symbols: `class ScopedSessionTests(unittest.IsolatedAsyncioTestCase); 13 public methods`
+
 ### `tests/test_setup_dependencies.py`
 
 - Role: Installer path/reuse regressions; simulated VDI error, actual offline pip proof.
-- Direct imports: `importlib.util`, `os`, `pathlib`, `subprocess`, `sys`, `tempfile`, `types`, `unittest`, `zipfile`
-- Public symbols: `class DependencySetupTests(unittest.TestCase); 9 public methods`
+- Direct imports: `importlib.util`, `json`, `os`, `pathlib`, `subprocess`, `sys`, `tempfile`, `types`, `unittest`, `unittest.mock`, `zipfile`
+- Public symbols: `class DependencySetupTests(unittest.TestCase); 18 public methods`
 
 ### `tests/test_setup_resources.py`
 
 - Role: Exercise Edge resource choices without launching executables.
 - Direct imports: `copilot_agent.config`, `copilot_agent.setup_resources`, `copilot_agent.storage`, `os`, `pathlib`, `tempfile`, `types`, `unittest`, `unittest.mock`
 - Public symbols: `class ResourceSetupTests(unittest.IsolatedAsyncioTestCase); 7 public methods`
+
+### `tests/test_site_discovery.py`
+
+- Role: Implementation module; responsibilities are identified by its public symbols and imports.
+- Direct imports: `copilot_agent.site_discovery`, `copilot_agent.tools`, `json`, `pathlib`, `tempfile`, `tests`, `unittest`, `unittest.mock`
+- Public symbols: `class DiscoveryTests(unittest.IsolatedAsyncioTestCase); 4 public methods`
 
 ### `tests/test_site_knowledge.py`
 
@@ -783,7 +855,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `tests/test_supervised_session.py`
 
 - Role: Implementation module; responsibilities are identified by its public symbols and imports.
-- Direct imports: `copilot_agent.approvals`, `copilot_agent.config`, `copilot_agent.policy`, `copilot_agent.state`, `copilot_agent.web_navigation`, `copy`, `pathlib`, `tempfile`, `tests`, `tests.test_orchestrator`, `tests.test_web_navigation`, `unittest`, `unittest.mock`
+- Direct imports: `copilot_agent.approvals`, `copilot_agent.config`, `copilot_agent.policy`, `copilot_agent.session_mode`, `copilot_agent.state`, `copilot_agent.web_navigation`, `copy`, `pathlib`, `tempfile`, `tests`, `tests.test_orchestrator`, `tests.test_web_navigation`, `unittest`, `unittest.mock`
 - Public symbols: `class SupervisedSessionTests(unittest.IsolatedAsyncioTestCase); 7 public methods`
 
 ### `tests/test_sync.py`
@@ -852,6 +924,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `asyncio`, `copilot_agent.browser`, `copilot_agent.policy`, `copilot_agent.site_knowledge`, `copilot_agent.tools`, `hashlib`, `json`, `pathlib`, `playwright.async_api`, `tempfile`, `time`, `types`, `unittest`
 - Public symbols: `class WebsiteIntegrationTests(unittest.IsolatedAsyncioTestCase); 9 public methods`
 
+### `tools/refresh_research_inventory.py`
+
+- Role: Regenerate the exact registered research catalogue without machine state.
+- Direct imports: `copilot_agent.tools`, `json`, `pathlib`, `sys`
+- Public symbols: `family(name)`; `main()`
+
 ### `version_launcher.py`
 
 - Role: Local complete-copy testing versions. Requires neither Git nor extra packages.
@@ -864,31 +942,31 @@ This is a static AST inventory of the current source, not a verbatim code packag
 Generated from the local Graphify code-only AST graph. The raw graph, cache, and Graphify report are not attachments; the statistics and selected relationships below preserve their useful navigation evidence.
 
 - Graphify version: `0.9.79`
-- Source revision analyzed: `unrecorded`
-- Nodes / edges / hyperedges: 3099 / 9382 / 0
-- Relationship counts: calls=3847, contains=977, imports=1418, imports_from=641, indirect_call=350, inherits=37, method=1412, rationale_for=319, references=90, uses=291
+- Source revision analyzed: `3a22557a369ec9c4c079536cbc2d3cd1c3537e0c`
+- Nodes / edges / hyperedges: 3652 / 11345 / 0
+- Relationship counts: calls=4561, contains=1148, imports=1826, imports_from=842, indirect_call=434, inherits=41, method=1659, rationale_for=387, references=97, uses=350
 - Graph origin: Graphify AST extraction; inferred edges are hypotheses, not verified behavior.
 
 ### Highest-connectivity source symbols
 
-- `PolicyError` — 197 graph links; `copilot_agent/policy.py` at `L9`.
-- `Orchestrator` — 135 graph links; `copilot_agent/orchestrator.py` at `L29`.
-- `ToolRegistry` — 119 graph links; `copilot_agent/tools.py` at `L367`.
-- `tools.py` — 116 graph links; `copilot_agent/tools.py` at `L1`.
-- `PathPolicy` — 115 graph links; `copilot_agent/policy.py` at `L42`.
-- `DiscoveryError` — 113 graph links; `copilot_agent/discovery_contracts.py` at `L64`.
-- `SessionState` — 99 graph links; `copilot_agent/state.py` at `L62`.
-- `BrowserAdapter` — 97 graph links; `copilot_agent/browser.py` at `L324`.
-- `orchestrator.py` — 92 graph links; `copilot_agent/orchestrator.py` at `L1`.
-- `Store` — 87 graph links; `copilot_agent/discovery_store.py` at `L44`.
-- `copilot_agent/app.py` — 86 graph links; `copilot_agent/app.py` at `L1`.
-- `final_response()` — 84 graph links; `tests/test_orchestrator.py` at `L65`.
-- `site_knowledge.py` — 73 graph links; `copilot_agent/site_knowledge.py` at `L1`.
-- `Config` — 71 graph links; `copilot_agent/config.py` at `L26`.
-- `OrchestratorTests` — 71 graph links; `tests/test_orchestrator.py` at `L77`.
-- `automation_packages.py` — 70 graph links; `copilot_agent/automation_packages.py` at `L1`.
-- `live_package_run.py` — 57 graph links; `tests/live_package_run.py` at `L1`.
-- `policy.py` — 57 graph links; `copilot_agent/policy.py` at `L1`.
+- `PolicyError` — 261 graph links; `copilot_agent/policy.py` at `L9`.
+- `ToolRegistry` — 164 graph links; `copilot_agent/tools.py` at `L405`.
+- `tools.py` — 156 graph links; `copilot_agent/tools.py` at `L1`.
+- `Orchestrator` — 155 graph links; `copilot_agent/orchestrator.py` at `L29`.
+- `PathPolicy` — 151 graph links; `copilot_agent/policy.py` at `L42`.
+- `SessionState` — 115 graph links; `copilot_agent/state.py` at `L67`.
+- `DiscoveryError` — 114 graph links; `copilot_agent/discovery_contracts.py` at `L64`.
+- `BrowserAdapter` — 107 graph links; `copilot_agent/browser.py` at `L324`.
+- `orchestrator.py` — 107 graph links; `copilot_agent/orchestrator.py` at `L1`.
+- `final_response()` — 98 graph links; `tests/test_orchestrator.py` at `L86`.
+- `Store` — 94 graph links; `copilot_agent/discovery_store.py` at `L44`.
+- `copilot_agent/app.py` — 89 graph links; `copilot_agent/app.py` at `L1`.
+- `site_knowledge.py` — 89 graph links; `copilot_agent/site_knowledge.py` at `L1`.
+- `Config` — 86 graph links; `copilot_agent/config.py` at `L26`.
+- `policy.py` — 79 graph links; `copilot_agent/policy.py` at `L1`.
+- `automation_packages.py` — 76 graph links; `copilot_agent/automation_packages.py` at `L1`.
+- `._turn()` — 63 graph links; `copilot_agent/orchestrator.py` at `L1338`.
+- `OrchestratorTests` — 63 graph links; `tests/test_orchestrator.py` at `L98`.
 
 ### Direct, source-derived relationships
 
@@ -1037,6 +1115,13 @@ Sources: `config.example.json`, `copilot_agent/config.py`, `schemas/response-v1.
 - `max_download_bytes`: example value `20971520`.
 - `operation_reuse`: example value `false`.
 - `persistent_graph`: example value `true`.
+- `rea_enabled`: example value `true`.
+- `rea_max_input_bytes`: example value `20971520`.
+- `rea_max_output_bytes`: example value `1048576`.
+- `rea_max_parallel`: example value `3`.
+- `rea_node_executable`: example value `""`.
+- `rea_repository`: example value `""`.
+- `rea_timeout_seconds`: example value `45`.
 - `response_timeout`: example value `180`.
 - `sync_timeout`: example value `120`.
 - `targeted_repair`: example value `false`.
@@ -1163,7 +1248,14 @@ These compact files define how users launch the project and the top-level respon
   "knowledge_reuse": true,
   "targeted_repair": false,
   "operation_reuse": false,
-  "discovery_extractor": "crawl4ai"
+  "discovery_extractor": "crawl4ai",
+  "rea_enabled": true,
+  "rea_repository": "",
+  "rea_node_executable": "",
+  "rea_timeout_seconds": 45,
+  "rea_max_output_bytes": 1048576,
+  "rea_max_input_bytes": 20971520,
+  "rea_max_parallel": 3
 }
 <!-- END SOURCE: config.example.json -->
 

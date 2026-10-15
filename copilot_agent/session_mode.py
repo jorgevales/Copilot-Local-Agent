@@ -2,17 +2,29 @@
 from urllib.parse import urlsplit, urlunsplit
 from .policy import URLPolicy, PolicyError, config_value
 
-START_PROMPT = 'Start fast full-access session: no package or plan review, reads and edits allowed, file deletion blocked [Y/n]? '
+START_PROMPT = ('Start fast discovery session: scoped read-only tools and useful S: knowledge saves run immediately; '
+                'one prefilled login-button click is allowed; new targets, other writes and target changes need approval; '
+                'MFA stays manual [Y/n]? ')
 
 
 def fast_mode(config):
-    return config_value(config, '_permissive_session', False) is True
+    # Legacy internal flag is never enabled by the public session confirmation.
+    # Keep it isolated from the scoped discovery grant for old embedded callers.
+    return (config_value(config, '_permissive_session', False) is True
+            and not discovery_mode(config))
+
+
+def discovery_mode(config):
+    return config_value(config, '_discovery_session', False) is True
 
 
 def configure_session(config, allowed):
-    for name in ('_permissive_session', '_supervised_session', '_continuous_package_session', '_local_navigation_confirmed'):
+    for name in ('_discovery_session', '_knowledge_session_confirmed', '_local_navigation_confirmed'):
         setattr(config, name, bool(allowed))
-    config._package_review_enabled = not allowed
+    for name in ('_permissive_session', '_supervised_session', '_continuous_package_session'):
+        setattr(config, name, False)
+    config._package_review_enabled = True
+    config._session_approved_origins = set()
 
 
 class OpenWebsitePolicy(URLPolicy):
@@ -39,4 +51,32 @@ class OpenWebsitePolicy(URLPolicy):
 
 
 def website_policy(config, domains=()):
+    if discovery_mode(config):
+        return ApprovedWebsitePolicy(domains, config_value(config, '_session_approved_origins', ()))
     return OpenWebsitePolicy() if fast_mode(config) else URLPolicy(domains)
+
+
+def website_origin(url):
+    OpenWebsitePolicy.website_domain(url)
+    parsed = urlsplit(url)
+    host = parsed.hostname.lower().rstrip('.')
+    host = '[' + host + ']' if ':' in host else host
+    port = parsed.port
+    return parsed.scheme + '://' + host + (':' + str(port) if port and port != (443 if parsed.scheme == 'https' else 80) else '')
+
+
+class ApprovedWebsitePolicy(URLPolicy):
+    """Default HTTPS domain scope plus exact separately approved origins."""
+    def __init__(self, domains, origins):
+        super().__init__(domains)
+        self.origins = set(origins)
+
+    def resolve(self, url):
+        try:
+            return super().resolve(url)
+        except PolicyError:
+            if website_origin(url) in self.origins:
+                return urlunsplit(urlsplit(url))
+            raise
+
+    website_domain = staticmethod(OpenWebsitePolicy.website_domain)

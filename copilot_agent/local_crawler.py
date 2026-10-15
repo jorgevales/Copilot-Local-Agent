@@ -19,6 +19,8 @@ import uuid
 
 from .persistence import io_path, write_json
 from .policy import PolicyError, config_value, reject_path_redirection
+from .knowledge_views import (canonical_site_origin, evidence_folder,
+                              evidence_namespace, website_storage_root)
 
 
 def website_url(value):
@@ -131,9 +133,14 @@ async def crawl_websites(args, context, *, factory=None):
     title = args['title'].strip()
     if not title:
         raise ValueError('Give this website knowledge a title.')
-    key = hashlib.sha256(json.dumps([title, urls], ensure_ascii=False).encode()).hexdigest()[:16]
-    slug = re.sub(r'[^\w-]+', '-', title, flags=re.UNICODE).strip('-')[:64] or 'website'
-    folder = knowledge_root(context['config']) / (slug + '-' + key)
+    storage_root = website_storage_root(knowledge_root(context['config']))
+    site_origins = sorted({canonical_site_origin(url) for url in urls})
+    if len(site_origins) == 1:
+        folder = evidence_folder(context, site_origins[0], 'crawl4ai', root=storage_root)
+    else:
+        identity = [(origin, evidence_namespace(context, origin)) for origin in site_origins]
+        key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:24]
+        folder = storage_root / 'campaigns' / key
     reject_path_redirection(folder)
     index_path = folder / 'index.json'
     storage = io_path(folder)
@@ -141,6 +148,10 @@ async def crawl_websites(args, context, *, factory=None):
     index_file = io_path(index_path)
     index = json.loads(index_file.read_text(encoding='utf-8')) if index_file.exists() else {
         'schema_version': 1, 'title': title, 'urls': urls, 'pages': {}, 'frontier': [], 'errors': {}}
+    index['evidence_kind'] = 'raw_task_evidence_not_reusable_knowledge'
+    index['title'] = title
+    new_seeds = [url for url in urls if url not in index.get('urls', [])]
+    index['urls'] = list(dict.fromkeys(index.get('urls', []) + urls))
     context['crawl4ai_saved_index'] = str(index_path)
     origins = {(urlsplit(url).scheme, urlsplit(url).netloc) for url in urls}
     max_pages, max_depth = args.get('max_pages', 0), args.get('max_depth', 0)
@@ -153,6 +164,8 @@ async def crawl_websites(args, context, *, factory=None):
     page_count, cycle = 0, 0
     frontier = deque(index.get('frontier') or [(url, 0) for url in urls])
     resumed_frontier = bool(index.get('frontier'))
+    queued = {url for url, _ in frontier}
+    frontier.extend((url, 0) for url in new_seeds if url not in queued)
 
     def save(status):
         index.update(status=status, frontier=list(frontier), updated_at=time.time())
@@ -174,7 +187,8 @@ async def crawl_websites(args, context, *, factory=None):
             return []
         markdown = getattr(result.markdown, 'raw_markdown', result.markdown) or ''
         page_key = hashlib.sha256(url.encode()).hexdigest()
-        page_path = folder / (page_key + '.json')
+        page_folder = evidence_folder(context, destination, 'crawl4ai', root=storage_root)
+        page_path = page_folder / (page_key + '.json')
         reject_path_redirection(page_path)
         links = result.links
         if hasattr(links, 'model_dump'):
@@ -183,7 +197,8 @@ async def crawl_websites(args, context, *, factory=None):
         payload = {'title': title, 'url': url, 'resolved_url': destination, 'depth': depth,
                    'captured_at': time.time(), 'status_code': result.status_code,
                    'markdown': str(markdown), 'html': saved_html(html), 'links': links,
-                   'metadata': result.metadata or {}}
+                   'metadata': result.metadata or {},
+                   'evidence_kind': 'raw_task_evidence_not_reusable_knowledge'}
         write_json(page_path, payload)
         data = io_path(page_path).read_bytes()
         index['pages'][url] = {'path': str(page_path), 'sha256': hashlib.sha256(data).hexdigest(), 'depth': depth}
@@ -269,15 +284,19 @@ async def crawl_websites(args, context, *, factory=None):
     return {'status': status, 'title': title, 'index_path': str(index_path),
             'knowledge_directory': str(folder), 'saved_pages': len(index['pages']),
             'pending_pages': len(frontier), 'failed_pages': len(index['errors']),
-            'read_tool': 'crawl4ai.read', 'cycles_completed': cycle}
+            'read_tool': 'crawl4ai.read', 'cycles_completed': cycle,
+            'evidence_kind': 'raw_task_evidence_not_reusable_knowledge'}
 
 
 def read_knowledge(args, context):
     """Read arbitrary-sized saved knowledge in windows without UI result truncation."""
-    root = knowledge_root(context['config']).resolve()
+    legacy = knowledge_root(context['config']).resolve()
+    root = website_storage_root(legacy).resolve()
     requested = Path(args['path']).resolve()
-    if not requested.is_relative_to(root):
+    roots = (legacy, root / 'sites', root / 'campaigns')
+    if not any(requested.is_relative_to(candidate) for candidate in roots):
         raise PolicyError('Choose a file inside the shared website knowledge directory.')
+    reject_path_redirection(requested)
     text = io_path(requested).read_text(encoding='utf-8')
     offset, limit = args.get('offset', 0), args.get('limit', 8000)
     content = text[offset:offset + limit]

@@ -1,13 +1,11 @@
 # Local website discovery and session package mode
 
-Start **Start Agent UI.cmd** (or **Start Agent.cmd**). Accept the single fast
-full-access session option to skip package quality review and individual plan
-approvals together. It permits ordinary file reads/edits and cross-website
-navigation for this session only. File deletion remains blocked; credentials,
-manual sign-in, OS permissions and valid executable contracts remain enforced.
-Closing or restarting the agent resets the grant.
+Start **Start Agent UI.cmd** (or **Start Agent.cmd**) and accept the scoped
+read-only discovery/session knowledge grant. Other effects retain concise
+approval. Closing or restarting resets the grant. REA is preferred for broad
+technical inspection; Crawl4AI remains specialized structured extraction.
 
-The startup guide then offers local Crawl4AI discovery:
+The optional `--discover-first` argument opens the startup Crawl4AI guide:
 
 1. Choose Yes and paste a website address.
 2. Give that website knowledge a title.
@@ -23,8 +21,11 @@ existing sign-in, opens its own tabs and closes only those tabs. It never launch
 a second crawler browser, copies cookies to files or automates sign-in. The
 normal public static `discovery.manifest` path remains available separately.
 
-Each collection lives in the authoritative **Discoveries knowledge/websites**
-folder, with the chosen title and a stable identifier. `index.json` records URLs,
+Each collection uses the canonical per-site **Discoveries knowledge/sites**
+folder and bound namespace. Multi-site campaign indexes live under **campaigns**;
+each page remains in its own site folder. Titles never create duplicate stores.
+Legacy **websites** collections remain readable. Raw captures are approved task
+evidence, not sanitized reusable knowledge. `index.json` records URLs,
 page file paths, depth, hashes, remaining routes, capture errors and status. Page
 JSON files contain rendered HTML, markdown, links and metadata. Saved HTML
 retains ordinary business field values and notes while omitting scripts, hidden
@@ -39,9 +40,8 @@ The agent receives collection titles and index paths in its startup contract.
 It can call `crawl4ai.read` on indexes and page files as needed, following
 `next_offset` to read every window without gaps. It can request more discovery
 through `crawl4ai.crawl`; the orchestrator supplies the connected browser,
-knowledge destination, session directory and Stop event. In immediate mode,
-startup session authorization also covers subsequent crawler requests. In normal
-mode the crawler asks for local authorization.
+knowledge destination, session directory and Stop event. The crawler retains local approval for raw task-evidence writes. Sanitized
+knowledge-tool saves use the automatic session grant.
 
 The crawl tool accepts multiple starting `urls`, a `title`, `concurrency`,
 `max_pages`, `max_depth`, `cycles`, `refresh_seconds`,
@@ -64,7 +64,7 @@ the agent later reads is returned to **Microsoft Copilot**, so “local crawling
 not mean the entire agent workflow is local-only. Use only websites/content you
 are authorized to collect and use with the organization's Copilot environment.
 
-For supplied terminal settings, `--yes-setup` accepts the same fast full-access
+For supplied terminal settings, `--yes-setup` accepts the same fast scoped discovery
 session grant and skips the guide. `--discover-first` shows the guide even with
 `--yes-setup`. The legacy `--package-mode` argument no longer adds a separate
 startup choice.
