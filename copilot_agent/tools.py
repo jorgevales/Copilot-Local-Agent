@@ -26,6 +26,7 @@ from .downloads import DownloadError
 from .web_navigation import (NAVIGATION_SPECS, validate_navigation, execute_navigation,
                              clear_navigation_state, get_primary_navigation_tab_id)
 from .browser_inspection import INSPECTION_SPECS, execute_inspection
+from .screenshot_evidence import CAPTURE_PROPERTIES, capture_evidence
 from .web_documents import DOCUMENT_SPECS, DOCUMENT_EXAMPLES, validate_documents, execute_documents
 from .site_knowledge import KNOWLEDGE_SPECS, KNOWLEDGE_EXAMPLES, validate_knowledge, execute_knowledge, safe_proposal, KnowledgeValidationError, KnowledgeWriteError, reconcile_knowledge_call
 from .discovery_engine import DISCOVERY_SPECS, validate_discovery, execute_discovery
@@ -161,7 +162,7 @@ SPECS = {
     "browser.press": (obj({"selector":S,"key":S,"frame_selector":S},["selector","key"]), "user_approval", "Press an allowlisted key on one unique non-password control; Enter may submit and is never retried automatically."),
     "browser.frames": (obj({}), "read_only", "List iframe selectors and query-free source URLs."),
     "browser.scroll": (obj({"pixels":{"type":"integer","minimum":-10000,"maximum":10000}}), "user_approval", "Scroll the owned tool page."),
-    "browser.screenshot": (obj({}), "user_approval", "Save a screenshot of the owned tool tab to a unique session file."),
+    "browser.screenshot": (obj(CAPTURE_PROPERTIES, []), "user_approval", "Capture a personalized screenshot batch in one call. All pictures become one labeled PDF automatically attached to Copilot. Default: top/middle/bottom sampling (short pages need fewer shots). Optional shots specify label, element selector, page/container scroll, viewport clip or full_page. Scroll positions restore by default."),
     "browser.errors": (obj({}), "read_only", "Report captured tool-page console errors if the browser adapter supplies them."),
     "browser.downloads": (obj({}), "read_only", "Report observed tool-page download events; absence is not delivery proof."),
     "ocr.image": (obj(PATH), "user_approval", "Check a local image; OCR requires an explicitly available integrated image capability."),
@@ -397,6 +398,7 @@ class ToolRegistry:
             examples = [{"arguments":{"script":"print('reviewed computation')","purpose":"Compute a bounded result","language":"python_subset","working_directory":".","read_paths":[],"create_paths":[],"expected_outputs":[],"commands":[],"network_destinations":[],"permissions":[],"risk_summary":"No external side effects","recovery_notes":"Review failure output before retry"}}]
         if name == "browser.open": examples = [{"arguments":{"url":"https://example.com/"}}]
         if name == 'browser.inspect': examples = [{'arguments': {'tab_id': 'tab-1', 'max_nodes': 300}}]
+        if name == 'browser.screenshot': examples = [{'arguments': {'shots': [{'label': 'Page overview', 'scroll_y': 0}, {'label': 'Requested details', 'selector': '#details'}, {'label': 'Precise viewport region', 'clip': {'x': 20, 'y': 100, 'width': 300, 'height': 200}}]}}]
         if name == 'browser.javascript': examples = [{'arguments': {'tab_id': 'tab-1', 'expression': '() => ({title: document.title, path: location.pathname})'}}]
         if name == "browser.reconcile": examples = [{"arguments":{"call_id":"prior-navigation-call-id","outcome":"completed","observed_url":"https://example.com/actual-page"}}]
         if name == "browser.recover_uncertain": examples = [{"arguments":{"call_id":"prior-form-call-id","checkpoint_url":"https://example.com/start"}}]
@@ -707,6 +709,7 @@ class ToolRegistry:
             policy=tool_path_policy(name, context)
             timeout=min(30,config_value(config,"tool_timeout",30))
             if name == 'browser.javascript': timeout = args.get('timeout_ms', 10000) / 1000 + 2
+            if name in {'browser.screenshot', 'browser.inspect'}: timeout = min(365, 20 + 12 * len(args.get('shots', [None] * args.get('max_shots', 3))))
             if name=="created.wait": timeout=min(300,config_value(config,"sync_timeout",120))+1
             if name=="copilot.download": timeout=min(295,config_value(config,"download_timeout",90))+1
             if name in {'browser.plan', 'browser.download_batch'}:
@@ -725,7 +728,7 @@ class ToolRegistry:
                 if result.get('outcome') in {'failed', 'incomplete', 'cancelled'}:
                     return self._limit({'ok': False, 'tool': name, 'result': result,
                                         'error': {'code': 'operation_failed', 'message': 'Discovery did not meet the objective; inspect retained evidence and material gaps.'}}, context)
-            if name in NAVIGATION_SPECS or name in DOCUMENT_SPECS or name in INSPECTION_SPECS:
+            if name in NAVIGATION_SPECS or name in DOCUMENT_SPECS or name in INSPECTION_SPECS or name == 'browser.screenshot':
                 if result.get('status') in {'failed', 'partial', 'blocked', 'interrupted', 'cancelled', 'needs_user_input', 'uncertain'}:
                     return self._limit({'ok': False, 'tool': name, 'result': result,
                                         'error': {'code': result.get('error', {}).get('code', 'operation_failed')
@@ -938,6 +941,11 @@ class ToolRegistry:
             return browser_diagnostics(context['session_state'], context['browser'])
         if name in NAVIGATION_SPECS: return await execute_navigation(name, args, context, policy)
         if name in INSPECTION_SPECS: return await execute_inspection(name, args, context)
+        if name == 'browser.screenshot':
+            from .web_navigation import get_navigation_page, _install_origin_guard
+            page = get_navigation_page(context, args.get('tab_id'))
+            await _install_origin_guard(page, context, page.url)
+            return await capture_evidence(page, args, context)
         if name in DOCUMENT_SPECS: return await execute_documents(name, args, context, policy)
         if name in KNOWLEDGE_SPECS: return execute_knowledge(name, args, context, policy)
         if name in DISCOVERY_SPECS: return await execute_discovery(name, args, context)
@@ -1162,12 +1170,6 @@ class ToolRegistry:
                 if page.url!="about:blank": urls.resolve(page.url)
                 return {"status":"performed","url":page.url}
             if name=="browser.scroll": await page.evaluate("pixels=>window.scrollBy(0,pixels)",args["pixels"]); return {"status":"performed"}
-            if name=="browser.screenshot":
-                folder=Path(context["session_dir"])/"screenshots"; folder.mkdir(parents=True,exist_ok=True)
-                target=folder/(uuid.uuid4().hex+".png")
-                await page.screenshot(path=str(target),full_page=False,timeout=10000,
-                    mask=[page.locator("input,textarea,[contenteditable='true'],button[aria-label*='account' i],button[aria-label*='profile' i]")])
-                return {"path":str(target)}
             if name in {"browser.errors","browser.downloads"}:
                 key="tool_errors" if name.endswith("errors") else "tool_downloads"
                 values=getattr(browser,key,None)

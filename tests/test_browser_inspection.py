@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from copilot_agent.browser_inspection import execute_inspection
+from copilot_agent.screenshot_evidence import METRICS
 from copilot_agent.policy import PathPolicy
 from copilot_agent.tools import ToolRegistry
 from tests import test_web_navigation as navigation_fixtures
@@ -18,6 +19,10 @@ class InspectionConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             dom_started, image_started = asyncio.Event(), asyncio.Event()
             async def dom(*args):
+                if args[0] == METRICS:
+                    return {'x': 0, 'y': 0, 'width': 800, 'height': 600, 'maxY': 0}
+                if args[0].startswith('(p)=>window.scrollTo'):
+                    return None
                 dom_started.set()
                 await image_started.wait()
                 return {'dom': {'nodes': []}}
@@ -45,6 +50,7 @@ class InspectionBrowserTests(unittest.IsolatedAsyncioTestCase):
         self.context = self.fixture.context
         self.context['policy'] = PathPolicy([self.context['session_dir']])
         self.context['pending_image_attachments'] = []
+        self.context['pending_file_attachments'] = []
         self.registry = ToolRegistry()
 
     async def test_dom_shadow_forms_api_metadata_and_real_image_are_delivered_together(self):
@@ -62,9 +68,42 @@ class InspectionBrowserTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('secret-value', json.dumps(result))
         screenshot = result['screenshot']
         data = Path(screenshot['path']).read_bytes()
-        self.assertTrue(data.startswith(b'\x89PNG\r\n\x1a\n'))
+        self.assertTrue(data.startswith(b'%PDF-'))
         self.assertEqual(hashlib.sha256(data).hexdigest(), screenshot['sha256'])
-        self.assertEqual([screenshot['path']], self.context['pending_image_attachments'])
+        self.assertEqual([screenshot['path']], self.context['pending_file_attachments'])
+        self.assertEqual([], self.context['pending_image_attachments'])
+
+    async def test_scroll_element_and_precise_region_batch_is_one_labeled_pdf(self):
+        await self.fixture.page.set_content('''<style>body{margin:0}#details{margin-top:1400px;width:320px;height:180px;background:red}#panel{height:100px;width:300px;overflow:auto}#panel div{height:800px}</style><h1>Top</h1><div id="panel"><div>Scrollable panel</div></div><section id="details">Requested detail</section>''')
+        await self.fixture.page.evaluate('window.scrollTo(0,150)')
+        response = await self.registry.execute('browser.screenshot', {'shots': [
+            {'label': 'Top of page', 'scroll_y': 0},
+            {'label': 'Precise top region', 'scroll_y': 0, 'clip': {'x': 0, 'y': 0, 'width': 300, 'height': 100}},
+            {'label': 'Scrollable panel interior', 'scroll_container': '#panel', 'scroll_y': 250, 'selector': '#panel'},
+            {'label': 'Requested red details', 'selector': '#details'}]}, self.context)
+        self.assertTrue(response['ok'], response)
+        result = response['result']
+        self.assertEqual(4, result['screenshot']['pictures'])
+        self.assertEqual(['viewport', 'clip', 'element', 'element'], [shot['kind'] for shot in result['shots']])
+        self.assertEqual((300, 100), (result['shots'][1]['width'], result['shots'][1]['height']))
+        self.assertEqual(250, result['shots'][2]['container']['y'])
+        self.assertEqual(320, result['shots'][3]['width'])
+        self.assertEqual(150, await self.fixture.page.evaluate('scrollY'))
+        self.assertEqual(0, await self.fixture.page.locator('#panel').evaluate('(n)=>n.scrollTop'))
+        self.assertEqual([result['screenshot']['path']], self.context['pending_file_attachments'])
+        data = Path(result['screenshot']['path']).read_bytes()
+        self.assertEqual(4, data.count(b'/Type /Page\n'))
+        self.assertTrue(data.rstrip().endswith(b'%%EOF'))
+        self.context['pending_file_attachments'].clear()
+        automatic = await self.registry.execute('browser.screenshot', {}, self.context)
+        self.assertTrue(automatic['ok'], automatic)
+        self.assertEqual(3, automatic['result']['screenshot']['pictures'])
+        positions = [shot['scroll']['y'] for shot in automatic['result']['shots']]
+        self.assertEqual(0, positions[0])
+        self.assertGreater(positions[1], positions[0])
+        self.assertGreater(positions[2], positions[1])
+        self.assertEqual(150, await self.fixture.page.evaluate('scrollY'))
+        self.assertEqual(1, len(self.context['pending_file_attachments']))
 
     async def test_javascript_arguments_spa_navigation_and_uncertain_effects(self):
         response = await self.registry.execute('browser.javascript', {

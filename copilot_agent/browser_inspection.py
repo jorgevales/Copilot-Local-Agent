@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 from pathlib import Path
 import time
 import uuid
 
-from .persistence import io_path, write_json
+from .persistence import write_json
+from .screenshot_evidence import CAPTURE_PROPERTIES, capture_evidence
 from .policy import PolicyError
 from .web_navigation import get_navigation_page, _install_origin_guard
 
@@ -18,10 +18,9 @@ def _schema(properties, required=()):
 
 INSPECTION_SPECS = {
     'browser.inspect': (_schema({
-        'tab_id': {'type': 'string', 'maxLength': 100},
+        **CAPTURE_PROPERTIES,
         'max_nodes': {'type': 'integer', 'minimum': 1, 'maximum': 2000},
-        'full_page': {'type': 'boolean'},
-    }), 'user_approval', 'Inspect an owned website tab: DOM, shadow DOM, control coordinates, forms, scripts, observed API/resource metadata and screenshot run concurrently. Automatically attach the screenshot to the next Copilot exchange; complete structure uses the existing large-result file transport. Resource evidence describes observed client/backend interfaces, not server source.'),
+    }), 'user_approval', 'Inspect DOM/app/API structure concurrently with the first screenshot, then capture a configurable scroll/element/region batch. All labeled pictures are combined in one automatically attached PDF. Use shots with label, selector, scroll_x/scroll_y, optional scroll_container or viewport clip; otherwise sample up to three page positions. Resource evidence describes interfaces, not server source.'),
     'browser.javascript': (_schema({
         'tab_id': {'type': 'string', 'maxLength': 100},
         'expression': {'type': 'string', 'minLength': 1, 'maxLength': 50000},
@@ -86,39 +85,21 @@ async def execute_inspection(name, args, context):
     started = time.time()
     folder = Path(context['session_dir']) / 'browser_inspections'
     token = uuid.uuid4().hex
-    png, document = folder / (token + '.png'), folder / (token + '.json')
-    # Independent observations share one tab; never interleave a navigation/action here.
-    structure, screenshot = await asyncio.gather(
-        asyncio.wait_for(page.evaluate(SNAPSHOT, {'maxNodes': args.get('max_nodes', 300)}), 15),
-        page.screenshot(type='png', full_page=args.get('full_page', False), timeout=15000,
-                        mask=[page.locator('input[type=password],[autocomplete=current-password],[autocomplete=new-password]')]),
-        return_exceptions=True)
-    result = {'status': 'observed', 'tab_id': args.get('tab_id', 'tab-1'),
+    document = folder / (token + '.json')
+    # Finish the first structural observation before scrolling for later pictures.
+    result = await capture_evidence(page, args, context,
+        observation=lambda: asyncio.wait_for(page.evaluate(SNAPSHOT, {'maxNodes': args.get('max_nodes', 300)}), 15))
+    structure = result.pop('_structure', None)
+    result.update({'tab_id': args.get('tab_id', 'tab-1'),
               'capture_started_at': started, 'capture_finished_at': time.time(),
               'same_url_during_capture': before == page.url, 'parallel_capture': True, 'side_effects_uncertain': False,
-              'consistency': 'Concurrent observations, not an atomic snapshot. Reinspect if URL/layout changed.',
-              'gaps': []}
+              'consistency': 'DOM matches the first capture. Later pictures report their own scroll positions; captures are not atomic.'})
     if before != page.url:
         result['gaps'].append('The page navigated during capture; repeat paired inspection on the settled page.')
     if isinstance(structure, BaseException):
         result['gaps'].append('Structural inspection failed: ' + type(structure).__name__)
-    else:
+    elif structure is not None:
         result['structure'] = structure
-    if isinstance(screenshot, BaseException):
-        result['gaps'].append('Screenshot failed: ' + type(screenshot).__name__)
-    else:
-        target = io_path(png)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(screenshot)
-        result['screenshot'] = {'path': str(png), 'sha256': hashlib.sha256(screenshot).hexdigest(),
-                                'bytes': len(screenshot), 'coordinate_space': 'DOM boxes are viewport CSS pixels'}
-        pending = context.setdefault('pending_image_attachments', [])
-        if len(pending) < 10:
-            pending.append(str(png))
-            result['screenshot']['queued_for_copilot'] = True
-        else:
-            result['screenshot']['queued_for_copilot'] = False
-            result['gaps'].append('Screenshot saved; attach on a later exchange because the image queue is full.')
     if result['gaps']:
         result['status'] = 'partial'
     result['artifact_path'] = str(document)

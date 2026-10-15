@@ -100,7 +100,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `copilot_agent/browser_inspection.py`
 
 - Role: Paired structural/visual evidence and explicit JavaScript on owned website tabs.
-- Direct imports: `.persistence`, `.policy`, `.web_navigation`, `__future__`, `asyncio`, `hashlib`, `pathlib`, `time`, `uuid`
+- Direct imports: `.persistence`, `.policy`, `.screenshot_evidence`, `.web_navigation`, `__future__`, `asyncio`, `pathlib`, `time`, `uuid`
 - Public symbols: `_schema(properties, required=()) [private helper]`; `execute_inspection(name, args, context)`
 
 ### `copilot_agent/bundle.py`
@@ -330,6 +330,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `__future__`, `asyncio`, `json`, `os`, `pathlib`, `re`, `shutil`, `socket`, `subprocess`, `sys`, `time`, `urllib.parse`, `urllib.request`
 - Public symbols: `_decode_process_command(buffer, returned) [private helper]`; `_edge_listener_process(port: int) -> dict [private helper]`; `_hidden_command(command: list[str], timeout=8) -> str [private helper]`; `_loopback_listener_pid_native(port: int) -> int | None [private helper]`; `_native_probe(kind, identifier) [private helper]`; `_profile_argument(command_line: str) -> Path | None [private helper]`; `_windows_process_details(pid: int) -> dict [private helper]`; `_windows_process_details_native(pid: int) -> dict [private helper]`; `cdp_endpoint(port: int) -> str`; `class EndpointError(RuntimeError)`; `connect_bounded(playwright, endpoint: str, timeout: float, process=None, initial_payload=None, endpoint_validator=None, endpoint_wait_timeout=None)`; `direct_profile_candidates(profile)`; `discover_edge_debugging_endpoints() -> list[dict]`; `find_edge_executable(explicit_path=None) -> Path`; `get_cdp_version(endpoint: str, timeout: float=0.75) -> dict | None`; `launch_edge(edge_path: Path, port: int, profile: Path) -> subprocess.Popen`; `launch_edge_direct(edge_path, port, profile, *, software_graphics=False)`; `loopback_listener_pid(port: int) -> int | None`; `port_listening(port: int) -> bool`; `profile_in_use(profile: Path) -> bool`; `remote_debugging_blocked() -> bool`; `stop_launched_edge(process: subprocess.Popen | None) -> None`; `validate_edge_listener(port: int, profile: Path | None=None) -> Path | None`; `validate_endpoint(endpoint: str, payload: dict) -> str`; `validate_launched_endpoint(port: int, profile: Path, process: subprocess.Popen | None) -> None`; `validate_profile_ownership(port: int, profile: Path) -> None`
 
+### `copilot_agent/screenshot_evidence.py`
+
+- Role: One labeled, full-resolution PDF for a configurable batch of page captures.
+- Direct imports: `.persistence`, `.policy`, `__future__`, `asyncio`, `hashlib`, `io`, `pathlib`, `PIL`, `textwrap`, `urllib.parse`, `uuid`
+- Public symbols: `_object(properties, required=()) [private helper]`; `_pdf(pages, target) [private helper]`; `capture_evidence(page, args, context, observation=None)`
+
 ### `copilot_agent/session_mode.py`
 
 - Role: One ephemeral, permissive session choice; never restored from saved state.
@@ -387,7 +393,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `copilot_agent/tools.py`
 
 - Role: Versioned local capabilities. Browser tools use guarded owned Edge tabs.
-- Direct imports: `.archives`, `.browser_inspection`, `.code_runner`, `.discovery_contracts`, `.discovery_engine`, `.discovery_knowledge`, `.downloads`, `.local_navigation`, `.logging_utils`, `.policy`, `.reconciliation`, `.research_permissions`, `.session_mode`, `.site_knowledge`, `.sync`, `.web_documents`, `.web_navigation`, `.web_operations`, `asyncio`, `ctypes`, `hashlib`, `importlib.metadata`, `json`, `os`, `pathlib`, `platform`, `re`, `shutil`, `sys`, `urllib.parse`, `uuid`
+- Direct imports: `.archives`, `.browser_inspection`, `.code_runner`, `.discovery_contracts`, `.discovery_engine`, `.discovery_knowledge`, `.downloads`, `.local_navigation`, `.logging_utils`, `.policy`, `.reconciliation`, `.research_permissions`, `.screenshot_evidence`, `.session_mode`, `.site_knowledge`, `.sync`, `.web_documents`, `.web_navigation`, `.web_operations`, `asyncio`, `ctypes`, `hashlib`, `importlib.metadata`, `json`, `os`, `pathlib`, `platform`, `re`, `shutil`, `sys`, `urllib.parse`, `uuid`
 - Public symbols: `_approved_write_target(name, args, policy, context) [private helper]`; `_atomic_replace(path, payload, expected_sha256, context, policy, *, operation_name='files.replace') [private helper]`; `_require_extended_read(path, policy) [private helper]`; `_swap_replacement_file(path, temp) [private helper]`; `_write_target(name, args, policy, context) [private helper]`; `class ToolRegistry; method names: definitions, definition, validate_input, validate_call, _limit, execute, _execute`; `configured_path_policy(config, session_dir)`; `definitions()`; `execute(name, args, context)`; `obj(properties, required=None)`; `schema_example(schema)`; `tool_path_policy(name, context)`; `validate(value, schema)`
 
 ### `copilot_agent/web_documents.py`
@@ -543,8 +549,8 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `tests/test_browser_inspection.py`
 
 - Role: Implementation module; responsibilities are identified by its public symbols and imports.
-- Direct imports: `asyncio`, `copilot_agent.browser_inspection`, `copilot_agent.policy`, `copilot_agent.tools`, `hashlib`, `json`, `pathlib`, `tempfile`, `tests`, `types`, `unittest`, `unittest.mock`
-- Public symbols: `class InspectionBrowserTests(unittest.IsolatedAsyncioTestCase); 3 public methods`; `class InspectionConcurrencyTests(unittest.IsolatedAsyncioTestCase); 1 public methods`
+- Direct imports: `asyncio`, `copilot_agent.browser_inspection`, `copilot_agent.policy`, `copilot_agent.screenshot_evidence`, `copilot_agent.tools`, `hashlib`, `json`, `pathlib`, `tempfile`, `tests`, `types`, `unittest`, `unittest.mock`
+- Public symbols: `class InspectionBrowserTests(unittest.IsolatedAsyncioTestCase); 4 public methods`; `class InspectionConcurrencyTests(unittest.IsolatedAsyncioTestCase); 1 public methods`
 
 ### `tests/test_browser_plan_extensions.py`
 

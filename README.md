@@ -1,7 +1,7 @@
 # Copilot Local Agent
 
 `browser.inspect` now captures DOM/app structure and a screenshot concurrently,
-automatically attaching the image for Copilot. `browser.javascript` supports
+automatically attaching one labeled PDF of scroll/element/region pictures for Copilot. `browser.javascript` supports
 targeted DOM queries and SPA navigation. See [DOM and visual navigation](docs/DOM_AND_VISUAL_NAVIGATION.md).
 
 Startup offers **one fast full-access option for this session**: skip package quality

@@ -6,7 +6,7 @@ import json
 import re
 
 PRIVATE_TOOLS = {
-    'browser.inspect', 'browser.javascript',
+    'browser.inspect', 'browser.javascript', 'browser.screenshot',
     'crawl4ai.crawl', 'crawl4ai.read',
     'browser.reconcile', 'browser.recover_uncertain', 'browser.diagnostics',
     'operation.quarantine', 'operation.reconcile',
