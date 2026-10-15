@@ -487,7 +487,7 @@ class ToolRegistry:
                          else config_value(self.config, 'rea_node_readiness_timeout_seconds', 180))
             fallback = (config_value(self.config, 'rea_fallback_timeout_seconds', 15)
                         if config_value(self.config, 'rea_backend', 'auto') == 'auto' else 0)
-            timeout = config_value(self.config, 'rea_timeout_seconds', 45) + readiness + fallback + 12
+            timeout = config_value(self.config, 'rea_timeout_seconds', 600) + readiness + fallback + 12
             result_schema = {'anyOf': [{'type': 'object', 'properties': {
                 'status': {'enum': ['completed', 'partial', 'failed', 'unavailable', 'cancelled', 'timeout', 'output_limit', 'uncertain']},
                 'target': {'type': 'string'}, 'target_type': {'type': 'string'},
@@ -517,7 +517,7 @@ class ToolRegistry:
             definition['availability'] = self.rea_availability()
             definition['output_size_limit'] = config_value(self.config, 'rea_max_output_bytes', 1048576)
             definition['limits'].update(output_bytes=definition['output_size_limit'],
-                analysis_timeout_seconds=config_value(self.config, 'rea_timeout_seconds', 45),
+                analysis_timeout_seconds=config_value(self.config, 'rea_timeout_seconds', 600),
                 fallback_timeout_seconds=fallback,
                 transport_bytes=config_value(self.config, 'rea_max_transport_bytes', 33554432),
                 readiness_timeout_seconds=readiness,
@@ -805,7 +805,9 @@ class ToolRegistry:
             if name in REA_SPECS:
                 readiness = (0 if config_value(config, 'rea_backend', 'auto') == 'python_native'
                              else config_value(config, 'rea_node_readiness_timeout_seconds', 180))
-                timeout = config_value(config, 'rea_timeout_seconds', 45) + readiness + 12
+                fallback = (config_value(config, 'rea_fallback_timeout_seconds', 15)
+                            if config_value(config, 'rea_backend', 'auto') == 'auto' else 0)
+                timeout = config_value(config, 'rea_timeout_seconds', 600) + readiness + fallback + 12
             result=await asyncio.wait_for(self._execute(name,args,context,policy),timeout=timeout)
             if name in REA_SPECS and not observation_usable(result):
                 status = result.get('status', 'failed')

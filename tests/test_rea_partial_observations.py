@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from copilot_agent.logging_utils import now
+from copilot_agent.config import Config
 from copilot_agent.policy import PathPolicy
 from copilot_agent.rea import observation_usable, _save
 from copilot_agent.research_routing import route_research
@@ -71,9 +72,18 @@ class PartialObservationTests(unittest.IsolatedAsyncioTestCase):
         with patch('copilot_agent.tools.rea_health', return_value={'available': True}):
             definitions = ToolRegistry(dict(self.config, rea_backend='auto')).definition('rea.analyze_artifact')
         self.assertEqual(180, definitions['limits']['readiness_timeout_seconds'])
-        self.assertEqual(45, definitions['limits']['analysis_timeout_seconds'])
+        self.assertEqual(600, definitions['limits']['analysis_timeout_seconds'])
         self.assertEqual(15, definitions['limits']['fallback_timeout_seconds'])
-        self.assertEqual(252, definitions['limits']['timeout_seconds'])
+        self.assertEqual(807, definitions['limits']['timeout_seconds'])
+
+    def test_persisted_old_deadline_is_upgraded_and_long_deadline_is_valid(self):
+        for requested, expected in ((45, 600), (600, 600), (1800, 1800), (120, 120)):
+            with self.subTest(requested=requested):
+                config = Config(root=self.root, storage_dir=self.root, rea_timeout_seconds=requested)
+                config.validate()
+                self.assertEqual(expected, config.rea_timeout_seconds)
+        with self.assertRaisesRegex(ValueError, 'rea_timeout_seconds'):
+            Config(root=self.root, storage_dir=self.root, rea_timeout_seconds=1801).validate()
 
     def test_complete_path_restoration_cannot_exceed_output_budget_as_success(self):
         result = _save({'execution_id': 'a' * 32, 'backend': 'python_native', 'tool': 'rea.analyze_artifact',

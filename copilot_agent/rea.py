@@ -585,7 +585,7 @@ def validate_rea(name, args, context, policy):
     from .tools import validate
     validate(args, REA_SPECS[name][0])
     config = context.get('config', {})
-    _bounded(config, 'rea_timeout_seconds', 45, 1, 180)
+    _bounded(config, 'rea_timeout_seconds', 600, 1, 1800)
     _bounded(config, 'rea_fallback_timeout_seconds', 15, 1, 180)
     _bounded(config, 'rea_max_transport_bytes', 33554432, 16384, 67108864)
     _bounded(config, 'rea_max_output_bytes', 1048576, 16384, 8388608)
@@ -935,7 +935,7 @@ async def _execute_python(name, args, context, policy):
     prepared = validate_rea(name, args, context, policy)
     prepared.update(_name=name, _arguments=args)
     config = context.get('config', {})
-    timeout = config_value(config, 'rea_timeout_seconds', 45)
+    timeout = config_value(config, 'rea_timeout_seconds', 600)
     output_limit = config_value(config, 'rea_max_output_bytes', 1048576)
     base = {'execution_id': uuid.uuid4().hex, 'backend': 'python_native', 'tool': name,
             'target': prepared['target'], 'target_type': prepared['target_type'],
@@ -1121,7 +1121,7 @@ async def _execute_node(name, args, context, policy):
         semaphore = runtime['semaphore'] = asyncio.Semaphore(slots)
         runtime['loop'] = loop
     async with semaphore:
-        command = [health['node'], '--max-old-space-size=384', str(Path(health['repository']) / 'scripts/rea.mjs')]
+        command = [health['node'], '--max-old-space-size=1024', str(Path(health['repository']) / 'scripts/rea.mjs')]
         page = None
         staging = None
         if name != 'rea.inspect_page':
@@ -1159,12 +1159,12 @@ async def _execute_node(name, args, context, policy):
             if args['kind'] == 'javascript':
                 command += ['--max-heap-mb', '256', '--max-semantic-nodes', '10000',
                             '--max-semantic-nodes-per-file', '3000', '--analysis-timeout-ms',
-                            str(config_value(config, 'rea_timeout_seconds', 45) * 1000)]
+                            str(config_value(config, 'rea_timeout_seconds', 600) * 1000)]
         command += ['--json', '--full-output']
         base['operation'] = command[3]
         try:
             run = await _run(command, cwd=health['repository'],
-                timeout=config_value(config, 'rea_timeout_seconds', 45),
+                timeout=config_value(config, 'rea_timeout_seconds', 600),
                 output_limit=config_value(config, 'rea_max_transport_bytes', 33554432), context=context)
             base['execution_started'] = context.get('rea_execution_started', False)
             if run.get('status') or run.get('output_complete') is False:

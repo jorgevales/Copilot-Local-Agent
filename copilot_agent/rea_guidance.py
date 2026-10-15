@@ -93,6 +93,8 @@ def rea_usage_guidance(config=None):
         'limits': {
             'readiness_timeout_seconds': value('rea_node_readiness_timeout_seconds'),
             'analysis_timeout_seconds': value('rea_timeout_seconds'),
+            'analysis_timeout_max_seconds': 1800,
+            'node_old_space_heap_mib': 1024,
             'fallback_timeout_seconds': value('rea_fallback_timeout_seconds'),
             'readiness_budget': 'Separate shared budget for readiness probes; cached verified readiness is reused. Observation wait is only part of analysis time, not the process deadline.',
             'fallback_budget': 'Node receives its full analysis allowance. A permitted fallback has its own bounded allowance; its evidence remains explicitly degraded.',

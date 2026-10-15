@@ -68,7 +68,7 @@ class Config:
     rea_repository: str = ''
     rea_node_executable: str = ''
     rea_node_readiness_timeout_seconds: int = 180
-    rea_timeout_seconds: int = 45
+    rea_timeout_seconds: int = 600
     rea_fallback_timeout_seconds: int = 15
     rea_max_transport_bytes: int = 33554432
     rea_max_output_bytes: int = 1048576
@@ -195,7 +195,10 @@ class Config:
                 raise ValueError(key + ' must be a trusted path string')
             if value and not Path(value).is_absolute():
                 raise ValueError(key + ' must be an absolute administrator-configured path')
-        for key, minimum, maximum in (('rea_timeout_seconds', 1, 180),
+        # Upgrade the previous shipped deadline in persisted settings too.
+        if self.rea_timeout_seconds == 45:
+            self.rea_timeout_seconds = 600
+        for key, minimum, maximum in (('rea_timeout_seconds', 1, 1800),
                                      ('rea_fallback_timeout_seconds', 1, 180),
                                      ('rea_max_transport_bytes', 16384, 67108864),
                                      ('rea_node_readiness_timeout_seconds', 1, 180),

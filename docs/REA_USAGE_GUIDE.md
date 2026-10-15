@@ -73,7 +73,11 @@ other excluded carriers remain excluded from returned evidence.
 - Uncertain cleanup blocks automatic fallback/retry.
 
 Current defaults: readiness **180 seconds** shared across readiness phases,
-Node analysis **45 seconds**, optional fallback **15 seconds** separately.
+Node analysis **600 seconds** (10 minutes), optional fallback **15 seconds** separately.
+Set `rea_timeout_seconds` between 1 and 1800 seconds for complex investigations.
+The previous shipped value of 45 seconds is upgraded to 600 when configuration is validated.
+Node receives a 1024 MiB old-space heap ceiling for large page observations.
+These are maximum allowances: successful calls return immediately, and cancellation remains available.
 Readiness is cached by runtime identity. The `observation_ms` window is only
 one part of analysis, not its total process deadline. Catalogue limits reflect
 configuration: input **20 MiB**, concurrency **3**, model-facing output **1 MiB**,
