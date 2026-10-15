@@ -13,6 +13,11 @@ def canonical_hash(value) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':')).encode('utf-8')).hexdigest()
 
 
+def browser_inventory(request):
+    """Listing owned tabs observes local registration, even before any page exists."""
+    return request.get('name') == 'browser.tabs' and request.get('arguments', {}).get('operation') == 'list'
+
+
 def operation_domains(name: str) -> frozenset[str]:
     """Conservative effect domains; unknown tools retain the global gate."""
     if name.startswith(('site_knowledge.', 'discovery.knowledge_', 'knowledge.')):
@@ -87,6 +92,46 @@ class SessionState:
                          'response_ids': [], 'summary': '', 'requirements': [], 'decisions': [],
                          'constraints': [], 'unresolved_questions': [], 'findings_sync': []}
             self.save()
+
+        self.repair_browser_observations()
+
+    def repair_browser_observations(self):
+        """Correct provably read-only/preflight legacy entries, never unknown effects."""
+        repaired, previous = [], {}
+        prior_status = self.data['status']
+        for call_id, call in self.data['calls'].items():
+            if call.get('status') != 'uncertain':
+                continue
+            request, outcome = call.get('request', {}), call.get('result', {})
+            inventory = browser_inventory(request) or call.get('browser_observation_only') is True
+            refusal = (request.get('name') == 'browser.recover_uncertain'
+                       and outcome.get('error', {}).get('code') == 'policy_denied'
+                       and outcome.get('error', {}).get('message') == 'Recovery checkpoint must remain on the uncertain action website')
+            if not inventory and not refusal:
+                continue
+            previous[call_id] = deepcopy(call)
+            call.update(status='completed', completion_credited=False,
+                        ledger_repair={'kind': 'read_only_inventory' if inventory else 'recovery_preflight_refusal',
+                                       'repaired_at': now()})
+            if inventory:
+                call.update(state_changing=False, browser_observation_only=True)
+            call.setdefault('result', {}).setdefault('result', {}).update(
+                status='not_started' if not outcome.get('ok') else 'observed', side_effects_uncertain=False)
+            repaired.append(call_id)
+        if repaired:
+            if not self.data.get('pending_submission') and not any(call.get('status') == 'uncertain' for call in self.data['calls'].values()):
+                self.data['status'] = 'ready'
+            try:
+                self.save()
+            except Exception:
+                self.data['calls'].update(previous)
+                self.data['status'] = prior_status
+                raise
+            try:
+                self.event('browser_observation_ledger_repaired', count=len(repaired))
+            except OSError:
+                pass
+        return repaired
 
     @property
     def session_id(self):
@@ -192,6 +237,8 @@ class SessionState:
     def begin_call(self, request: dict, state_changing: bool = True, reconciliation_baseline=None,
                    uncertainty_recovery: bool = False):
         call_id = request['call_id']
+        if browser_inventory(request):
+            state_changing = False
         from .web_privacy import private_id
         if uncertainty_recovery and request.get('name') not in {'browser.recover_uncertain', 'operation.quarantine'}:
             raise RuntimeError('Only the uncertainty recovery tool may bypass the pending-effect gate')
@@ -205,9 +252,11 @@ class SessionState:
                         for c in self.data['calls'].values())):
             raise RuntimeError('A previous state-changing operation remains uncertain; inspect and reconcile before another change')
         action_hash = canonical_hash({k: request[k] for k in ('name', 'version', 'arguments')})
-        if any(c.get('action_hash') == action_hash and c['status'] in {'uncertain', 'abandoned_unverifiable'} for c in self.data['calls'].values()):
+        if not browser_inventory(request) and any(c.get('action_hash') == action_hash and c['status'] in {'uncertain', 'abandoned_unverifiable'} for c in self.data['calls'].values()):
             raise RuntimeError('An identical action has uncertain effects; reconcile before requesting it again')
         self.data['calls'][call_id] = {'status': 'executing', 'request_hash': canonical_hash(request), 'action_hash': action_hash, 'state_changing': state_changing, 'request': request, 'started_at': now()}
+        if browser_inventory(request):
+            self.data['calls'][call_id]['browser_observation_only'] = True
         if reconciliation_baseline is not None:
             self.data['calls'][call_id]['reconciliation_baseline'] = deepcopy(reconciliation_baseline)
         self.event('tool_intent', call_id=call_id, name=request['name'], request_hash=canonical_hash(request))

@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from .policy import PathPolicy, URLPolicy, PolicyError, config_value, is_s_drive_path, resolve_s_drive_output
+from .state import browser_inventory
 from .session_mode import fast_mode, website_policy
 from .local_navigation import SessionFileAccessPolicy
 from .local_navigation import (SessionPathPolicy, SessionPathExtensionPolicy, SessionNavigationGrant,
@@ -150,7 +151,7 @@ SPECS = {
     "browser.info": (obj({}), "read_only", "Read tool-tab URL and title."),
     "browser.diagnostics": (obj({}), "read_only", "Read sanitized authoritative browser registration, connection, owned-tab count and uncertain/quarantined ledger states. No URLs, titles, cookies or page content."),
     "browser.reconcile": (obj({"call_id":S,"outcome":{"type":"string","enum":["completed","not_executed"]},"observed_url":S,"observed_title":{"type":"string","maxLength":300}},["call_id","outcome","observed_url"]), "read_only", "Resolve an uncertain navigation-only browser call automatically after fresh local inspection confirms the exact observed URL and pre-action fingerprint. No click or navigation; never use for forms or writes."),
-    "browser.recover_uncertain": (obj({"call_id":S,"checkpoint_url":S}), "user_approval", "Quarantine one uncertain non-navigation browser action without crediting its outcome, open a fresh approved same-origin checkpoint, and resume the current run. Never replays the action."),
+    "browser.recover_uncertain": (obj({"call_id":S,"checkpoint_url":S}), "user_approval", "Quarantine one uncertain non-navigation browser action without outcome credit and establish a fresh approved checkpoint. If the original tab is absent/closed/blank, no original website is required; live-origin restrictions follow the session mode. Validation refusals are not_started, not uncertain actions. Never replay the original action."),
     "operation.quarantine": (obj({"call_id":S}), "user_approval", "Quarantine one uncertain non-browser operation without replay or outcome credit. The identical action remains barred; inspect effects before proposing a different action."),
     "operation.reconcile": (obj({"call_id":S}), "read_only", "Resolve an uncertain site-knowledge save from a fresh readback against the recorded pre-write and approved target hashes. Other operation types require their subsystem recovery."),
     "browser.read": (obj({"frame_selector":S},[]), "read_only", "Read bounded visible body text from the managed tab or one explicit iframe."),
@@ -455,7 +456,8 @@ class ToolRegistry:
                 "limits":{"timeout_seconds":timeout,"output_chars":None,"legacy_projection_chars":12000,"file_bytes":20971520},
                 "output_transport": 'Complete current results; oversized chat envelopes use indexed JSON attachments. Worker-specific input/resource and attachment budgets still apply.',
                 "errors":errors,
-                "examples":examples}
+                "examples":examples,
+                **({'approval_policy_by_operation': {'list': 'read_only', 'open': 'user_approval', 'close': 'user_approval', 'reset': 'user_approval'}} if name == 'browser.tabs' else {})}
 
     def validate_input(self, name, args):
         if name=='site_knowledge.save':
@@ -700,7 +702,7 @@ class ToolRegistry:
         try:
             definition=self.definition(name)
             preflight_result = self.validate_call(name,args,context)
-            if definition["approval_policy"]!="read_only" and context.get("approved") is not True:
+            if definition["approval_policy"]!="read_only" and not browser_inventory({'name': name, 'arguments': args}) and context.get("approved") is not True:
                 raise PolicyError("Explicit local approval is required")
             if name == "automation.inspect":
                 return self._limit({"ok": True, "tool": name, "result": preflight_result}, context)
@@ -1076,6 +1078,9 @@ class ToolRegistry:
         if name.startswith("browser."):
             browser=context.get("browser")
             page=getattr(browser,"tool_page",None)
+            if name == 'browser.info' and (page is None or page.is_closed()):
+                return {'status': 'no_owned_page', 'owned_page_available': False,
+                        'side_effects_uncertain': False, 'next_action': 'browser.open'}
             if name == "browser.open" and (page is None or page.is_closed()):
                 # A login flow can replace or close an owned tab. The approved
                 # URL is preflighted before opening another tab in this profile.

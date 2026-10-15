@@ -21,7 +21,7 @@ from .presentation import exchange_summary, call_summary
 from .research_permissions import prepare_permissions
 from .prompts import PromptBuilder
 from .protocol import ProtocolError, parse_response, correction_message
-from .state import canonical_hash, operation_domains, recoverable_capture_request_id
+from .state import canonical_hash, operation_domains, recoverable_capture_request_id, browser_inventory
 from .sync import CreatedSync
 from .attachments import AttachmentQueue, SUPPORTED_EXTENSIONS, TEXT_EXTENSIONS, upload_name
 
@@ -880,6 +880,7 @@ class Orchestrator:
         return target
 
     async def _send(self, kind: str, content, extra_attachments=()):
+        self.state.repair_browser_observations()
         from .session_mode import configure_session, fast_mode
         if self.approvals.supervised_session or fast_mode(self.config):
             configure_session(self.config, self.approvals.supervised_session)
@@ -1145,6 +1146,7 @@ class Orchestrator:
         raise RuntimeError('Unreachable retry state')
 
     def _preflight(self, response):
+        self.state.repair_browser_observations()
         self._recover_uncertain_knowledge()
         recovered = recover_missing_navigation(self.state, self.browser)
         if recovered:
@@ -1159,15 +1161,15 @@ class Orchestrator:
             if call['call_id'] in self.state.data['calls'] or private_id(call['call_id']) in self.state.data['calls']:
                 raise PolicyError('Previously processed call ID must not be replayed')
             action_hash = canonical_hash({k: call[k] for k in ('name', 'version', 'arguments')})
-            if any(c.get('action_hash') == action_hash and c['status'] in {'uncertain', 'abandoned_unverifiable'} for c in self.state.data['calls'].values()):
+            if not browser_inventory(call) and any(c.get('action_hash') == action_hash and c['status'] in {'uncertain', 'abandoned_unverifiable'} for c in self.state.data['calls'].values()):
                 raise PolicyError('An identical action has unresolved or quarantined effects. Inspect the relevant subsystem and reconcile from fresh evidence where supported; do not replay it.')
             prior_failure = next((c for c in self.state.data['calls'].values()
                                   if c.get('action_hash') == action_hash and c['status'] == 'completed'
                                   and not c.get('result', {}).get('ok')), None)
             from .session_mode import fast_mode
             prior_detail = (prior_failure or {}).get('result', {}).get('result', {})
-            certain_retry = fast_mode(self.config) and (prior_detail.get('side_effects_uncertain') is False
-                                                       or prior_detail.get('status') == 'not_started')
+            certain_retry = browser_inventory(call) or fast_mode(self.config) and (prior_detail.get('side_effects_uncertain') is False
+                                                                                 or prior_detail.get('status') == 'not_started')
             if prior_failure and not certain_retry:
                 if (call['name'] == 'automation.inspect'
                         and self._prior_package_review(call.get('arguments', {}).get('expected_sha256'))):
@@ -1182,7 +1184,7 @@ class Orchestrator:
                     '. No new action ran. Correct the specific failing argument, selector, path or code using this result; a small justified repair to the same approach is enough, '
                     'or explain the actual blocker; changing only call_id is not a recovery.'
                 )
-            if (catalog[call['name']]['approval_policy'] != 'read_only'
+            if (catalog[call['name']]['approval_policy'] != 'read_only' and not browser_inventory(call)
                     and call['name'] not in {'browser.recover_uncertain', 'operation.quarantine'}
                     and any(c['status'] == 'uncertain' and c.get('state_changing', True)
                             and ('global' in operation_domains(call['name'])
@@ -1568,7 +1570,7 @@ class Orchestrator:
                         results.append({'call_id': call['call_id'], **blocked_run})
                         package_review_failure = {'call_id': call['call_id'], **blocked_run}
                         break
-                needs_approval = definition['approval_policy'] not in {'none', 'read_only', 'automatic', 'auto_readonly'}
+                needs_approval = not browser_inventory(call) and definition['approval_policy'] not in {'none', 'read_only', 'automatic', 'auto_readonly'}
                 effectful = needs_approval or call['name']=='research.perform' and call['arguments'].get('operation') in {'search','navigate','open_profile','open_document_library','open_document'}
                 navigation_authorized = needs_approval and navigation_scope_allows(call, self.browser, self.navigation_domains, self.navigation_binding)
                 if navigation_authorized:

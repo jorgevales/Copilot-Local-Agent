@@ -364,7 +364,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Implementation module; responsibilities are identified by its public symbols and imports.
 - Direct imports: `.logging_utils`, `.persistence`, `__future__`, `copy`, `hashlib`, `json`, `pathlib`, `re`, `uuid`
-- Public symbols: `canonical_hash(value) -> str`; `class SessionState; method names: __init__, session_id, message_count, save, event, message, begin_submission, confirm_submission, reconcile_submission, begin_call, quarantine_call, abandon_browser_uncertainty, finish_call, fail_active_turn, approve_domain, quarantine_missing_navigation, reconcile_call, grant, context`; `latest_committed_request_id(state) -> str | None`; `operation_domains(name: str) -> frozenset[str]`; `recoverable_capture_request_id(state) -> str | None`
+- Public symbols: `browser_inventory(request)`; `canonical_hash(value) -> str`; `class SessionState; method names: __init__, repair_browser_observations, session_id, message_count, save, event, message, begin_submission, confirm_submission, reconcile_submission, begin_call, quarantine_call, abandon_browser_uncertainty, finish_call, fail_active_turn, approve_domain, quarantine_missing_navigation, reconcile_call, grant, context`; `latest_committed_request_id(state) -> str | None`; `operation_domains(name: str) -> frozenset[str]`; `recoverable_capture_request_id(state) -> str | None`
 
 ### `copilot_agent/storage.py`
 
@@ -393,7 +393,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `copilot_agent/tools.py`
 
 - Role: Versioned local capabilities. Browser tools use guarded owned Edge tabs.
-- Direct imports: `.archives`, `.browser_inspection`, `.code_runner`, `.discovery_contracts`, `.discovery_engine`, `.discovery_knowledge`, `.downloads`, `.local_navigation`, `.logging_utils`, `.policy`, `.reconciliation`, `.research_permissions`, `.screenshot_evidence`, `.session_mode`, `.site_knowledge`, `.sync`, `.web_documents`, `.web_navigation`, `.web_operations`, `asyncio`, `ctypes`, `hashlib`, `importlib.metadata`, `json`, `os`, `pathlib`, `platform`, `re`, `shutil`, `sys`, `urllib.parse`, `uuid`
+- Direct imports: `.archives`, `.browser_inspection`, `.code_runner`, `.discovery_contracts`, `.discovery_engine`, `.discovery_knowledge`, `.downloads`, `.local_navigation`, `.logging_utils`, `.policy`, `.reconciliation`, `.research_permissions`, `.screenshot_evidence`, `.session_mode`, `.site_knowledge`, `.state`, `.sync`, `.web_documents`, `.web_navigation`, `.web_operations`, `asyncio`, `ctypes`, `hashlib`, `importlib.metadata`, `json`, `os`, `pathlib`, `platform`, `re`, `shutil`, `sys`, `urllib.parse`, `uuid`
 - Public symbols: `_approved_write_target(name, args, policy, context) [private helper]`; `_atomic_replace(path, payload, expected_sha256, context, policy, *, operation_name='files.replace') [private helper]`; `_require_extended_read(path, policy) [private helper]`; `_swap_replacement_file(path, temp) [private helper]`; `_write_target(name, args, policy, context) [private helper]`; `class ToolRegistry; method names: definitions, definition, validate_input, validate_call, _limit, execute, _execute`; `configured_path_policy(config, session_dir)`; `definitions()`; `execute(name, args, context)`; `obj(properties, required=None)`; `schema_example(schema)`; `tool_path_policy(name, context)`; `validate(value, schema)`
 
 ### `copilot_agent/web_documents.py`
@@ -545,6 +545,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Role: Offline contract tests; no browser, file deletion, network, or Copilot send.
 - Direct imports: `asyncio`, `copilot_agent`, `copilot_agent.browser`, `copilot_agent.protocol`, `copilot_agent.reused_browser`, `hashlib`, `json`, `pathlib`, `sys`, `tempfile`, `types`, `unittest`, `unittest.mock`
 - Public symbols: `class CodeExpansionTests(unittest.IsolatedAsyncioTestCase); 2 public methods`; `class CorrelationTests(unittest.TestCase); 3 public methods`; `class ExchangeTests(unittest.IsolatedAsyncioTestCase); 16 public methods`; `class FakeButton; 3 public methods`; `class FakeEditor; 3 public methods`; `class InteractionReadinessTests(unittest.IsolatedAsyncioTestCase); 3 public methods`; `class OfflineAdapter(BrowserAdapter); 12 public methods`; `class PreloadedOfflineAdapter(OfflineAdapter); 3 public methods`; `class ReadinessAdapter(BrowserAdapter); 7 public methods`; `class ReadinessControl; 1 public methods`; `class RemainingCorrelationTests(unittest.TestCase); 14 public methods`; `class StartupRecoveryTests(unittest.IsolatedAsyncioTestCase); 9 public methods`; `class ToolContextTests(unittest.IsolatedAsyncioTestCase); 10 public methods`
+
+### `tests/test_browser_bootstrap_ledger.py`
+
+- Role: Implementation module; responsibilities are identified by its public symbols and imports.
+- Direct imports: `copilot_agent.orchestrator`, `copilot_agent.policy`, `copilot_agent.reconciliation`, `copilot_agent.state`, `copilot_agent.tools`, `pathlib`, `tempfile`, `tests`, `types`, `unittest`, `unittest.mock`
+- Public symbols: `class BootstrapLedgerTests(unittest.IsolatedAsyncioTestCase); 9 public methods`
 
 ### `tests/test_browser_inspection.py`
 

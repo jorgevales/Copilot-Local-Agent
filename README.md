@@ -1,5 +1,9 @@
 # Copilot Local Agent
 
+Tab listing works before a website is opened and cannot lock the browser ledger.
+Missing-page recovery can establish a fresh approved checkpoint; see
+[browser bootstrap recovery](docs/BROWSER_BOOTSTRAP_RECOVERY.md).
+
 `browser.inspect` now captures DOM/app structure and a screenshot concurrently,
 automatically attaching one labeled PDF of scroll/element/region pictures for Copilot. `browser.javascript` supports
 targeted DOM queries and SPA navigation. See [DOM and visual navigation](docs/DOM_AND_VISUAL_NAVIGATION.md).

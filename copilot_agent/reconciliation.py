@@ -266,14 +266,21 @@ async def abandon_uncertain_browser_call(state, browser, call_id: str, checkpoin
             or (call.get('reconciliation_baseline') or {}).get('kind') == 'navigation_only'):
         raise ReconciliationRequired('Use evidence-based reconciliation for navigation-only operations')
     urls = website_policy(getattr(browser, 'config', {}), state.data.get('approved_domains', []))
-    checkpoint_url = urls.resolve(checkpoint_url)
+    try:
+        checkpoint_url = urls.resolve(checkpoint_url)
+    except PolicyError as error:
+        raise ReconciliationRequired(str(error), side_effects_uncertain=False) from error
     previous_page = getattr(browser, 'tool_page', None)
     old_navigation = getattr(browser, '_navigation_state', {}) or {}
     detail = call.get('result', {}).get('result', {})
     tab_id = detail.get('tab_id', request.get('arguments', {}).get('tab_id', 'tab-1'))
     affected_page = old_navigation.get('tabs', {}).get(tab_id, {}).get('page', previous_page)
-    if previous_page is None or not fast_mode(getattr(browser, 'config', {})) and _origin(previous_page.url) != _origin(checkpoint_url):
-        raise PolicyError('Recovery checkpoint must remain on the uncertain action website')
+    reference = affected_page or previous_page
+    if (reference is not None and not reference.is_closed() and reference.url != 'about:blank'
+            and not fast_mode(getattr(browser, 'config', {}))
+            and _origin(reference.url) != _origin(checkpoint_url)):
+        raise ReconciliationRequired('Recovery checkpoint must remain on the uncertain action website',
+                                     side_effects_uncertain=False)
     page = await browser.new_tool_page()
     if (page is None or page is getattr(browser, 'page', None)
             or page is getattr(browser, 'chat_page', None)

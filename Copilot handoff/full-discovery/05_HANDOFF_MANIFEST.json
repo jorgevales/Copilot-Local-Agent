@@ -18,7 +18,7 @@
       "purpose": "Reading guide, scope, evidence labels and completeness boundary.",
       "recommended_reading_order": 1,
       "required": true,
-      "sha256": "e3b8b32d1293f042ca7caf2e720b0fd27e75dcd4a033a616e244c1682f88af16",
+      "sha256": "835ba5e5d4575be80902cc9c71da2e18582192e7295b105d5d630806528e70b8",
       "source_files_represented": [
         "README.md"
       ]
@@ -33,7 +33,7 @@
       "purpose": "Self-contained purpose, architecture, execution path, trust boundaries and operational assumptions.",
       "recommended_reading_order": 2,
       "required": true,
-      "sha256": "ea0978a07d58dd0a5aff3b1d05b9694af0e959d722736437601dd690b5b1d89a",
+      "sha256": "0b171d1566a5c0973adcd2086294f4cf2ca6a69d48242b06fa44fec527593397",
       "source_files_represented": [
         "Launcher.ps1",
         "README.md",
@@ -56,7 +56,7 @@
       ]
     },
     {
-      "bytes": 150711,
+      "bytes": 151243,
       "content_category": "generated source-symbol and Graphify summary",
       "content_treatment": "verbatim sections are source-bounded; generated analysis and summaries are explicitly labeled",
       "exclusions_or_summarization": "See package-level exclusions and per-source treatment records.",
@@ -65,7 +65,7 @@
       "purpose": "Python module/symbol/import inventory, summarized contracts and traceable Graphify relationship evidence.",
       "recommended_reading_order": 3,
       "required": true,
-      "sha256": "b83df24cec4015ea6a1a336f543e620a646d2955fc0832ec1026aef2a4a393f1",
+      "sha256": "f9979bad7ae7b75ea7116162716c9fc910ab132668ee6e1b1a53c304644cb089",
       "source_files_represented": [
         "Launcher.ps1",
         "Run Tests.cmd",
@@ -168,6 +168,7 @@
         "tests/test_automation_approval.py",
         "tests/test_automation_packages.py",
         "tests/test_browser.py",
+        "tests/test_browser_bootstrap_ledger.py",
         "tests/test_browser_inspection.py",
         "tests/test_browser_plan_extensions.py",
         "tests/test_bug_handoff.py",
@@ -222,7 +223,7 @@
       ]
     },
     {
-      "bytes": 226000,
+      "bytes": 228531,
       "content_category": "verbatim source documentation bundle",
       "content_treatment": "verbatim sections are source-bounded; generated analysis and summaries are explicitly labeled",
       "exclusions_or_summarization": "See package-level exclusions and per-source treatment records.",
@@ -231,7 +232,7 @@
       "purpose": "Verbatim project README and docs sources with explicit source boundaries.",
       "recommended_reading_order": 4,
       "required": true,
-      "sha256": "1e0b212a736709ef6f52865d8d073ca843f866e3e7e41e49c013dcba9068dfb6",
+      "sha256": "0a8ba005dbc7b75027c3f1c32fe098bbc9a6fce8868c96006216606addc97bf1",
       "source_files_represented": [
         "README.md",
         "agent_ui/README.md",
@@ -240,6 +241,7 @@
         "docs/ARCHITECTURE.md",
         "docs/ATTACHMENTS.md",
         "docs/AUTOMATION_PACKAGE_ARCHITECTURE.md",
+        "docs/BROWSER_BOOTSTRAP_RECOVERY.md",
         "docs/BROWSER_RECOVERY.md",
         "docs/BUSINESS_DATA_WORK.md",
         "docs/COPILOT_TESTING.md",
@@ -306,7 +308,7 @@
       ]
     },
     {
-      "bytes": 75912,
+      "bytes": 76580,
       "content_category": "generated manifest",
       "content_treatment": "generated metadata; SHA-256 is omitted for the manifest itself because it would be self-referential",
       "exclusions_or_summarization": "Self size is recorded; self hash is omitted.",
@@ -341,7 +343,7 @@
   "project": "Copilot Local Agent",
   "project_path_in_workspace": "Scripts and projects/Copilot Local Agent",
   "source_coverage": {
-    "eligible_text_source_count": 218,
+    "eligible_text_source_count": 220,
     "summarized_or_catalogued_sources": [
       "agent_ui/runtime.py",
       "agent_ui/tests/test_launch_ui.py",
@@ -449,6 +451,7 @@
       "tests/test_automation_approval.py",
       "tests/test_automation_packages.py",
       "tests/test_browser.py",
+      "tests/test_browser_bootstrap_ledger.py",
       "tests/test_browser_inspection.py",
       "tests/test_browser_plan_extensions.py",
       "tests/test_bug_handoff.py",
@@ -510,6 +513,7 @@
       "docs/ARCHITECTURE.md",
       "docs/ATTACHMENTS.md",
       "docs/AUTOMATION_PACKAGE_ARCHITECTURE.md",
+      "docs/BROWSER_BOOTSTRAP_RECOVERY.md",
       "docs/BROWSER_RECOVERY.md",
       "docs/BUSINESS_DATA_WORK.md",
       "docs/COPILOT_TESTING.md",
@@ -867,10 +871,10 @@
       "sha256": "6b4d5842ff1dcdea56c823accaccc5e8ea17093a21775d027a67196dde7da092"
     },
     {
-      "bytes": 156690,
+      "bytes": 156956,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/orchestrator.py",
-      "sha256": "b26e34f38def18b89dfaea53be550dbff321198ff6526a82cf44b45a484b0596"
+      "sha256": "ac63d98a6dc912d5cbae4a2cfd30282842af1aff16101dfd936001c29e2bcaa7"
     },
     {
       "bytes": 7484,
@@ -909,10 +913,10 @@
       "sha256": "99dd427461d87487aa270f6bbe0c33b8e960520b39aee5ad524cfee486fb7583"
     },
     {
-      "bytes": 19440,
+      "bytes": 19789,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/reconciliation.py",
-      "sha256": "9336c4f9f562b69a451387169773ed45d89960e9940093f66868898d35fd8066"
+      "sha256": "89c62874ab2cd845a8a7eefd519060f365a4210f38992bd7a3af42047a310a0e"
     },
     {
       "bytes": 25669,
@@ -957,10 +961,10 @@
       "sha256": "690dd6b845a7734992c0335fd571f2c492564da0c8e72eb2c84ba784f3fb9762"
     },
     {
-      "bytes": 24720,
+      "bytes": 27317,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/state.py",
-      "sha256": "3d69d4caeb39c6ad31219ca4120778be4ab6d14f8f683582a5d7a84b686c7cc1"
+      "sha256": "c15aa679c4eef2c032c60bddd00daff25cc83791a7ac58745a54f515838a82e4"
     },
     {
       "bytes": 5277,
@@ -987,10 +991,10 @@
       "sha256": "24a690df72702ad6320f8a25c72dae6bb06c92fee96366e27640f87ff003b948"
     },
     {
-      "bytes": 94170,
+      "bytes": 94860,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/tools.py",
-      "sha256": "9d3c81b14b17b7781de495e9e443f2471d06cac5845bc4fe9736bcfc8ae5069f"
+      "sha256": "8f214eb5c69573fd62e136e8213af032f8e2289b52bbd037859e0ce4d68b802a"
     },
     {
       "bytes": 38694,
@@ -999,10 +1003,10 @@
       "sha256": "6dccd8079338b5d3c7971485b495307e371e8eab1ba7704a4283b81180eeb430"
     },
     {
-      "bytes": 61738,
+      "bytes": 62368,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/web_navigation.py",
-      "sha256": "0e753515cdaa6da2fa309efa35b7d12f0f7f31495762fd6a738b91f8e856f5c0"
+      "sha256": "04bedda246159eaf48b934f65dd7ce89c85ae7df7b3d9f99baae1c367a22127f"
     },
     {
       "bytes": 25586,
@@ -1039,6 +1043,12 @@
       "content_treatment": "verbatim_text_embedded",
       "path": "docs/AUTOMATION_PACKAGE_ARCHITECTURE.md",
       "sha256": "b1e29b0cc5037a30e51805c68b978013b5b2592356612d68459d9feb4f22d38d"
+    },
+    {
+      "bytes": 2088,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/BROWSER_BOOTSTRAP_RECOVERY.md",
+      "sha256": "f12bb211d6e55c1690043fbd0bf2b324ff475ddd554d596396b9736918d1329a"
     },
     {
       "bytes": 5410,
@@ -1317,10 +1327,10 @@
       "sha256": "949553fecd97f0122177b2ce8391d932eeeada87c50ffb905ae4b5fa83f80eab"
     },
     {
-      "bytes": 17752,
+      "bytes": 17969,
       "content_treatment": "verbatim_text_embedded",
       "path": "README.md",
-      "sha256": "2a1537c18eac8b1240213a102b9801b71f708516e42af946f717c7dba43af1ba"
+      "sha256": "4c8ffd468aaaf1d3af1ae373516fa77e42c37e030ed7d6a4fa52c1e068a887dd"
     },
     {
       "bytes": 1819,
@@ -1555,6 +1565,12 @@
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "tests/test_browser.py",
       "sha256": "bf2ef10b6acf6cec3407671ebdb988816cb9afb38c405b5fc6af35d89cb51a66"
+    },
+    {
+      "bytes": 9601,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_browser_bootstrap_ledger.py",
+      "sha256": "b106e6290f27683b5674551ee0ec1bc2a1bc89c96340d30b80ae9c1a8f1cabf1"
     },
     {
       "bytes": 7739,

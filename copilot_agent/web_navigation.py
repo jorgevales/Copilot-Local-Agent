@@ -65,7 +65,7 @@ NAVIGATION_SPECS = {
         "operation": {"type": "string", "enum": ["list", "open", "close", "reset"]},
         "tab_id": KEY, "url": TEXT, "purpose": {"type": "string", "maxLength": 256},
         "task_id": KEY, "customer_key": KEY,
-    }, ("operation",)), "user_approval", "Manage at most six owned same-origin tabs with stable IDs and explicit task/customer contexts; preserve the primary page. Reset navigates that page to an approved safe URL before clearing prior task/customer bindings and ephemeral plans/maps."),
+    }, ("operation",)), "user_approval", "Manage owned website tabs with stable IDs. Operation list is read-only, needs no approval or existing page, and returns an empty inventory before browser.open. Open/close/reset retain execution authorization; preserve the primary page. Reset establishes a safe checkpoint before clearing prior bindings and plans."),
     "browser.plan": (_object({
         "task_id": KEY, "customer_key": KEY, "identity": IDENTITIES, "tab_id": KEY,
         "steps": {"type": "array", "items": _step_schema(), "maxItems": 50},
@@ -683,11 +683,18 @@ async def _reset_tabs(args, context):
 
 
 def _tab_list(context):
+    browser = context.get('browser')
+    state = getattr(browser, '_navigation_state', None)
+    page = getattr(browser, 'tool_page', None)
+    if page is not None and not page.is_closed():
+        state = _state(context)
+    elif state is None:
+        return []
     return [{"tab_id": key, "purpose": tab["purpose"], "primary": tab["primary"],
              "url": safe_url(tab["page"].url), "state": "closed" if tab["page"].is_closed() else "open",
              "task_bound": bool(tab["task_id"]), "customer_bound": bool(tab["customer_key"]),
              "customer_verified": tab["customer_verified"]}
-            for key, tab in _state(context)["tabs"].items()]
+            for key, tab in state["tabs"].items()]
 
 
 def plan_hash(args):
@@ -947,6 +954,10 @@ async def _execute_plan(args, context):
 async def execute_navigation(name, args, context, policy=None):
     validate_navigation(name, args, context)
     _check_cancelled(context)
+    if name == 'browser.tabs' and args['operation'] == 'list':
+        tabs = _tab_list(context)
+        return {'status': 'observed', 'tabs': tabs, 'side_effects_uncertain': False,
+                'next_action': 'browser.open' if not any(tab['state'] == 'open' for tab in tabs) else 'inspect_owned_tab'}
     if NAVIGATION_SPECS[name][1] != "read_only" and not context.get("approved"):
         raise PolicyError("Navigation plan/tab/customer operation requires explicit approval")
     if name == "browser.tabs" and args["operation"] == "reset":
