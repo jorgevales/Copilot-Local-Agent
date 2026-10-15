@@ -91,7 +91,12 @@ def crawler_factory(browser, scratch, page_timeout, *, visual_context=None):
         async def crawl(self, url, **options):
             page = await browser.context.new_page()
             try:
-                response = await page.goto(url, wait_until='domcontentloaded', timeout=page_timeout)
+                if visual_context is not None:
+                    from .automatic_visuals import paired_browser_action
+                    response = await paired_browser_action(page, visual_context, 'crawl4ai page navigate',
+                        lambda: page.goto(url, wait_until='domcontentloaded', timeout=page_timeout))
+                else:
+                    response = await page.goto(url, wait_until='domcontentloaded', timeout=page_timeout)
                 config = options.get('config')
                 script = getattr(config, 'js_code', None)
                 for expression in ([script] if isinstance(script, str) else script or []):

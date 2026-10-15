@@ -2,14 +2,26 @@ import asyncio
 from io import BytesIO
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 from unittest.mock import AsyncMock, patch, Mock
 
 from PIL import Image
-from copilot_agent.automatic_visuals import capture_visuals, execute_with_visuals, merge_visual_pages, SCROLL_PANEL
+from copilot_agent.automatic_visuals import capture_visuals, execute_with_visuals, merge_visual_pages, SCROLL_PANEL, paired_browser_action, capture_action_phase
 
 
 class VisualsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stop_during_before_capture_never_dispatches_action(self):
+        from copilot_agent.web_navigation import NavigationStop
+        event = threading.Event()
+        action = AsyncMock()
+        async def phase(page, context, label, phase, action_id):
+            if phase == 'before':
+                event.set()
+        with patch('copilot_agent.automatic_visuals.capture_action_phase', side_effect=phase):
+            with self.assertRaises(NavigationStop):
+                await paired_browser_action(None, {'cancel_event': event}, 'click', action)
+        action.assert_not_awaited()
     async def test_existing_discovery_and_research_merge_one_pdf(self):
         with tempfile.TemporaryDirectory() as folder:
             context = {'session_dir': folder, 'source_request_id': 'r1', 'pending_visual_attachments': []}
@@ -27,11 +39,40 @@ class VisualsTests(unittest.IsolatedAsyncioTestCase):
         registry = ToolRegistry()
         with tempfile.TemporaryDirectory() as folder, patch.object(registry, 'validate_call'), \
                 patch.object(registry, '_execute', new=AsyncMock(return_value={'status': 'observed'})), \
-                patch('copilot_agent.automatic_visuals._safe_capture', new=AsyncMock(return_value={
+                patch('copilot_agent.automatic_visuals.capture_action_phase', new=AsyncMock()), \
+                patch('copilot_agent.automatic_visuals.flush_visual_context', new=AsyncMock(return_value={
                     'status': 'captured', 'pictures': 5, 'queued_for_copilot': True})):
             result = await registry.execute('browser.recon', {}, {'session_dir': folder, 'approved': True})
         self.assertTrue(result['ok'])
         self.assertEqual(result['result']['visual_context']['pictures'], 5)
+
+    async def test_action_runs_once_between_before_after_even_on_failure(self):
+        events = []
+        async def phase(page, context, label, phase, action_id):
+            events.append(phase)
+        async def action():
+            events.append('action')
+            raise ValueError('action failed')
+        with patch('copilot_agent.automatic_visuals.capture_action_phase', side_effect=phase):
+            with self.assertRaises(ValueError):
+                await paired_browser_action(None, {}, 'plan step click', action)
+        self.assertEqual(events, ['before', 'action', 'after'])
+
+    async def test_action_pairs_bypass_discovery_sample_cap(self):
+        pixels = BytesIO()
+        Image.new('RGB', (300, 200), 'white').save(pixels, 'PNG')
+        page = Mock(url='https://example.com/page', is_closed=Mock(return_value=False))
+        page.screenshot = AsyncMock(return_value=pixels.getvalue())
+        with tempfile.TemporaryDirectory() as folder, patch('copilot_agent.automatic_visuals._url_policy'):
+            context = {'session_dir': folder, 'source_call_id': 'call-1'}
+            for sequence in range(8):
+                await capture_action_phase(page, context, 'click', 'before', str(sequence))
+                await capture_action_phase(page, context, 'click', 'after', str(sequence))
+            result = await merge_visual_pages([], context)
+        self.assertEqual(result['pictures'], 16)
+        self.assertTrue(result['queued_for_copilot'])
+        self.assertIn('BEFORE', result['captions'][0])
+        self.assertIn('AFTER', result['captions'][1])
 
     async def test_scrolls_only_independent_owned_revisit(self):
         pixels = BytesIO()

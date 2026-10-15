@@ -27,7 +27,7 @@ class AssembledCapacityTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(path.name == visual.name for path in sent))
         self.assertEqual([], engine.base_context['pending_visual_attachments'])
 
-    async def test_visual_pdf_defers_without_breaking_full_user_batch(self):
+    async def test_visual_pdf_requires_slot_and_repeats_on_every_message(self):
         root, state, browser, engine, extras = self.fixture(11)
         visual = state.directory / 'visual-context.pdf'
         visual.write_text('%PDF-1.4 synthetic visual attachment', encoding='ascii')
@@ -35,15 +35,20 @@ class AssembledCapacityTests(unittest.IsolatedAsyncioTestCase):
         async def already_packed(text, attachments):
             return text, attachments
         # Isolate attachment prioritization from composer result-packing limits.
-        with patch('builtins.print'), patch.object(engine, '_pack_outbound_response', side_effect=already_packed):
+        with patch('builtins.print'), patch.object(engine, '_pack_outbound_response', side_effect=already_packed), \
+                self.assertRaisesRegex(PolicyError, 'visual evidence requires its attachment slot'):
             await engine._send('initialize', 'Use reviewed files.', extras)
-        self.assertEqual(20, len(browser.sent[0]['attachments']))
+        self.assertEqual([], browser.sent)
         self.assertEqual([str(visual)], engine.base_context['pending_visual_attachments'])
+        with patch('builtins.print'):
+            await engine._send('tool_results', {'results': []})
+        self.assertTrue(any(path.name == visual.name for path in browser.sent[0]['attachments']))
+        self.assertEqual([], engine.base_context['pending_visual_attachments'])
         browser.responders.append(final_response)
         with patch('builtins.print'):
             await engine._send('tool_results', {'results': []})
         self.assertTrue(any(path.name == visual.name for path in browser.sent[1]['attachments']))
-        self.assertEqual([], engine.base_context['pending_visual_attachments'])
+        self.assertTrue(browser.sent[1]['message']['automatic_visual_evidence']['repeated_previous_evidence'])
 
     def fixture(self, extra_count):
         root, config, state, registry = make_fixture('attachment-capacity-')

@@ -350,6 +350,7 @@ async def start_new_session(config, previous, model_label, registry=None, *, use
     from .session_mode import START_PROMPT, configure_session, discovery_mode
     renew_discovery = (user_requested or discovery_mode(config)) and not getattr(config, '_automation_test_mode', False)
     if user_requested:
+        previous.approvals.revoke_session_grants()
         for call_id, record in old.data['calls'].items():
             if record.get('status') == 'executing':
                 record['status'] = 'uncertain'
@@ -378,7 +379,7 @@ async def start_new_session(config, previous, model_label, registry=None, *, use
                  '_auto_local_drive_root'):
         if hasattr(config, name):
             setattr(fresh_config, name, getattr(config, name))
-    configure_session(fresh_config, renew_discovery)
+    configure_session(fresh_config, renew_discovery, approve_plans=renew_discovery)
     directory = config.runtime_dir / 'sessions' / uuid.uuid4().hex
     state = SessionState(directory)
     if user_requested and _UI_EVENT_SINK is not None:
@@ -624,14 +625,14 @@ async def run(args):
            else 'Agent-owned writes are restricted to the isolated proof workspace.' if getattr(config, '_automation_test_mode', False)
            else 'Runtime and saved website knowledge use the shared Discoveries store. The fast session option permits ordinary file reads and edits elsewhere, subject to OS access.')
     system('Fast discovery uses your approved target scope and existing signed-in browser; one prefilled login click is allowed, then denial/MFA needs you.')
-    system('Read-only discovery and useful sanitized S: knowledge saves run immediately. Other effects keep concise approval and package validation. Stop remains available.')
+    system('Startup Y authorizes current-session tool plans, including writes, code and inspected packages. Exact plan hashes and tool validation remain enforced. Stop remains available.')
     system('Useful Findings are saved on any valid turn; their file is attached every ten messages.')
     system('File delivery: actual Copilot UI downloads and verified ZIP extraction; no Created-folder monitoring.')
     isolated_proof = getattr(config, '_automation_test_mode', False)
     from .session_setup import guided_discovery
     from .session_mode import START_PROMPT, configure_session
     confirmed = False if isolated_proof else bool(args.yes_setup) or (await ask(START_PROMPT)).strip().lower() in {'', 'y', 'yes'}
-    configure_session(config, confirmed)
+    configure_session(config, confirmed, approve_plans=confirmed)
     state.data['visible'] = True
     if not confirmed and not isolated_proof:
         state.data['status'] = 'cancelled'

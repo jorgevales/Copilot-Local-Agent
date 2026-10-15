@@ -72,6 +72,7 @@ def attachment_slots(pending):
 
 
 async def discover(args, context):
+    from .automatic_visuals import paired_browser_action
     if not context.get('approved'):
         raise PolicyError('Current session authorization is required for discovery.')
     page = get_navigation_page(context, args.get('tab_id'))
@@ -178,7 +179,8 @@ async def discover(args, context):
                     for y in sorted({round(original['maxY']/2), original['maxY']} - {original['y']}):
                         if len(pictures) >= 12 or time.monotonic() >= deadline or page.url != state['url']:
                             break
-                        await page.evaluate('(y)=>window.scrollTo({top:y,behavior:"instant"})', y)
+                        await paired_browser_action(page, context, 'browser.discover scroll sample',
+                            lambda: page.evaluate('(y)=>window.scrollTo({top:y,behavior:"instant"})', y))
                         await asyncio.sleep(.15)
                         raw, dom = await asyncio.gather(page.screenshot(type='png', scale='css', timeout=5000, mask=[page.locator(MASK)]), page.evaluate(SNAPSHOT, {'maxNodes': 2000}))
                         state['scroll_samples'].append({'y': y, 'dom': dom})
@@ -188,7 +190,8 @@ async def discover(args, context):
                     data['gaps'].append({'state': state['id'], 'collector': 'scroll_samples', 'error': type(exc).__name__})
                 finally:
                     if page.url == state['url']:
-                        await page.evaluate('(p)=>window.scrollTo(p.x,p.y)', original)
+                        await paired_browser_action(page, context, 'browser.discover restore scroll',
+                            lambda: page.evaluate('(p)=>window.scrollTo(p.x,p.y)', original))
             data['states'].append(state)
             for frame_state in state['frames']:
                 for node in frame_state.get('resources', {}).get('controls', []):
@@ -222,7 +225,8 @@ async def discover(args, context):
                         data['actions'].append({'from_state': state['id'], 'frame': frame.url, 'index': index, 'label': label, 'href': href, 'status': 'started'})
                         write_json(checkpoint, data)
                         await _install_origin_guard(page, context, page.url)
-                        await control.click(timeout=3000)
+                        await paired_browser_action(page, context, 'browser.discover navigation click',
+                            lambda: control.click(timeout=3000))
                         data['actions'][-1]['status'] = 'clicked_not_yet_verified'
                         acted = True
                         break
@@ -247,7 +251,8 @@ async def discover(args, context):
                 try:
                     from .session_mode import website_policy
                     website_policy(context['config'], context.get('approved_domains', [])).resolve(destination)
-                    await page.goto(destination, wait_until='domcontentloaded', timeout=10000)
+                    await paired_browser_action(page, context, 'browser.discover navigate',
+                        lambda: page.goto(destination, wait_until='domcontentloaded', timeout=10000))
                     data['actions'][-1]['status'] = 'clicked_not_yet_verified'
                 except Exception as exc:
                     data['actions'][-1]['status'] = 'click_failed_observe'

@@ -52,6 +52,7 @@ class Orchestrator:
         self._active_turn_run_id = None
         self.feedback = Feedback(display, state)
         self.approvals = ApprovalManager(state, approval_decider, self.feedback)
+        self.approvals.session_plan_approval = bool(getattr(config, '_session_plan_approval', False))
         self.approvals.fast_package_session = bool(getattr(config, '_continuous_package_session', False))
         self.approvals.supervised_session = bool(getattr(config, '_supervised_session', False))
         from .session_mode import configure_session
@@ -941,12 +942,17 @@ class Orchestrator:
             text, attachments = self.prompts.build(kind, redact(content), request_id)
         pending_images = self.base_context['pending_image_attachments']
         pending_files = self.base_context['pending_file_attachments']
+        pending_visuals = self.base_context.get('pending_visual_attachments', [])
+        selected_visuals = list(dict.fromkeys(map(Path, pending_visuals or
+            self.base_context.get('last_visual_attachments', []))))
         attachments = list(dict.fromkeys([*attachments, *map(Path, extra_attachments),
-                                         *map(Path, pending_images), *map(Path, pending_files)]))
+                                         *map(Path, pending_images), *map(Path, pending_files),
+                                         *selected_visuals]))
         if len(attachments) > 20:
             raise PolicyError('This message contains ' + str(len(attachments)) +
                               ' attachments after adding automatic context; Copilot allows 20. Remove ' +
-                              str(len(attachments) - 20) + ' user file(s) or defer them to another message.')
+                              str(len(attachments) - 20) + ' user file(s) or defer them to another message. '
+                              'Browser visual evidence requires its attachment slot on every message.')
         if any(path.suffix.casefold() == '.zip' for path in attachments):
             raise PolicyError('ZIP uploads are unavailable; attach individual files instead.')
         if extra_attachments:
@@ -961,20 +967,16 @@ class Orchestrator:
             message['approved_navigation_scope'] = {'domains': sorted(self.navigation_domains),
                 'session_only': True, 'instruction': 'Continue navigation-only browser.open/back/forward/plans and bounded same-origin new tabs within this approved scope without another approval prompt. Identity-checked customer navigation uses the same origin grant. Forms, searches, downloads, scripts and consequential controls retain their applicable approval. After a lost tab, open fresh and observe live; never credit the lost operation.'}
             text = json.dumps(message, ensure_ascii=False, indent=2)
+        if selected_visuals:
+            message = json.loads(text)
+            message['automatic_visual_evidence'] = {
+                'files': [path.name for path in selected_visuals],
+                'repeated_previous_evidence': not bool(pending_visuals),
+                'instruction': 'Read the labeled BEFORE and AFTER action screenshots in the attached PDF. '
+                               'Use recorded action identities and capture times. Repeated evidence describes '
+                               'the last observed browser state; it is not a new observation.'}
+            text = json.dumps(message, ensure_ascii=False, indent=2)
         text, attachments = await self._pack_outbound_response(text, attachments)
-        # Add automatic visual evidence after result packing so it cannot consume
-        # slots required for complete tool results or explicitly selected files.
-        pending_visuals = self.base_context.get('pending_visual_attachments', [])
-        selected_visuals = []
-        for path in dict.fromkeys(map(Path, pending_visuals)):
-            if path in attachments:
-                selected_visuals.append(path)
-            elif len(attachments) < 20:
-                attachments.append(path)
-                selected_visuals.append(path)
-        if len(selected_visuals) < len(set(map(Path, pending_visuals))):
-            self.state.event('automatic_visual_attachments_deferred',
-                             pending=len(pending_visuals), attached=len(selected_visuals))
         snapshot = [{'path': str(p), 'sha256': self._bounded_hash(p)} for p in attachments]
         upload_paths = []
         for entry in snapshot:
@@ -1026,6 +1028,8 @@ class Orchestrator:
             pending_images.clear()
             pending_files.clear()
             pending_visuals[:] = [path for path in pending_visuals if Path(path) not in selected_visuals]
+            if selected_visuals:
+                self.base_context['last_visual_attachments'] = list(map(str, selected_visuals))
             self.state.save()
         try:
             raw = await self.browser.exchange(text, request_id, attachments=upload_paths,

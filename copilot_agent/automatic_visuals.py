@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 import uuid
@@ -13,7 +14,7 @@ from PIL import Image
 from .persistence import io_path
 from .policy import config_value
 from .screenshot_evidence import MASK, METRICS, _pdf
-from .web_navigation import get_navigation_page, _install_origin_guard, _url_policy, safe_url
+from .web_navigation import get_navigation_page, _install_origin_guard, _url_policy, safe_url, _check_cancelled, NavigationStop
 
 
 MAX_PICTURES = 12
@@ -29,12 +30,79 @@ AFTER = {'browser.open', 'browser.back', 'browser.forward', 'browser.plan', 'bro
 
 
 def relevant(name, args):
-    return name in PASSIVE or name in AFTER and not (name == 'browser.tabs' and args.get('operation') not in {'open', 'reset'})
+    return name.startswith('browser.') or name in PASSIVE or name in AFTER
+
+
+def _collector(context):
+    batch = str(context.get('source_request_id') or 'session-batch')
+    return context.setdefault('automatic_visual_context', {}).setdefault('batches', {}).setdefault(batch,
+        {'lock': asyncio.Lock(), 'records': [], 'gaps': [],
+         'target': str(Path(context['session_dir']) / 'screenshots' / (uuid.uuid4().hex + '-automatic.pdf'))})
+
+
+async def capture_action_phase(page, context, label, phase, action_id):
+    """Actual owned-page action evidence; never subject to discovery sampling limits."""
+    collector = _collector(context)
+    async with collector['lock']:
+        try:
+            if page is None or page.is_closed():
+                raise ValueError('Owned page unavailable')
+            if page.url != 'about:blank':
+                _url_policy(context).resolve(page.url)
+            url = page.url
+            captured_at = datetime.now(timezone.utc).isoformat()
+            pixels = await page.screenshot(type='png', scale='css', timeout=2500, mask=[page.locator(MASK)])
+            if page.url != url:
+                raise ValueError('Page navigated during phase capture')
+            scroll = {'x': None, 'y': None}
+            try:
+                metrics = await asyncio.wait_for(page.evaluate(METRICS), .25)
+                scroll = {'x': metrics['x'], 'y': metrics['y']}
+            except Exception:
+                pass
+            path = Path(collector['target']).with_name(uuid.uuid4().hex + '.png')
+            io_path(path).parent.mkdir(parents=True, exist_ok=True)
+            io_path(path).write_bytes(pixels)
+            collector['records'].append({'number': len(collector['records']) + 1,
+                'label': f'{phase.upper()} {label} | action={action_id} | {captured_at}',
+                'phase': phase, 'action_id': action_id, 'source_call_id': context.get('source_call_id'),
+                'captured_at': captured_at, 'url': safe_url(url), 'scroll': scroll,
+                'kind': 'actual action viewport', 'image_path': str(path)})
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            collector['gaps'].append({'source': label, 'phase': phase, 'action_id': action_id,
+                'reason': type(error).__name__, 'note': 'Action evidence unavailable; action was not replayed.'})
+
+
+async def paired_browser_action(page, context, label, operation, *, after_page=None):
+    """Bracket one action exactly once; phase failures never replay the operation."""
+    action_id = str(context.get('source_call_id') or 'call') + '/' + uuid.uuid4().hex[:12]
+    await capture_action_phase(page, context, label, 'before', action_id)
+    result = None
+    try:
+        _check_cancelled(context)
+        if context.get('cancel_event') is not None and context['cancel_event'].is_set():
+            raise NavigationStop('cancelled', 'User cancellation received during before-action capture')
+        result = await operation()
+        return result
+    finally:
+        try:
+            target = after_page(result) if after_page is not None else page
+        except Exception:
+            target = None
+        await capture_action_phase(target, context, label, 'after', action_id)
+
+
+async def flush_visual_context(context):
+    # Empty merge writes existing records and queues the complete shared artifact.
+    return await merge_visual_pages([], context)
 
 
 def _source_page(name, args, context):
     page = get_navigation_page(context, args.get('tab_id'))
-    _url_policy(context).resolve(page.url)
+    if page.url != 'about:blank':
+        _url_policy(context).resolve(page.url)
     requested = args.get('origin')
     if requested and (urlsplit(requested).scheme, urlsplit(requested).netloc) != (urlsplit(page.url).scheme, urlsplit(page.url).netloc):
         raise ValueError('No owned visual page matching the investigated origin')
@@ -85,7 +153,8 @@ async def merge_visual_pages(pages, context):
             pending.remove(collector['target'])
         if queued and collector['target'] not in pending:
             pending.append(collector['target'])
-        return {'status': 'partial' if collector['gaps'] else 'captured', 'pictures': len(records),
+        return {'status': 'attachment_too_large' if not queued else 'partial' if collector['gaps'] else 'captured',
+            'pictures': len(records), 'bytes': len(payload),
             'path': collector['target'], 'sha256': hashlib.sha256(payload).hexdigest(),
             'queued_for_copilot': queued, 'gaps': list(collector['gaps']),
             'captions': [record['label'] for record in records]}
@@ -217,11 +286,46 @@ async def _safe_capture(name, args, context):
 
 
 async def execute_with_visuals(name, args, context, operation):
+    if name.startswith('browser.') or name in {'operation.call', 'operation.learn'}:
+        action_id = str(context.get('source_call_id') or 'call') + '/' + uuid.uuid4().hex[:12]
+        def owned_page(arguments):
+            try:
+                return _source_page(name, arguments, context)
+            except Exception:
+                return None
+        await capture_action_phase(owned_page(args), context, name, 'before', action_id)
+        result = None
+        try:
+            _check_cancelled(context)
+            if context.get('cancel_event') is not None and context['cancel_event'].is_set():
+                raise NavigationStop('cancelled', 'User cancellation received during before-action capture')
+            result = await operation()
+            return result
+        finally:
+            after_args = dict(args)
+            if isinstance(result, dict) and result.get('tab_id'):
+                after_args['tab_id'] = result['tab_id']
+            await capture_action_phase(owned_page(after_args), context, name, 'after', action_id)
+            try:
+                visual = await flush_visual_context(context)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                visual = {'status': 'unavailable', 'reason': type(error).__name__, 'queued_for_copilot': False}
+            if isinstance(result, dict):
+                result['visual_context'] = visual
+                old_path = result.get('screenshot', {}).get('path')
+                pending = context.get('pending_file_attachments', [])
+                if visual.get('queued_for_copilot') and old_path in pending:
+                    pending.remove(old_path)
     if name == 'crawl4ai.crawl':
         result = await operation()
         if isinstance(result, dict):
-            result['visual_context'] = context.get('crawl_visual_context', {
-                'status': 'unavailable', 'note': 'No browser page visual capture was produced for this crawl.'})
+            try:
+                result['visual_context'] = await flush_visual_context(context)
+            except Exception:
+                result['visual_context'] = context.get('crawl_visual_context', {
+                    'status': 'unavailable', 'note': 'No browser page visual capture was produced for this crawl.'})
         return result
     if not relevant(name, args):
         return await operation()

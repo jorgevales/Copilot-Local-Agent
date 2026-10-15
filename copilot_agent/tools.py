@@ -478,6 +478,10 @@ class ToolRegistry:
                 "visible":{"type":"boolean","const":True},"enabled":{"type":"boolean"},"selector":{"type":"string"},"href":{"type":["string","null"]}},
                 "required":["tag","type","role","label","text","attributes","visible","enabled","selector","href"],"additionalProperties":False}
             result_schema={"anyOf":[{"type":"object","properties":{"controls":{"type":"array","items":control_schema,"maxItems":100}},"required":["controls"],"additionalProperties":False},{"type":"object","properties":{"truncated":{"const":True},"retained_result":{"type":"string"}},"required":["truncated","retained_result"]},{"type":"object","properties":{"truncated":{"const":True},"followup":{"type":"string"}},"required":["truncated","followup"]}]}
+        if name.startswith('browser.'):
+            for variant in [result_schema, *result_schema.get('anyOf', [])]:
+                if 'properties' in variant:
+                    variant['properties']['visual_context'] = {'type': 'object'}
         timeout = 300 if name in {"created.wait", "copilot.download"} else 30
         if name in {'browser.plan', 'browser.download_batch'}: timeout = 125
         if name == 'operation.learn': timeout = 95

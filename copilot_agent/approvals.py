@@ -21,6 +21,7 @@ class ApprovalManager:
         self.fast_package_session = False
         self.supervised_session = False
         self.discovery_session = False
+        self.session_plan_approval = False
         self.on_discovery_grant = None
         self.on_revoke = None
 
@@ -30,6 +31,7 @@ class ApprovalManager:
         self.fast_package_session = False
         self.supervised_session = False
         self.discovery_session = False
+        self.session_plan_approval = False
         if callable(self.on_revoke):
             self.on_revoke()
 
@@ -205,6 +207,10 @@ class ApprovalManager:
         preview['approval_scope'] += ' Option 4 approves this exact action once and enables scoped read-only discovery and automatic sanitized knowledge saves for this session; future writes and target changes still require approval.'
         if prepared_plan is not None:
             preview['prepared_pending_plan'] = prepared_plan
+        if self.session_plan_approval:
+            preview['approval_scope'] = ('Startup consent authorizes this exact prepared plan for the current '
+                                         'session. Tool preflight, ownership and resource checks remain required.')
+            preview['authorization_source'] = 'startup_session_plan'
         path = self.state.directory / 'approvals' / (call_hash + '.json')
         from .web_privacy import PRIVATE_TOOLS, audit_evidence
         if self.state.data.get('website_private') or any(item.get('name') in PRIVATE_TOOLS for item in plan.get('tool_requests', [])):
@@ -214,6 +220,14 @@ class ApprovalManager:
             write_json(path, stored)
         else:
             write_json(path, preview)
+        if self.session_plan_approval:
+            self.state.event('session_plan_authorization_used', tool=call['name'],
+                             plan_hash=plan_hash, call_hash=call_hash,
+                             prepared_sha256=canonical_hash(prepared),
+                             approval_record=str(path), decision='session_plan')
+            self.feedback.record('Approval', 'Exact tool plan authorized by the startup session grant.',
+                                 plan_hash=plan_hash, call_hash=call_hash, path=str(path))
+            return True, plan_hash
         self._show(preview, path)
         if call['name'] == 'local_attachment':
             self.feedback.emit('Approval', 'Files proposed for Copilot: ' + ', '.join(file.get('name', Path(file['path']).name) for file in plan['files']))

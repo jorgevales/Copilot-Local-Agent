@@ -2,9 +2,11 @@
 from urllib.parse import urlsplit, urlunsplit
 from .policy import URLPolicy, PolicyError, config_value
 
-START_PROMPT = ('Start fast discovery session: scoped read-only tools and useful S: knowledge saves run immediately; '
-                'one prefilled login-button click is allowed; new targets, other writes and target changes need approval; '
-                'MFA stays manual [Y/n]? ')
+START_PROMPT = ('Start fast discovery session: Y authorizes all current-session tool plans, including file writes, '
+                'browser actions, code and inspected package execution, without repeated plan approval prompts; '
+                'scoped read-only tools and useful S: knowledge saves run immediately; one prefilled login-button click '
+                'is allowed; tool validation, browser ownership and operating-system approval still apply; '
+                'sign-in and MFA stay manual. Approval resets for a fresh session [Y/n]? ')
 
 
 def fast_mode(config):
@@ -18,7 +20,8 @@ def discovery_mode(config):
     return config_value(config, '_discovery_session', False) is True
 
 
-def configure_session(config, allowed):
+def configure_session(config, allowed, *, approve_plans=False):
+    config._session_plan_approval = bool(allowed and approve_plans)
     for name in ('_discovery_session', '_knowledge_session_confirmed', '_local_navigation_confirmed'):
         setattr(config, name, bool(allowed))
     for name in ('_permissive_session', '_supervised_session', '_continuous_package_session'):

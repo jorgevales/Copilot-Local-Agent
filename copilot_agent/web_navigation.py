@@ -734,6 +734,7 @@ def _compact_recon(snapshot, context):
 
 
 async def _execute_plan(args, context):
+    from .automatic_visuals import paired_browser_action
     state = _state(context)
     digest = plan_hash(args)
     tab_id = args.get("tab_id", "tab-1")
@@ -825,19 +826,24 @@ async def _execute_plan(args, context):
             elif op == "assert":
                 await _verify(page, step["expect"], context, step.get("timeout_ms", 3000))
             elif op == "open_tab":
-                tab_id = await _open_tab({**step, "task_id": args["task_id"], "customer_key": args.get("customer_key")}, context, initial_origin_url)
+                tab_id = await paired_browser_action(page, context, 'browser.plan '+path+' open_tab',
+                    lambda: _open_tab({**step, "task_id": args["task_id"], "customer_key": args.get("customer_key")}, context, initial_origin_url),
+                    after_page=lambda opened_id: get_navigation_page(context, opened_id, args['task_id'], args.get('customer_key')))
                 page = get_navigation_page(context, tab_id, args["task_id"], args.get("customer_key"))
                 result["tab_id"] = tab_id
                 result["opened_tab_id"] = tab_id
             elif op == "close_tab":
-                await _close_tab(step["tab_id"], context, args["task_id"], args.get("customer_key"))
+                await paired_browser_action(page, context, 'browser.plan '+path+' close_tab',
+                    lambda: _close_tab(step["tab_id"], context, args["task_id"], args.get("customer_key")),
+                    after_page=lambda _: get_navigation_page(context, args.get('tab_id', 'tab-1'), args['task_id'], args.get('customer_key')))
                 tab_id = args.get("tab_id", "tab-1")
                 page = get_navigation_page(context, tab_id, args["task_id"], args.get("customer_key"))
             elif op == "navigate":
                 target = _same_origin(step["url"], initial_origin_url, context)
                 _check_cancelled(context)
                 effect_in_progress = True
-                await page.goto(target, wait_until="domcontentloaded", timeout=step.get("timeout_ms", 15000))
+                await paired_browser_action(page, context, 'browser.plan '+path+' navigate',
+                    lambda: page.goto(target, wait_until="domcontentloaded", timeout=step.get("timeout_ms", 15000)))
                 _same_origin(page.url, initial_origin_url, context)
             else:
                 if op == "wait":
@@ -877,23 +883,27 @@ async def _execute_plan(args, context):
                         await locator.click(trial=True, timeout=step.get("timeout_ms", 3000))
                         _check_cancelled(context)
                         effect_in_progress = True
-                        await locator.click(timeout=step.get("timeout_ms", 3000))
+                        await paired_browser_action(page, context, 'browser.plan '+path+' click',
+                            lambda: locator.click(timeout=step.get("timeout_ms", 3000)))
                     elif op == "fill":
                         _check_cancelled(context)
                         effect_in_progress = True
-                        await locator.fill(step["value"], timeout=step.get("timeout_ms", 3000))
+                        await paired_browser_action(page, context, 'browser.plan '+path+' fill',
+                            lambda: locator.fill(step["value"], timeout=step.get("timeout_ms", 3000)))
                         if await locator.input_value(timeout=1000) != step["value"]:
                             raise NavigationStop("verification_failed", "Entered field value did not match")
                     elif op == "select":
                         _check_cancelled(context)
                         effect_in_progress = True
-                        await locator.select_option(value=step["value"], timeout=step.get("timeout_ms", 3000))
+                        await paired_browser_action(page, context, 'browser.plan '+path+' select',
+                            lambda: locator.select_option(value=step["value"], timeout=step.get("timeout_ms", 3000)))
                         if await locator.input_value(timeout=1000) != step["value"]:
                             raise NavigationStop("verification_failed", "Selected option did not remain selected")
                     elif op == "press":
                         _check_cancelled(context)
                         effect_in_progress = True
-                        await locator.press(step["key"], timeout=step.get("timeout_ms", 3000))
+                        await paired_browser_action(page, context, 'browser.plan '+path+' press',
+                            lambda: locator.press(step["key"], timeout=step.get("timeout_ms", 3000)))
                     _same_origin(page.url, initial_origin_url, context)
             await _verify(page, step.get("expect", []), context, step.get("timeout_ms", 3000))
             if args.get("customer_key"):

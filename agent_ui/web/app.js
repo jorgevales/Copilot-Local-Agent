@@ -7,7 +7,8 @@ let submitting=false,launchPending=false,launchReply='y',launchCursor=0,launchEr
 const MAX_MESSAGE_FILES=20;
 let selectedFiles=[],outbox=[],outboxRunning=false;
 function backendPrompt(){return events.filter(e=>e.kind==='status').at(-1);}
-function launchRequested(){const p=backendPrompt();return p?.payload.state==='awaiting_input'&&String(p.payload.summary||'').trim().endsWith('Start fast discovery session: scoped read-only tools and useful S: knowledge saves run immediately; one prefilled login-button click is allowed; new targets, other writes and target changes need approval; MFA stays manual [Y/n]?');}
+function isStartPrompt(text){return /Start fast discovery session:[\s\S]*\[Y\/n\]\?\s*$/.test(String(text||''));}
+function launchRequested(){const p=backendPrompt();return p?.payload.state==='awaiting_input'&&isStartPrompt(p.payload.summary);}
 function runtimeAvailable(){return Boolean(snapshot?.runtime_connected)&&!connectionLost&&events.filter(e=>e.kind==='connection').at(-1)?.payload.state!=='disconnected';}
 function runtimeStateLabel(){
  if(!runtimeAvailable())return 'Runtime unavailable';
@@ -21,7 +22,7 @@ function runtimeStateLabel(){
 }
 function renderLaunch(){
  const requested=launchRequested(),available=runtimeAvailable();
- const subsequent=events.find(e=>e.id>launchCursor&&(e.kind==='error'||e.kind==='connection'&&e.payload.state==='disconnected'||e.kind==='status'&&e.payload.state==='awaiting_input'&&!String(e.payload.summary||'').trim().endsWith('Start fast discovery session: scoped read-only tools and useful S: knowledge saves run immediately; one prefilled login-button click is allowed; new targets, other writes and target changes need approval; MFA stays manual [Y/n]?')));
+ const subsequent=events.find(e=>e.id>launchCursor&&(e.kind==='error'||e.kind==='connection'&&e.payload.state==='disconnected'||e.kind==='status'&&e.payload.state==='awaiting_input'&&!isStartPrompt(e.payload.summary)));
  if(launchPending&&subsequent){launchPending=false;if(subsequent.kind==='error')launchError=subsequent.payload.summary||'Startup reported an error. Review the conversation for details.';}
  $('launch-card').hidden=!requested&&!launchPending&&!launchError;
  $('launch-card').setAttribute('aria-busy',String(submitting||launchPending));

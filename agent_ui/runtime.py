@@ -355,9 +355,16 @@ class AgentRuntime:
         call={'name':name,'version':'1.0','call_id':'manage-'+grant_id,'arguments':args}
         plan={'tool_requests':[call],'risk_summary':'Review the changed durable read grant; no write/download permission.'}
         plan_hash=canonical_hash({'plan':plan,'prepared':prepared})
-        decision=self.request_approval({'plan_hash':plan_hash,'call_hash':canonical_hash(call),
-            'current_call_id':call['call_id'],'complete_pending_plan':plan,'prepared_code':prepared,
-            'approval_scope':'This exact revised durable research grant','choices':['deny','once','plan']})
+        call_hash=canonical_hash(call)
+        if getattr(context.get('config'), '_session_plan_approval', False):
+            context['session_state'].event('session_plan_authorization_used', tool=name,
+                plan_hash=plan_hash, call_hash=call_hash, prepared_sha256=canonical_hash(prepared),
+                decision='session_plan')
+            decision='plan'
+        else:
+            decision=self.request_approval({'plan_hash':plan_hash,'call_hash':call_hash,
+                'current_call_id':call['call_id'],'complete_pending_plan':plan,'prepared_code':prepared,
+                'approval_scope':'This exact revised durable research grant','choices':['deny','once','plan']})
         if decision not in {'once','plan'}: return {'status':'denied'}
         context.update(approved=True,approval_hash=plan_hash,permission_reviewed=prepared)
         return asyncio.run(execute_permissions(name,args,context))
