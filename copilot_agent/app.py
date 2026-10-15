@@ -511,7 +511,8 @@ async def run(args):
         raise ValueError('The persistent Edge profile must be inside the configured user storage.')
     os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
     system('Verified temporary workspace: ' + str(temp_directory))
-    await choose_edge(config, settings, ask, system, force=getattr(args, 'setup_only', False))
+    await choose_edge(config, settings, ask, system,
+                      force=getattr(args, 'setup_only', False) and not bool(args.yes_setup))
     settings['python_executable'] = sys.executable
     settings['config'] = {key: value for key, value in config.as_dict().items() if key in {
         'allowed_domains', 'allowed_roots', 'model', 'response_timeout', 'response_max_duration', 'max_corrections',

@@ -324,7 +324,7 @@ def main():
     if (project / 'bootstrap' / 'setup_rea.py').is_file():
         from setup_rea import provision
         try:
-            provision(project)
+            provision(project, prompt_for_node=sys.stdin.isatty())
         except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
             print('REA OPTIONAL RUNTIME NOT READY: ' + str(error), file=sys.stderr, flush=True)
             print('Python setup completed. Run .venv\\Scripts\\python.exe bootstrap\\setup_rea.py to repair REA.',

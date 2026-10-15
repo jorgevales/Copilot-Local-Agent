@@ -74,6 +74,37 @@ For a supported approved website investigation, `research.route` must return
 `preferred: rea.inspect_page` when REA is available. Dependency failure remains
 explicit and preserves browser/API/Crawl4AI alternatives and existing approvals.
 
+
+### Paste a portable Node path and continue automatically
+
+Run **Setup.cmd**. Its Node prompt accepts a pasted absolute path to `node.exe`,
+the extracted portable Node folder, or the original Windows Node ZIP. File
+Explorer quotes and spaces are accepted. Examples are `S:\Tools\node\node.exe`,
+`S:\Tools\node-v24.13.0-win-x64`, or `\\server\share\Tools\node-v24.13.0-win-x64.zip`.
+S: aliases are resolved through the current mapped share, with direct and UNC
+fallbacks. No share is guessed. A ZIP is extracted automatically into a verified
+writable managed cache; the original archive stays unchanged.
+
+After validation, setup saves `rea_node_executable` in `config.local.json`,
+retaining its other settings. Normal startup now loads that local configuration
+automatically; an explicit `--config` still takes precedence. Setup uses the
+portable distribution's own `node_modules/npm/bin/npm-cli.js`, then continues
+REA dependencies and runtime checks. Setup automatically reuses/detects Edge;
+only a genuinely missing resource needs another path. Invalid Node paths can be
+corrected at the same prompt. Enter reuses detected Node, or stops Node setup
+clearly if none was found. No installer or global PATH change is required.
+
+For a direct command instead of the prompt:
+
+```powershell
+.venv\Scripts\python.exe bootstrap\setup_rea.py --node-path "S:\Tools\node-v24.13.0-win-x64.zip"
+```
+
+Use `--prompt-node-path` to explicitly choose a different Node location, or
+`--non-interactive` for unattended runs that must fail clearly instead of waiting
+for input. ZIP layout/size/path checks and native version validation run before
+continuing. Supply a trusted Windows Node ZIP with Node and npm included.
+
 ## Typed capabilities and limits
 
 | Tool | Input | Behavior |

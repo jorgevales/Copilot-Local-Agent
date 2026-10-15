@@ -87,7 +87,7 @@ class ResourceSetupTests(unittest.IsolatedAsyncioTestCase):
         simulated_share.mkdir()
         canonical_storage=simulated_share/'Discoveries knowledge'
         args=SimpleNamespace(config=None,attach_existing=False,port=None,profile=None,
-                             model=None,setup_only=True,resume=None,yes_setup=True)
+                             model=None,setup_only=True,resume=None,yes_setup=False)
         with patch('copilot_agent.app.Config.load',return_value=config), \
              patch('copilot_agent.storage.discoveries_storage',return_value=canonical_storage), \
              patch('copilot_agent.app.mapped_s_drive_root',return_value=simulated_share), \
@@ -100,3 +100,24 @@ class ResourceSetupTests(unittest.IsolatedAsyncioTestCase):
         settings=read_user_settings(config.storage_dir)
         self.assertEqual(str(self.executable),settings['edge_executables'][machine_key()])
         self.assertNotIn('selected_account', settings)
+
+    async def test_automatic_setup_does_not_force_another_edge_question(self):
+        from copilot_agent.app import run
+        config = Config(root=self.root)
+        config.select_storage(self.root / 'automatic-storage')
+        share = self.root / 'automatic-share'
+        share.mkdir()
+        args = SimpleNamespace(config=None, attach_existing=False, port=None, profile=None,
+                               model=None, setup_only=True, resume=None, yes_setup=True)
+        with patch('copilot_agent.app.Config.load', return_value=config), \
+             patch('copilot_agent.storage.discoveries_storage', return_value=share / 'Discoveries knowledge'), \
+             patch('copilot_agent.app.mapped_s_drive_root', return_value=share), \
+             patch('copilot_agent.config.mapped_s_drive_root', return_value=share), \
+             patch('copilot_agent.app.choose_edge', new=AsyncMock()) as select, \
+             patch('copilot_agent.app.ask', new=AsyncMock()) as ask, \
+             patch('copilot_agent.app.BrowserAdapter') as browser, \
+             patch('copilot_agent.app.system', self.messages.append):
+            await run(args)
+        self.assertFalse(select.call_args.kwargs['force'])
+        ask.assert_not_awaited()
+        browser.assert_not_called()

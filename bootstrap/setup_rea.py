@@ -21,6 +21,11 @@ import time
 import urllib.request
 import uuid
 
+# This helper also runs as a standalone script before the application starts.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from copilot_agent.node_runtime import node_path_candidates, node_source_candidates
+from copilot_agent.persistence import io_path, write_json
+
 VERSION = '6.5.0'
 ARCHIVE_URL = 'https://registry.npmjs.org/rea-agents/-/rea-agents-6.5.0.tgz'
 INTEGRITY = 'C6BG7LyrAdR74mSjertM6PrxJkcNZ2bfQNOJornPo9erDEp2tyPRVYPnV5Yodr+1RqewCQla68WulXlVnveD+A=='
@@ -46,10 +51,15 @@ def find_node(env):
             values.extend([base / 'nodejs' / 'node.exe', base / 'Programs' / 'nodejs' / 'node.exe'])
     if env.get('COPILOT_REA_NODE'):
         values = [env['COPILOT_REA_NODE']]
+    paths = []
     for value in values:
         if not value:
             continue
-        path = Path(value).expanduser()
+        try:
+            paths.extend(node_path_candidates(value))
+        except ValueError:
+            continue
+    for path in dict.fromkeys(paths):
         if not path.is_absolute() or not path.is_file() or path.suffix.lower() in {'.cmd', '.bat', '.ps1'}:
             continue
         try:
@@ -61,7 +71,49 @@ def find_node(env):
         except (OSError, AttributeError, ValueError, subprocess.TimeoutExpired):
             continue
     raise RuntimeError('Compatible native Node not found. Install Node 24.11+ LTS (or 22.19+/26+) and reopen Setup; '
-                       'alternatively set COPILOT_REA_NODE to its absolute executable and rea_node_executable in config.local.json.')
+                       'or paste the absolute node.exe, extracted portable folder or portable ZIP path when asked.')
+
+
+def _operator_node(value, project, env):
+    sources = node_source_candidates(value)
+    if sources[0].suffix.lower() == '.zip':
+        from copilot_agent.portable_node import extract_portable_node
+        failures = []
+        for source in sources:
+            try:
+                selected = extract_portable_node(source, project, environ=env)
+                return find_node(dict(env, COPILOT_REA_NODE=str(selected)))
+            except (OSError, ValueError, RuntimeError) as error:
+                failures.append(str(error))
+        raise RuntimeError('Portable Node ZIP could not be prepared: ' + '; '.join(failures))
+    return find_node(dict(env, COPILOT_REA_NODE=str(value)))
+
+
+def _select_node(project, env, *, node_path=None, prompt_for_node=False,
+                 ask_on_missing=False, input_fn=None):
+    if node_path is not None:
+        return _operator_node(node_path, project, env), True
+    if not prompt_for_node:
+        try:
+            return find_node(env), bool(env.get('COPILOT_REA_NODE'))
+        except RuntimeError:
+            if not ask_on_missing:
+                raise
+    ask = input_fn or input
+    while True:
+        try:
+            value = ask('Paste Node node.exe, extracted portable folder or ZIP path (S: or UNC; Enter to use detected Node / cancel): ').strip()
+        except EOFError as error:
+            raise RuntimeError('No Node path input is available. Rerun Setup interactively or supply --node-path.') from error
+        if not value:
+            try:
+                return find_node(env), True
+            except RuntimeError as error:
+                raise RuntimeError('Node path was not supplied; setup needs a compatible Node executable or portable ZIP. Rerun Setup to paste it.') from error
+        try:
+            return _operator_node(value, project, env), True
+        except (OSError, ValueError, RuntimeError) as error:
+            print('Node path was not accepted: ' + str(error) + ' Paste another path, or press Enter to stop.', flush=True)
 
 
 def find_npm(node, env):
@@ -148,8 +200,8 @@ def extract_archive(archive, destination):
                     shutil.copyfileobj(incoming, outgoing)
 
 
-def provision(project, *, environ=None, deadline_seconds=90, offline=False, config_path=None):
-    deadline = time.monotonic() + deadline_seconds
+def provision(project, *, environ=None, deadline_seconds=90, offline=False, config_path=None,
+              node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None):
     project = Path(project).resolve()
     env = dict(os.environ if environ is None else environ)
     settings_file = Path(config_path) if config_path else project / 'config.local.json'
@@ -161,7 +213,21 @@ def provision(project, *, environ=None, deadline_seconds=90, offline=False, conf
         return {'available': False, 'disabled': True}
     if settings.get('rea_node_executable'):
         env['COPILOT_REA_NODE'] = settings['rea_node_executable']
-    node = find_node(env)
+    node, save_node = _select_node(project, env, node_path=node_path,
+        prompt_for_node=prompt_for_node, ask_on_missing=ask_on_missing, input_fn=input_fn)
+    env['COPILOT_REA_NODE'] = str(node)
+    if save_node:
+        current = json.loads(io_path(settings_file).read_text(encoding='utf-8-sig')) if settings_file.exists() else {}
+        if current != settings:
+            raise RuntimeError('Local configuration changed while selecting Node; rerun setup to preserve those changes.')
+        settings['rea_node_executable'] = str(node)
+        write_json(settings_file, settings)
+        if json.loads(io_path(settings_file).read_text(encoding='utf-8-sig')) != settings:
+            raise RuntimeError('Saved Node configuration did not read back correctly; setup stopped.')
+        print('Node path validated and saved. Continuing the remaining setup automatically.', flush=True)
+    # Interactive operator time and ZIP preparation do not consume the REA
+    # dependency installation budget.
+    deadline = time.monotonic() + deadline_seconds
     candidates = runtime_candidates(project, env)
     if settings.get('rea_repository'):
         selected = Path(settings['rea_repository']).expanduser()
@@ -248,9 +314,14 @@ def main():
     parser.add_argument('--config', type=Path, default=None)
     parser.add_argument('--timeout-seconds', type=int, default=90, choices=range(10, 181), metavar='10..180')
     parser.add_argument('--offline', action='store_true', help='Use only COPILOT_REA_ARCHIVE and the existing npm cache.')
+    parser.add_argument('--node-path', help='Absolute node.exe, extracted portable folder or Windows Node ZIP; accepts S:/UNC paths.')
+    parser.add_argument('--prompt-node-path', action='store_true', help='Paste a Node path before continuing setup automatically.')
+    parser.add_argument('--non-interactive', action='store_true', help='Never prompt for a missing Node path.')
     args = parser.parse_args()
     try:
-        provision(args.project, deadline_seconds=args.timeout_seconds, offline=args.offline, config_path=args.config)
+        provision(args.project, deadline_seconds=args.timeout_seconds, offline=args.offline, config_path=args.config,
+                  node_path=args.node_path, prompt_for_node=args.prompt_node_path and not args.non_interactive,
+                  ask_on_missing=not args.non_interactive and sys.stdin.isatty())
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
         print('REA setup: ' + str(error), file=sys.stderr)
         return 1

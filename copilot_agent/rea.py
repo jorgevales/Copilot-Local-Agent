@@ -83,7 +83,11 @@ def _repository(config):
 def _node_candidates(config):
     selected = config_value(config, 'rea_node_executable', '')
     if selected:
-        return [Path(selected).expanduser()]
+        from .node_runtime import node_path_candidates
+        try:
+            return node_path_candidates(selected)
+        except ValueError:
+            return [Path(selected).expanduser()]
     candidates = []
     detected = shutil.which('node')
     if detected:

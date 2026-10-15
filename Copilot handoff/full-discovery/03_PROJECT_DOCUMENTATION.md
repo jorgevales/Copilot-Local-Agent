@@ -141,6 +141,37 @@ existing installation can instead be selected with `rea_repository` in
 set `rea_node_executable` in local configuration too when Node is not on PATH.
 Failures explicitly identify REA as unavailable while retaining working Python
 tools. Runtime setup never changes durable S:-backed discovery storage.
+
+
+### Paste a portable Node path and continue automatically
+
+Run **Setup.cmd**. Its Node prompt accepts a pasted absolute path to `node.exe`,
+the extracted portable Node folder, or the original Windows Node ZIP. File
+Explorer quotes and spaces are accepted. Examples are `S:\Tools\node\node.exe`,
+`S:\Tools\node-v24.13.0-win-x64`, or `\\server\share\Tools\node-v24.13.0-win-x64.zip`.
+S: aliases are resolved through the current mapped share, with direct and UNC
+fallbacks. No share is guessed. A ZIP is extracted automatically into a verified
+writable managed cache; the original archive stays unchanged.
+
+After validation, setup saves `rea_node_executable` in `config.local.json`,
+retaining its other settings. Normal startup now loads that local configuration
+automatically; an explicit `--config` still takes precedence. Setup uses the
+portable distribution's own `node_modules/npm/bin/npm-cli.js`, then continues
+REA dependencies and runtime checks. Setup automatically reuses/detects Edge;
+only a genuinely missing resource needs another path. Invalid Node paths can be
+corrected at the same prompt. Enter reuses detected Node, or stops Node setup
+clearly if none was found. No installer or global PATH change is required.
+
+For a direct command instead of the prompt:
+
+```powershell
+.venv\Scripts\python.exe bootstrap\setup_rea.py --node-path "S:\Tools\node-v24.13.0-win-x64.zip"
+```
+
+Use `--prompt-node-path` to explicitly choose a different Node location, or
+`--non-interactive` for unattended runs that must fail clearly instead of waiting
+for input. ZIP layout/size/path checks and native version validation run before
+continuing. Supply a trusted Windows Node ZIP with Node and npm included.
 <!-- END SOURCE: bootstrap/README.md -->
 
 
@@ -1493,6 +1524,23 @@ contract snapshot. Supported Node/npm must be installed or explicitly configured
 
 Live VDI, S:/UNC installation and production authenticated Copilot were not exercised here.
 Durable discovery storage and target/effect approvals remain unchanged.
+
+## Portable Node path setup follow-up
+
+Setup now accepts a pasted executable, extracted folder or Windows Node ZIP,
+including quoted paths and redirected S:/UNC aliases. ZIPs are safely extracted
+into writable managed candidates; the source is retained. The validated Node
+path is atomically saved in local configuration and automatically loaded at the
+next startup. npm is resolved beside portable Node. Setup continues through
+REA and automatically detected Edge without further routine resource questions.
+Missing resources and unavailable shares still produce actionable failures.
+
+Validation:102 focused setup/health/installer tests passed, followed by27 final
+portable-path/ZIP/setup tests after the automatic Edge continuation change
+(counts overlap). A real Node24.13.0 executable and npm tree were packed into a
+portable-layout ZIP, selected through the setup API, extracted, version checked,
+persisted and successfully used to finish REA setup. S:/UNC mapping contracts
+passed Windows fixture tests; live VDI/share behavior remains unverified.
 <!-- END SOURCE: docs/REA_AVAILABILITY_RECOVERY.md -->
 
 
@@ -1765,6 +1813,37 @@ verifies actual loading. A missing dependency is never called healthy.
 For a supported approved website investigation, `research.route` must return
 `preferred: rea.inspect_page` when REA is available. Dependency failure remains
 explicit and preserves browser/API/Crawl4AI alternatives and existing approvals.
+
+
+### Paste a portable Node path and continue automatically
+
+Run **Setup.cmd**. Its Node prompt accepts a pasted absolute path to `node.exe`,
+the extracted portable Node folder, or the original Windows Node ZIP. File
+Explorer quotes and spaces are accepted. Examples are `S:\Tools\node\node.exe`,
+`S:\Tools\node-v24.13.0-win-x64`, or `\\server\share\Tools\node-v24.13.0-win-x64.zip`.
+S: aliases are resolved through the current mapped share, with direct and UNC
+fallbacks. No share is guessed. A ZIP is extracted automatically into a verified
+writable managed cache; the original archive stays unchanged.
+
+After validation, setup saves `rea_node_executable` in `config.local.json`,
+retaining its other settings. Normal startup now loads that local configuration
+automatically; an explicit `--config` still takes precedence. Setup uses the
+portable distribution's own `node_modules/npm/bin/npm-cli.js`, then continues
+REA dependencies and runtime checks. Setup automatically reuses/detects Edge;
+only a genuinely missing resource needs another path. Invalid Node paths can be
+corrected at the same prompt. Enter reuses detected Node, or stops Node setup
+clearly if none was found. No installer or global PATH change is required.
+
+For a direct command instead of the prompt:
+
+```powershell
+.venv\Scripts\python.exe bootstrap\setup_rea.py --node-path "S:\Tools\node-v24.13.0-win-x64.zip"
+```
+
+Use `--prompt-node-path` to explicitly choose a different Node location, or
+`--non-interactive` for unattended runs that must fail clearly instead of waiting
+for input. ZIP layout/size/path checks and native version validation run before
+continuing. Supply a trusted Windows Node ZIP with Node and npm included.
 
 ## Typed capabilities and limits
 

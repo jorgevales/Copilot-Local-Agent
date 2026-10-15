@@ -484,7 +484,7 @@ print('Python runtime and Playwright verified.')
     Push-Location -LiteralPath $repoRoot
     try {
         if ($Mode -eq 'Setup') {
-            & $python @pythonArgs (Join-Path $repoRoot 'app.py') --setup-only
+            & $python @pythonArgs (Join-Path $repoRoot 'app.py') --setup-only --yes-setup
         } elseif ($Mode -in @('Start','UI')) {
             if ($Mode -eq 'UI') {
                 & $python @pythonArgs (Join-Path $repoRoot 'version_launcher.py') $projectVersion --ui

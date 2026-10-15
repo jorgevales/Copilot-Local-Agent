@@ -50,3 +50,20 @@ contract snapshot. Supported Node/npm must be installed or explicitly configured
 
 Live VDI, S:/UNC installation and production authenticated Copilot were not exercised here.
 Durable discovery storage and target/effect approvals remain unchanged.
+
+## Portable Node path setup follow-up
+
+Setup now accepts a pasted executable, extracted folder or Windows Node ZIP,
+including quoted paths and redirected S:/UNC aliases. ZIPs are safely extracted
+into writable managed candidates; the source is retained. The validated Node
+path is atomically saved in local configuration and automatically loaded at the
+next startup. npm is resolved beside portable Node. Setup continues through
+REA and automatically detected Edge without further routine resource questions.
+Missing resources and unavailable shares still produce actionable failures.
+
+Validation:102 focused setup/health/installer tests passed, followed by27 final
+portable-path/ZIP/setup tests after the automatic Edge continuation change
+(counts overlap). A real Node24.13.0 executable and npm tree were packed into a
+portable-layout ZIP, selected through the setup API, extracted, version checked,
+persisted and successfully used to finish REA setup. S:/UNC mapping contracts
+passed Windows fixture tests; live VDI/share behavior remains unverified.

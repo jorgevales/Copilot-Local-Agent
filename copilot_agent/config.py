@@ -104,6 +104,8 @@ class Config:
     def load(cls, path: Path | None = None, *, storage_override: Path | None = None) -> 'Config':
         cfg = cls()
         data = {}
+        if path is None:
+            path = PROJECT_ROOT / 'config.local.json'
         if path and Path(path).exists():
             data = json.loads(Path(path).read_text(encoding='utf-8-sig'))
             # Retain startup compatibility with older configs, while ignoring

@@ -60,8 +60,8 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `bootstrap/setup_rea.py`
 
 - Role: Provision the pinned optional REA runtime without administrator rights.
-- Direct imports: `__future__`, `argparse`, `base64`, `hashlib`, `json`, `os`, `pathlib`, `re`, `shutil`, `subprocess`, `sys`, `tarfile`, `tempfile`, `time`, `urllib.request`, `uuid`
-- Public symbols: `archive_bytes(env)`; `extract_archive(archive, destination)`; `find_node(env)`; `find_npm(node, env)`; `main()`; `provision(project, *, environ=None, deadline_seconds=90, offline=False, config_path=None)`; `runtime_candidates(project, env)`; `validate_runtime(root, node, env, *, smoke=True)`
+- Direct imports: `__future__`, `argparse`, `base64`, `copilot_agent.node_runtime`, `copilot_agent.persistence`, `hashlib`, `json`, `os`, `pathlib`, `re`, `shutil`, `subprocess`, `sys`, `tarfile`, `tempfile`, `time`, `urllib.request`, `uuid`
+- Public symbols: `_operator_node(value, project, env) [private helper]`; `_select_node(project, env, *, node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None) [private helper]`; `archive_bytes(env)`; `extract_archive(archive, destination)`; `find_node(env)`; `find_npm(node, env)`; `main()`; `provision(project, *, environ=None, deadline_seconds=90, offline=False, config_path=None, node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None)`; `runtime_candidates(project, env)`; `validate_runtime(root, node, env, *, smoke=True)`
 
 ### `copilot_agent/__init__.py`
 
@@ -289,6 +289,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `__future__`, `datetime`, `json`, `pathlib`, `re`, `urllib.parse`
 - Public symbols: `class EventLog; 2 public methods`; `now() -> str`; `redact(value)`
 
+### `copilot_agent/node_runtime.py`
+
+- Role: Operator supplied portable Node paths, including live S:/UNC aliases.
+- Direct imports: `__future__`, `ntpath`, `os`, `pathlib`
+- Public symbols: `_aliases(path) [private helper]`; `node_path_candidates(value)`; `node_source_candidates(value)`; `normalize_node_path(value)`
+
 ### `copilot_agent/orchestrator.py`
 
 - Role: Implementation module; responsibilities are identified by its public symbols and imports.
@@ -312,6 +318,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Role: Resolved-path and navigation boundaries shared by all local capabilities.
 - Direct imports: `ntpath`, `os`, `pathlib`, `stat`, `urllib.parse`
 - Public symbols: `_final_s_path(value) [private helper]`; `_mapped_s_provider_root() [private helper]`; `class PathPolicy; method names: __init__, resolve`; `class PolicyError(ValueError)`; `class URLPolicy; method names: __init__, resolve, website_domain`; `config_value(config, key, default=None)`; `is_s_drive_path(path) -> bool`; `mapped_s_drive_root()`; `reject_path_redirection(path)`; `resolve_s_drive_output(path, excluded_roots=(), *, must_exist=False)`
+
+### `copilot_agent/portable_node.py`
+
+- Role: Bounded extraction of official portable Windows Node ZIP distributions.
+- Direct imports: `__future__`, `hashlib`, `json`, `os`, `pathlib`, `re`, `shutil`, `stat`, `tempfile`, `uuid`, `zipfile`
+- Public symbols: `_clean_stage(stage: Path, parent: Path, name: str) -> None [private helper]`; `_digest(path: Path) -> str [private helper]`; `_members(archive: zipfile.ZipFile) -> list[tuple[zipfile.ZipInfo, Path]] [private helper]`; `_reusable(root: Path, digest: str) -> bool [private helper]`; `extract_portable_node(archive: Path, project: Path, *, environ=None) -> Path`
 
 ### `copilot_agent/presentation.py`
 
@@ -762,6 +774,18 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `copilot_agent.browser`, `types`, `unittest`, `unittest.mock`
 - Public symbols: `class ModelPickerDOMTests(unittest.IsolatedAsyncioTestCase); 4 public methods`
 
+### `tests/test_node_runtime.py`
+
+- Role: Portable Node identity normalization and redirected S: recovery.
+- Direct imports: `copilot_agent`, `os`, `pathlib`, `tempfile`, `types`, `unittest`, `unittest.mock`
+- Public symbols: `class NodeRuntimeTests(unittest.TestCase); 4 public methods`
+
+### `tests/test_node_setup_interactive.py`
+
+- Role: A pasted portable Node path finishes REA setup without further questions.
+- Direct imports: `contextlib`, `importlib.util`, `io`, `json`, `pathlib`, `tempfile`, `types`, `unittest`, `unittest.mock`
+- Public symbols: `class NodeSetupInteractiveTests(unittest.TestCase); 9 public methods`
+
 ### `tests/test_orchestrator.py`
 
 - Role: Mock transport/registry tests; no browser, network or deletion.
@@ -791,6 +815,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Role: Persistence on Windows shares with legacy path-length limits.
 - Direct imports: `copilot_agent.persistence`, `errno`, `os`, `pathlib`, `tempfile`, `unittest`, `unittest.mock`
 - Public symbols: `class PersistencePathTests(unittest.TestCase); 2 public methods`
+
+### `tests/test_portable_node.py`
+
+- Role: Implementation module; responsibilities are identified by its public symbols and imports.
+- Direct imports: `copilot_agent`, `pathlib`, `stat`, `tempfile`, `unittest`, `unittest.mock`, `zipfile`
+- Public symbols: `class PortableNodeTests(unittest.TestCase); 12 public methods`
 
 ### `tests/test_protocol_state.py`
 
@@ -856,7 +886,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Exercise Edge resource choices without launching executables.
 - Direct imports: `copilot_agent.config`, `copilot_agent.setup_resources`, `copilot_agent.storage`, `os`, `pathlib`, `tempfile`, `types`, `unittest`, `unittest.mock`
-- Public symbols: `class ResourceSetupTests(unittest.IsolatedAsyncioTestCase); 7 public methods`
+- Public symbols: `class ResourceSetupTests(unittest.IsolatedAsyncioTestCase); 8 public methods`
 
 ### `tests/test_site_discovery.py`
 
@@ -966,14 +996,14 @@ This is a static AST inventory of the current source, not a verbatim code packag
 Generated from the local Graphify code-only AST graph. The raw graph, cache, and Graphify report are not attachments; the statistics and selected relationships below preserve their useful navigation evidence.
 
 - Graphify version: `0.9.79`
-- Source revision analyzed: `9823919f75542c679c550fffdd058791e901bf1d`
-- Nodes / edges / hyperedges: 3727 / 11541 / 0
-- Relationship counts: calls=4646, contains=1166, imports=1872, imports_from=858, indirect_call=439, inherits=42, method=1696, rationale_for=396, references=97, uses=329
+- Source revision analyzed: `005da73e84c225446ef3e3d3c2edf4f459e26a45`
+- Nodes / edges / hyperedges: 3781 / 11703 / 0
+- Relationship counts: calls=4701, contains=1180, imports=1903, imports_from=876, indirect_call=451, inherits=42, method=1722, rationale_for=402, references=106, uses=320
 - Graph origin: Graphify AST extraction; inferred edges are hypotheses, not verified behavior.
 
 ### Highest-connectivity source symbols
 
-- `PolicyError` — 256 graph links; `copilot_agent/policy.py` at `L9`.
+- `PolicyError` — 254 graph links; `copilot_agent/policy.py` at `L9`.
 - `ToolRegistry` — 158 graph links; `copilot_agent/tools.py` at `L406`.
 - `tools.py` — 158 graph links; `copilot_agent/tools.py` at `L1`.
 - `Orchestrator` — 155 graph links; `copilot_agent/orchestrator.py` at `L29`.
@@ -989,7 +1019,7 @@ Generated from the local Graphify code-only AST graph. The raw graph, cache, and
 - `Config` — 86 graph links; `copilot_agent/config.py` at `L26`.
 - `policy.py` — 80 graph links; `copilot_agent/policy.py` at `L1`.
 - `automation_packages.py` — 76 graph links; `copilot_agent/automation_packages.py` at `L1`.
-- `rea.py` — 65 graph links; `copilot_agent/rea.py` at `L1`.
+- `rea.py` — 67 graph links; `copilot_agent/rea.py` at `L1`.
 - `._turn()` — 63 graph links; `copilot_agent/orchestrator.py` at `L1338`.
 
 ### Direct, source-derived relationships
@@ -1776,7 +1806,7 @@ print('Python runtime and Playwright verified.')
     Push-Location -LiteralPath $repoRoot
     try {
         if ($Mode -eq 'Setup') {
-            & $python @pythonArgs (Join-Path $repoRoot 'app.py') --setup-only
+            & $python @pythonArgs (Join-Path $repoRoot 'app.py') --setup-only --yes-setup
         } elseif ($Mode -in @('Start','UI')) {
             if ($Mode -eq 'UI') {
                 & $python @pythonArgs (Join-Path $repoRoot 'version_launcher.py') $projectVersion --ui
