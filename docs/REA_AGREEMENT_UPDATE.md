@@ -76,3 +76,14 @@ Copilot behavior still require target-environment verification.
 - 41 setup tests and51/55 readiness checks also passed during implementation (counts overlap).
 - The final output guard preserves output_limit and never turns excess evidence into successful partial coverage.
 - Live VDI, actual S:/UNC installation capacity and production authenticated Copilot remain unverified.
+
+
+## Existing upstream runtime follow-up
+
+The latest confirmed layout distinguishes the source repository
+`<PROJECTS_ROOT>\REA` from the working executable package `<REA_RUNTIME_ROOT>`.
+Use `<NODE_ROOT>\node.exe <REA_RUNTIME_ROOT>\scripts\rea.mjs` with registered
+fixed commands. This latest reporting instruction supersedes earlier full-path report wording.
+Reports mirror paths using the user's named references; actual
+configuration and ToolRegistry arguments retain resolved paths. See
+[upstream repair and validation](REA_UPSTREAM_RUNTIME_FIX.md).

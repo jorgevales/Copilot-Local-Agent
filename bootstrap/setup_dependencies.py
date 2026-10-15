@@ -323,12 +323,14 @@ def main():
     project = Path(sys.argv[2]).resolve().parent
     if (project / 'bootstrap' / 'setup_rea.py').is_file():
         from setup_rea import provision
-        try:
-            provision(project, prompt_for_node=sys.stdin.isatty())
-        except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
-            print('REA setup check failed: ' + str(error), file=sys.stderr, flush=True)
-            print('Python dependencies completed. Run Setup.cmd to retry REA setup.',
-                  file=sys.stderr, flush=True)
+        settings_path = project / 'config.local.json'
+        settings = json.loads(settings_path.read_text(encoding='utf-8-sig')) if settings_path.is_file() else {}
+        if not isinstance(settings, dict):
+            raise ValueError('REA configuration must be a JSON object: ' + str(settings_path))
+        require_node = settings.get('rea_enabled', True) and settings.get('rea_backend', 'auto') != 'python_native'
+        # Explicit Python-only/disabled configurations remain intentional. In
+        # ordinary auto/Node setup, Python fallback cannot mask repair failure.
+        provision(project, require_node=require_node, ask_on_missing=sys.stdin.isatty())
 
 
 if __name__=='__main__':

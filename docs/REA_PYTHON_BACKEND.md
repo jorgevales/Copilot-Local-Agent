@@ -10,8 +10,10 @@ public ToolRegistry schemas are unchanged. Backend provenance is explicit.
 
 Ordinary live/testing startup never installs software. Pull the code and start
 a new session using the existing project Python environment. REA remains usable
-without running Node setup. Setup.cmd may repair Node; an auto-mode Node failure
-reports the verified Python fallback instead of disabling REA. Use
+without running Node setup. Setup.cmd now requires upstream Node success in auto/node_cli mode;
+**Setup REA.cmd** explicitly repairs Node without Edge setup. Python fallback
+remains available during ordinary sessions, with `upstream_available:false`
+when the actual upstream runtime is missing. Use
 `"rea_backend": "python_native"` in local configuration to bypass Node entirely.
 
 ## Evidence supplied by Python

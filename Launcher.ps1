@@ -1,4 +1,4 @@
-param([ValidateSet('Setup','Start','UI','Tests')][string]$Mode = 'Start')
+param([ValidateSet('Setup','SetupREA','Start','UI','Tests')][string]$Mode = 'Start')
 $ErrorActionPreference = 'Stop'
 $repoRoot = $PSScriptRoot
 $productionShare = ([System.IO.Path]::GetPathRoot($repoRoot) -ieq 'S:\')
@@ -483,7 +483,11 @@ print('Python runtime and Playwright verified.')
     if ($LASTEXITCODE -ne 0) { throw 'Python or pinned dependencies are unavailable. Run Setup.cmd to create or repair the project environment; existing files are retained.' }
     Push-Location -LiteralPath $repoRoot
     try {
-        if ($Mode -eq 'Setup') {
+        if ($Mode -eq 'SetupREA') {
+            # Repair only upstream REA using the verified existing project
+            # interpreter. The helper asks for Node only when detection fails.
+            & $python @pythonArgs (Join-Path $repoRoot 'bootstrap\setup_rea.py') --project $repoRoot --require-node
+        } elseif ($Mode -eq 'Setup') {
             & $python @pythonArgs (Join-Path $repoRoot 'app.py') --setup-only --yes-setup
         } elseif ($Mode -in @('Start','UI')) {
             if ($Mode -eq 'UI') {

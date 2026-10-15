@@ -51,6 +51,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Role: Implementation module; responsibilities are identified by its public symbols and imports.
 - Direct imports: `copilot_agent.app`
 
+### `bootstrap/rea_delivery.py`
+
+- Role: Portable delivery of an explicitly trusted, complete upstream REA runtime.
+- Direct imports: `__future__`, `argparse`, `ctypes`, `hashlib`, `json`, `os`, `pathlib`, `re`, `stat`, `tempfile`, `uuid`, `zipfile`
+- Public symbols: `_regular(path) [private helper]`; `_relative(name) [private helper]`; `_sha(path) [private helper]`; `_shared(path) [private helper]`; `create_staging(project, env, *, remaining=None, excluded=())`; `export_runtime(root, archive)`; `extract_runtime_archive(archive, destination, *, expected_sha256, remaining=None)`; `main(argv=None)`; `staging_candidates(project, env)`; `validate_delivery(root)`
+
 ### `bootstrap/setup_dependencies.py`
 
 - Role: Repeat-safe package setup. Scratch files only; agent knowledge stays on S:.
@@ -60,8 +66,8 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `bootstrap/setup_rea.py`
 
 - Role: Provision the pinned optional REA runtime without administrator rights.
-- Direct imports: `__future__`, `argparse`, `base64`, `contextvars`, `copilot_agent.node_runtime`, `copilot_agent.persistence`, `hashlib`, `json`, `os`, `pathlib`, `re`, `shutil`, `subprocess`, `sys`, `tarfile`, `tempfile`, `time`, `types`, `urllib.request`, `uuid`
-- Public symbols: `_install_node(project, *, environ=None, deadline_seconds=180, offline=False, config_path=None, node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None) [private helper]`; `_operator_node(value, project, env) [private helper]`; `_provision_node(project, *, environ=None, deadline_seconds=180, offline=False, config_path=None, node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None) [private helper]`; `_remaining(default=180) [private helper]`; `_run_command(command, *, cwd=None, env=None, timeout=8, stage='cli_smoke', identity='rea --help') [private helper]`; `_select_node(project, env, *, node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None) [private helper]`; `_stage(stage, function, *args, **kwargs) [private helper]`; `_terminate_owned(process) [private helper]`; `_validate_runtime_files(root) [private helper]`; `_verify_scratch(path) [private helper]`; `archive_bytes(env)`; `class SetupBudget; 2 public methods`; `class SetupBudgetExpired(RuntimeError)`; `class SetupDiagnostics; 4 public methods`; `extract_archive(archive, destination)`; `find_node(env)`; `find_npm(node, env)`; `main()`; `provision(project, *, environ=None, deadline_seconds=180, offline=False, config_path=None, node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None)`; `runtime_candidates(project, env)`; `validate_runtime(root, node, env, *, smoke=True)`
+- Direct imports: `__future__`, `argparse`, `base64`, `contextvars`, `copilot_agent.node_runtime`, `copilot_agent.persistence`, `copilot_agent.rea_locations`, `hashlib`, `json`, `os`, `pathlib`, `re`, `shutil`, `subprocess`, `sys`, `tarfile`, `tempfile`, `time`, `types`, `urllib.request`, `uuid`
+- Public symbols: `_install_node(project, *, environ=None, deadline_seconds=180, offline=False, config_path=None, node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None) [private helper]`; `_operator_node(value, project, env) [private helper]`; `_provision_node(project, *, environ=None, deadline_seconds=180, offline=False, config_path=None, node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None) [private helper]`; `_remaining(default=180) [private helper]`; `_run_command(command, *, cwd=None, env=None, timeout=8, stage='cli_smoke', identity='rea --help') [private helper]`; `_select_node(project, env, *, node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None) [private helper]`; `_stage(stage, function, *args, **kwargs) [private helper]`; `_terminate_owned(process) [private helper]`; `_validate_runtime_files(root) [private helper]`; `_verify_scratch(path) [private helper]`; `archive_bytes(env)`; `class SetupBudget; 2 public methods`; `class SetupBudgetExpired(RuntimeError)`; `class SetupDiagnostics; 4 public methods`; `extract_archive(archive, destination)`; `find_node(env)`; `find_npm(node, env)`; `main()`; `provision(project, *, environ=None, deadline_seconds=180, offline=False, config_path=None, node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None, require_node=False)`; `runtime_candidates(project, env)`; `validate_runtime(root, node, env, *, smoke=True)`
 
 ### `copilot_agent/__init__.py`
 
@@ -353,6 +359,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Role: Analysis adapters. Authority, admission and lifecycle stay in rea.py.
 - Direct imports: `__future__`, `pathlib`
 - Public symbols: `class NodeCliREABackend; 3 public methods`; `class PythonNativeREABackend; 6 public methods`
+
+### `copilot_agent/rea_locations.py`
+
+- Role: Bounded discovery of existing REA repositories and portable Node tooling.
+- Direct imports: `.node_runtime`, `pathlib`
+- Public symbols: `_tools_roots(node_paths) [private helper]`; `existing_runtime_candidates(project, node_paths=())`; `npm_cache_candidates(node_paths=())`
 
 ### `copilot_agent/rea_python_artifacts.py`
 
@@ -880,7 +892,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: REA installation discovery and precise bounded availability diagnostics.
 - Direct imports: `copilot_agent.rea`, `copilot_agent.rea_readiness`, `hashlib`, `json`, `os`, `pathlib`, `subprocess`, `tempfile`, `unittest`, `unittest.mock`
-- Public symbols: `class REAAvailabilityTests(unittest.TestCase); 14 public methods`
+- Public symbols: `class REAAvailabilityTests(unittest.TestCase); 18 public methods`
 
 ### `tests/test_rea_availability_session.py`
 
@@ -894,11 +906,23 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `asyncio`, `copilot_agent.policy`, `copilot_agent.rea`, `json`, `pathlib`, `tempfile`, `unittest`, `unittest.mock`
 - Public symbols: `class BackendExecutionTests(unittest.IsolatedAsyncioTestCase); 2 public methods`; `class BackendSelectionTests(unittest.TestCase); 5 public methods`
 
+### `tests/test_rea_delivery.py`
+
+- Role: Implementation module; responsibilities are identified by its public symbols and imports.
+- Direct imports: `bootstrap`, `hashlib`, `json`, `pathlib`, `tempfile`, `unittest`, `unittest.mock`, `zipfile`
+- Public symbols: `class PortableDeliveryTests(unittest.TestCase); 14 public methods`
+
 ### `tests/test_rea_full_paths.py`
 
 - Role: Authorized filesystem coordinates remain useful without retaining credentials.
 - Direct imports: `__future__`, `copilot_agent.policy`, `copilot_agent.rea`, `hashlib`, `json`, `pathlib`, `tempfile`, `unittest`, `unittest.mock`
 - Public symbols: `class REAFullPathTests(unittest.IsolatedAsyncioTestCase); 5 public methods`
+
+### `tests/test_rea_locations.py`
+
+- Role: Known VDI sibling and portable npm layouts must be reusable offline.
+- Direct imports: `copilot_agent`, `importlib.util`, `pathlib`, `tempfile`, `unittest`, `unittest.mock`
+- Public symbols: `class ReaLocationsTests(unittest.TestCase); 4 public methods`
 
 ### `tests/test_rea_partial_observations.py`
 
@@ -942,6 +966,24 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `asyncio`, `copilot_agent.logging_utils`, `copilot_agent.policy`, `copilot_agent.rea`, `copilot_agent.research_routing`, `copilot_agent.state`, `copilot_agent.tools`, `hashlib`, `json`, `jsonschema`, `os`, `pathlib`, `tempfile`, `tests.test_rea`, `unittest`, `unittest.mock`
 - Public symbols: `class REARegistryActualTests(unittest.IsolatedAsyncioTestCase); 1 public methods`; `class REARegistryTests(unittest.IsolatedAsyncioTestCase); 11 public methods`; `request(name, arguments, call_id='read')`; `write_har(path)`
 
+### `tests/test_rea_setup_entry.py`
+
+- Role: Upstream REA repair entry points cannot report Python fallback as success.
+- Direct imports: `importlib.util`, `json`, `pathlib`, `re`, `subprocess`, `sys`, `tempfile`, `types`, `unittest`, `unittest.mock`
+- Public symbols: `class ReaSetupEntryTests(unittest.TestCase); 6 public methods`
+
+### `tests/test_rea_testing_runtime.py`
+
+- Role: Testing copies inherit provisioned REA paths without inheriting grants.
+- Direct imports: `copilot_agent`, `json`, `os`, `pathlib`, `sys`, `tempfile`, `unittest`, `unittest.mock`, `version_launcher`
+- Public symbols: `class ReaTestingRuntimeTests(unittest.TestCase); 7 public methods`
+
+### `tests/test_rea_upstream_delivery.py`
+
+- Role: Upstream installation must survive a missing npm/network and redirected roots.
+- Direct imports: `bootstrap`, `json`, `pathlib`, `tempfile`, `unittest`, `unittest.mock`
+- Public symbols: `class UpstreamDeliveryTests(unittest.TestCase); 4 public methods`
+
 ### `tests/test_reconciliation.py`
 
 - Role: Automatic reconciliation uses the original owned tab and fresh page state.
@@ -970,13 +1012,13 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Portable REA provisioning: integrity, archive safety and recovery contracts.
 - Direct imports: `base64`, `hashlib`, `importlib.util`, `io`, `json`, `os`, `pathlib`, `subprocess`, `tarfile`, `tempfile`, `types`, `unittest`, `unittest.mock`
-- Public symbols: `class ReaSetupTests(unittest.TestCase); 12 public methods`
+- Public symbols: `class ReaSetupTests(unittest.TestCase); 13 public methods`
 
 ### `tests/test_setup_rea_diagnostics.py`
 
 - Role: Credential-safe setup stages and mandatory Python fallback regression coverage.
 - Direct imports: `contextlib`, `errno`, `importlib.util`, `io`, `json`, `pathlib`, `subprocess`, `sys`, `tempfile`, `types`, `unittest`, `unittest.mock`
-- Public symbols: `class SetupBackendDiagnosticsTests(unittest.TestCase); 14 public methods`
+- Public symbols: `class SetupBackendDiagnosticsTests(unittest.TestCase); 21 public methods`
 
 ### `tests/test_setup_resources.py`
 
@@ -1084,7 +1126,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Local complete-copy testing versions. Requires neither Git nor extra packages.
 - Direct imports: `__future__`, `datetime`, `hashlib`, `json`, `os`, `pathlib`, `shutil`, `subprocess`, `sys`, `uuid`
-- Public symbols: `choose_source(live, ask=input, choice=None)`; `create_version(live, proposals, previous=None)`; `digest(path)`; `main()`; `prepare_drop_folder(live)`; `prepare_rea(source, flags, environment)`; `replacement_map(live, proposals)`; `source_files(root)`
+- Public symbols: `choose_source(live, ask=input, choice=None)`; `create_version(live, proposals, previous=None)`; `digest(path)`; `inherit_rea_runtime(live, environment)`; `main()`; `prepare_drop_folder(live)`; `prepare_rea(source, flags, environment)`; `replacement_map(live, proposals)`; `source_files(root)`
 
 
 ## Graphify relationship evidence
@@ -1092,9 +1134,9 @@ This is a static AST inventory of the current source, not a verbatim code packag
 Generated from the local Graphify code-only AST graph. The raw graph, cache, and Graphify report are not attachments; the statistics and selected relationships below preserve their useful navigation evidence.
 
 - Graphify version: `0.9.79`
-- Source revision analyzed: `38abaa75d24f4e512a785bcac48c1501a9f2867b`
-- Nodes / edges / hyperedges: 4050 / 12428 / 0
-- Relationship counts: calls=4969, contains=1259, imports=2039, imports_from=938, indirect_call=483, inherits=43, method=1836, rationale_for=435, references=108, uses=318
+- Source revision analyzed: `af0afd151bde4cd635e94d046adc706aaaae7165`
+- Nodes / edges / hyperedges: 4140 / 12629 / 0
+- Relationship counts: calls=5019, contains=1278, imports=2080, imports_from=959, indirect_call=492, inherits=43, method=1883, rationale_for=449, references=108, uses=318
 - Graph origin: Graphify AST extraction; inferred edges are hypotheses, not verified behavior.
 
 ### Highest-connectivity source symbols
@@ -1111,9 +1153,9 @@ Generated from the local Graphify code-only AST graph. The raw graph, cache, and
 - `final_response()` — 98 graph links; `tests/test_orchestrator.py` at `L86`.
 - `Store` — 94 graph links; `copilot_agent/discovery_store.py` at `L44`.
 - `copilot_agent/app.py` — 89 graph links; `copilot_agent/app.py` at `L1`.
+- `rea.py` — 89 graph links; `copilot_agent/rea.py` at `L1`.
 - `site_knowledge.py` — 89 graph links; `copilot_agent/site_knowledge.py` at `L1`.
-- `rea.py` — 88 graph links; `copilot_agent/rea.py` at `L1`.
-- `Config` — 86 graph links; `copilot_agent/config.py` at `L26`.
+- `Config` — 86 graph links; `copilot_agent/config.py` at `L28`.
 - `policy.py` — 84 graph links; `copilot_agent/policy.py` at `L1`.
 - `automation_packages.py` — 76 graph links; `copilot_agent/automation_packages.py` at `L1`.
 - `._turn()` — 63 graph links; `copilot_agent/orchestrator.py` at `L1338`.
@@ -1420,7 +1462,7 @@ These compact files define how users launch the project and the top-level respon
 <!-- BEGIN VERBATIM SOURCE: Launcher.ps1 -->
 ## Source: `Launcher.ps1` (verbatim text; line endings normalized to LF)
 
-param([ValidateSet('Setup','Start','UI','Tests')][string]$Mode = 'Start')
+param([ValidateSet('Setup','SetupREA','Start','UI','Tests')][string]$Mode = 'Start')
 $ErrorActionPreference = 'Stop'
 $repoRoot = $PSScriptRoot
 $productionShare = ([System.IO.Path]::GetPathRoot($repoRoot) -ieq 'S:\')
@@ -1905,7 +1947,11 @@ print('Python runtime and Playwright verified.')
     if ($LASTEXITCODE -ne 0) { throw 'Python or pinned dependencies are unavailable. Run Setup.cmd to create or repair the project environment; existing files are retained.' }
     Push-Location -LiteralPath $repoRoot
     try {
-        if ($Mode -eq 'Setup') {
+        if ($Mode -eq 'SetupREA') {
+            # Repair only upstream REA using the verified existing project
+            # interpreter. The helper asks for Node only when detection fails.
+            & $python @pythonArgs (Join-Path $repoRoot 'bootstrap\setup_rea.py') --project $repoRoot --require-node
+        } elseif ($Mode -eq 'Setup') {
             & $python @pythonArgs (Join-Path $repoRoot 'app.py') --setup-only --yes-setup
         } elseif ($Mode -in @('Start','UI')) {
             if ($Mode -eq 'UI') {

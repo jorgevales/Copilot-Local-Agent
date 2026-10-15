@@ -18,6 +18,72 @@ SPEC.loader.exec_module(helper)
 
 
 class SetupBackendDiagnosticsTests(unittest.TestCase):
+    def test_required_node_never_reports_python_fallback_as_setup_success(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.object(helper, '_provision_node', side_effect=RuntimeError('upstream package missing')), \
+                 patch('copilot_agent.rea.rea_health', return_value={'available': True, 'selected_backend': 'python_native'}) as health:
+                with self.assertRaisesRegex(RuntimeError, 'upstream package missing'):
+                    helper.provision(temporary, environ={}, require_node=True)
+            health.assert_not_called()
+
+    def test_required_node_attempts_upstream_even_with_explicit_python_backend(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            (project / 'config.local.json').write_text('{"rea_backend":"python_native"}')
+            with patch.object(helper, '_provision_node', return_value={'available': True, 'repository': 'S:/rea'}) as install, \
+                 patch('copilot_agent.rea.rea_health') as health:
+                result = helper.provision(project, environ={}, require_node=True)
+            self.assertEqual('node_cli', result['backend'])
+            install.assert_called_once()
+            health.assert_not_called()
+
+    def test_successful_required_node_repair_selects_auto_and_keeps_unrelated_settings(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            settings = project / 'config.local.json'
+            settings.write_text('{"rea_backend":"python_native", "keep":"value"}')
+            result = {'available': True, 'repository': str(project / 'upstream'),
+                      'node_executable': str(project / 'node.exe')}
+            with patch.object(helper, '_provision_node', return_value=result):
+                helper.provision(project, environ={}, require_node=True)
+            saved = json.loads(settings.read_text(encoding='utf-8-sig'))
+            self.assertEqual('auto', saved['rea_backend'])
+            self.assertEqual('value', saved['keep'])
+            self.assertEqual(result['repository'], saved['rea_repository'])
+            self.assertEqual(result['node_executable'], saved['rea_node_executable'])
+
+    def test_failed_required_node_repair_does_not_change_selected_backend(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            settings = project / 'config.local.json'
+            original = '{"rea_backend":"python_native", "keep":"value"}'
+            settings.write_text(original)
+            with patch.object(helper, '_provision_node', side_effect=RuntimeError('upstream missing')):
+                with self.assertRaisesRegex(RuntimeError, 'upstream missing'):
+                    helper.provision(project, environ={}, require_node=True)
+            self.assertEqual(original, settings.read_text())
+
+    def test_required_node_disabled_fails_without_discovery(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            (project / 'config.local.json').write_text('{"rea_enabled":false}')
+            with patch.object(helper, '_provision_node') as install:
+                with self.assertRaisesRegex(RuntimeError, 'disabled'):
+                    helper.provision(project, environ={}, require_node=True)
+            install.assert_not_called()
+
+    def test_required_node_rejects_disabled_or_non_available_result(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.object(helper, '_provision_node', return_value={'available': False, 'disabled': True}):
+                with self.assertRaisesRegex(RuntimeError, 'required upstream Node'):
+                    helper.provision(temporary, environ={}, require_node=True)
+
+    def test_cli_can_require_actual_upstream_node(self):
+        with patch.object(helper.sys, 'argv', ['setup_rea.py', '--require-node', '--non-interactive']), \
+             patch.object(helper, 'provision', return_value={'available': True}) as provision:
+            self.assertEqual(0, helper.main())
+        self.assertTrue(provision.call_args.kwargs['require_node'])
+
     def test_python_only_setup_never_discovers_node_or_installs(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
@@ -111,7 +177,7 @@ class SetupBackendDiagnosticsTests(unittest.TestCase):
                 clock[0] += seconds
                 return result
             def validate(path, *_):
-                if path.name != 'package':
+                if not (path / 'package.json').is_file():
                     raise ValueError('missing existing install')
                 return advance(10, True)
             def extract(archive, root):
@@ -132,7 +198,7 @@ class SetupBackendDiagnosticsTests(unittest.TestCase):
                 result = helper.provision(project, environ={})
             self.assertTrue(result['available'])
             self.assertEqual([85, 50], timeouts)
-            self.assertEqual(165, clock[0])
+            self.assertEqual(175, clock[0])
 
     def test_expired_budget_does_not_start_a_retry(self):
         clock = [0]
@@ -222,7 +288,7 @@ class SetupBackendDiagnosticsTests(unittest.TestCase):
             with patch.object(helper, 'find_node', return_value=project / 'node.exe'), \
                  patch.object(helper, 'find_npm', return_value=project / 'npm-cli.js'), \
                  patch.object(helper, 'runtime_candidates', return_value=[target]), \
-                 patch.object(helper, 'validate_runtime', side_effect=lambda root, *_: True if root.name == 'package' else (_ for _ in ()).throw(ValueError('missing'))), \
+                 patch.object(helper, 'validate_runtime', side_effect=lambda root, *_: True if (root / 'package.json').is_file() else (_ for _ in ()).throw(ValueError('missing'))), \
                  patch.object(helper, 'archive_bytes', return_value=b'archive'), \
                  patch.object(helper, 'extract_archive', side_effect=extract), \
                  patch.object(helper, '_verify_scratch', side_effect=probe), \

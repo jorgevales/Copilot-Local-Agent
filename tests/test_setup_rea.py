@@ -99,6 +99,21 @@ class ReaSetupTests(unittest.TestCase):
             npm.assert_not_called()
             download.assert_not_called()
 
+    def test_successful_runtime_persists_exact_repository_and_node_preserving_config(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            configuration = root / 'custom.json'
+            configuration.write_text(json.dumps({'other_setting': {'preserve': True}, 'rea_backend': 'auto'}))
+            node = root / 'portable' / 'node.exe'
+            with patch.object(helper, 'find_node', return_value=node), \
+                 patch.object(helper, 'validate_runtime', return_value=True):
+                result = helper.provision(root, environ={}, config_path=configuration, require_node=True)
+            saved = json.loads(configuration.read_text(encoding='utf-8-sig'))
+            self.assertEqual(result['repository'], saved['rea_repository'])
+            self.assertEqual(str(node), saved['rea_node_executable'])
+            self.assertEqual({'preserve': True}, saved['other_setting'])
+            self.assertEqual('auto', saved['rea_backend'])
+
     def test_authoritative_override_does_not_reuse_another_root(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -130,7 +145,7 @@ class ReaSetupTests(unittest.TestCase):
             with patch.object(helper, 'find_node', return_value=root / 'node.exe'), \
                  patch.object(helper, 'find_npm', return_value=root / 'npm-cli.js'), \
                  patch.object(helper, 'runtime_candidates', return_value=[blocked / 'rea', chosen]), \
-                 patch.object(helper, 'validate_runtime', side_effect=lambda path, node, env: True if path.name == 'package' else (_ for _ in ()).throw(ValueError('missing'))), \
+                 patch.object(helper, 'validate_runtime', side_effect=lambda path, node, env: True if (path / 'package.json').is_file() else (_ for _ in ()).throw(ValueError('missing'))), \
                  patch.object(helper, 'archive_bytes', return_value=b'archive'), \
                  patch.object(helper, 'extract_archive', side_effect=extract), \
                  patch.object(helper, '_run_command', side_effect=run):

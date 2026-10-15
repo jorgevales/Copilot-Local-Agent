@@ -7,6 +7,8 @@ from .policy import PolicyError, mapped_s_drive_root
 from .storage import default_local_storage, profile_directory, validate_user_storage_directory
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+REA_RUNTIME_FIELDS = frozenset({'rea_enabled', 'rea_backend', 'rea_repository', 'rea_node_executable',
+                                'rea_node_readiness_timeout_seconds'})
 
 
 def documents_directory() -> Path:
@@ -106,6 +108,20 @@ class Config:
     def load(cls, path: Path | None = None, *, storage_override: Path | None = None) -> 'Config':
         cfg = cls()
         data = {}
+        # Testing source copies exclude private configuration and runtime trees.
+        # The live launcher supplies only setup's REA selection; local testing
+        # preferences below take priority and ordinary validators still apply.
+        if os.environ.get('COPILOT_AGENT_EXECUTION_MODE') == 'testing':
+            inherited = os.environ.get('COPILOT_AGENT_REA_RUNTIME_SETTINGS', '')
+            if inherited:
+                if len(inherited) > 65536:
+                    raise ValueError('Inherited REA runtime preferences exceed the bounded size')
+                values = json.loads(inherited)
+                if not isinstance(values, dict):
+                    raise ValueError('Inherited REA runtime preferences must be a JSON object')
+                for key in REA_RUNTIME_FIELDS:
+                    if key in values:
+                        setattr(cfg, key, values[key])
         if path is None:
             path = PROJECT_ROOT / 'config.local.json'
         if path and Path(path).exists():

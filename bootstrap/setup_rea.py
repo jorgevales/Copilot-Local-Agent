@@ -26,6 +26,7 @@ import uuid
 # This helper also runs as a standalone script before the application starts.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from copilot_agent.node_runtime import node_path_candidates, node_source_candidates
+from copilot_agent.rea_locations import existing_runtime_candidates, npm_cache_candidates
 from copilot_agent.persistence import io_path, write_json
 
 VERSION = '6.5.0'
@@ -395,27 +396,55 @@ def _install_node(project, *, environ=None, deadline_seconds=180, offline=False,
     # installation candidates. Only time spent waiting for operator input is paused.
     deadline = _BUDGET.get().deadline
     candidates = runtime_candidates(project, env)
-    if settings.get('rea_repository'):
-        selected = Path(settings['rea_repository']).expanduser()
+    selected_repository = env.get('COPILOT_REA_REPOSITORY') or settings.get('rea_repository')
+    if selected_repository:
+        selected = Path(selected_repository).expanduser()
         if not selected.is_absolute() or selected == Path(selected.anchor):
             raise ValueError('rea_repository must be an absolute runtime folder, not a drive root')
         candidates = [selected]
     # A complete offline/developer installation is useful without copying its
     # potentially large dependency tree or modifying it.
-    existing = candidates + ([] if settings.get('rea_repository') else [project.parent / 'Copilot Local Agent Research' / 'rea'])
+    existing = ([*existing_runtime_candidates(project, [node]), *candidates,
+                 project.parent / 'Copilot Local Agent Research' / 'rea']
+                if not selected_repository else candidates)
     for root in existing:
         try:
             if time.monotonic() >= deadline:
                 break
             validate_runtime(root, node, env)
             print(f'REA {VERSION}: verified existing Node runtime.', flush=True)
-            return {'available': True, 'repository': str(root), 'reused': True}
+            return {'available': True, 'repository': str(root), 'node_executable': str(node), 'reused': True}
         except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
             continue
-    npm = _stage('npm_probe', find_npm, node, env)
-    if offline and not env.get('COPILOT_REA_ARCHIVE'):
-        raise RuntimeError('Offline repair needs COPILOT_REA_ARCHIVE pointing to the pinned 6.5.0 tarball and a populated npm cache.')
-    payload = _stage('archive_acquire', archive_bytes, env)
+    if not (env.get('npm_config_cache') or env.get('NPM_CONFIG_CACHE')):
+        for cache in npm_cache_candidates([node]):
+            try:
+                if not cache.is_dir():
+                    continue
+                _verify_scratch(cache)
+                env['npm_config_cache'] = str(cache)
+                break
+            except OSError:
+                continue
+    # Local managed installs avoid npm's thousands of small file operations on
+    # redirected S:/UNC. Keep every shared candidate as a writable fallback.
+    from bootstrap.rea_delivery import _shared, extract_runtime_archive
+    if not selected_repository:
+        candidates = sorted(candidates, key=_shared)
+    portable = env.get('COPILOT_REA_RUNTIME_ARCHIVE')
+    portable_digest = env.get('COPILOT_REA_RUNTIME_SHA256')
+    if bool(portable) != bool(portable_digest):
+        raise ValueError('A complete runtime bundle requires both COPILOT_REA_RUNTIME_ARCHIVE and COPILOT_REA_RUNTIME_SHA256.')
+    if portable:
+        portable = Path(portable).expanduser()
+        if not portable.is_absolute():
+            raise ValueError('COPILOT_REA_RUNTIME_ARCHIVE must be an absolute trusted archive path.')
+        npm, payload = None, None
+    else:
+        npm = _stage('npm_probe', find_npm, node, env)
+        if offline and not env.get('COPILOT_REA_ARCHIVE'):
+            raise RuntimeError('Offline repair needs COPILOT_REA_ARCHIVE pointing to the pinned 6.5.0 tarball and a populated npm cache.')
+        payload = _stage('archive_acquire', archive_bytes, env)
     failures = []
     for target in candidates:
         staging = target.parent / ('.rea-install-' + uuid.uuid4().hex)
@@ -424,43 +453,47 @@ def _install_node(project, *, environ=None, deadline_seconds=180, offline=False,
             if time.monotonic() >= deadline:
                 break
             staging.mkdir(parents=True)
-            archive = staging / 'rea.tgz'
-            archive.write_bytes(payload)
             root = staging / 'package'
             root.mkdir()
-            _stage('archive_extract', extract_archive, archive, root)
-            (root / '.copilot-rea-runtime.json').write_text(json.dumps({'version': VERSION}), encoding='utf-8')
             child_env = dict(env, TEMP=str(staging), TMP=str(staging), TMPDIR=str(staging),
                              npm_config_cache=str(staging / 'npm-cache'), PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD='1')
             child_env.pop('NPM_CONFIG_CACHE', None)
-            _verify_scratch(Path(child_env['npm_config_cache']))
-            command = [str(node), str(npm), 'install', '--omit=dev', '--omit=optional', '--ignore-scripts',
-                       '--no-audit', '--no-fund', '--fetch-retries=0', '--fetch-timeout=20000',
-                       '--registry=https://registry.npmjs.org']
-            # Prefer the existing npm cache when it is useful in restricted VDIs;
-            # a cache miss then gets one bounded online attempt.
-            cache_env = dict(child_env)
-            # An explicitly supplied cache is kept only after a write/read probe.
-            # Never let npm silently select the full C: user cache.
-            cache = env.get('npm_config_cache') or env.get('NPM_CONFIG_CACHE')
-            if cache:
-                try:
-                    _verify_scratch(Path(cache))
-                    cache_env['npm_config_cache'] = str(cache)
-                except OSError as error:
-                    diagnostics = _DIAGNOSTICS.get()
-                    if diagnostics:
-                        diagnostics.record('dependency_install', command='npm cache write/read probe', error=error, termination='failed')
-            stage = 'dependency_install'
-            result = _run_command(command + ['--offline'], cwd=root, env=cache_env,
-                                  timeout=_remaining(),
-                                  stage='dependency_install', identity='node npm install --offline --ignore-scripts')
-            if result.returncode and not offline:
-                result = _run_command(command, cwd=root, env=child_env,
+            if portable:
+                _stage('archive_extract', extract_runtime_archive, portable, root,
+                       expected_sha256=portable_digest, remaining=_remaining)
+            else:
+                archive = staging / 'rea.tgz'
+                archive.write_bytes(payload)
+                _stage('archive_extract', extract_archive, archive, root)
+                _verify_scratch(Path(child_env['npm_config_cache']))
+                command = [str(node), str(npm), 'install', '--omit=dev', '--omit=optional', '--ignore-scripts',
+                           '--no-audit', '--no-fund', '--fetch-retries=0', '--fetch-timeout=20000',
+                           '--registry=https://registry.npmjs.org']
+                # Prefer the existing npm cache when it is useful in restricted VDIs;
+                # a cache miss then gets one bounded online attempt.
+                cache_env = dict(child_env)
+                # An explicitly supplied cache is kept only after a write/read probe.
+                # Never let npm silently select the full C: user cache.
+                cache = env.get('npm_config_cache') or env.get('NPM_CONFIG_CACHE')
+                if cache:
+                    try:
+                        _verify_scratch(Path(cache))
+                        cache_env['npm_config_cache'] = str(cache)
+                    except OSError as error:
+                        diagnostics = _DIAGNOSTICS.get()
+                        if diagnostics:
+                            diagnostics.record('dependency_install', command='npm cache write/read probe', error=error, termination='failed')
+                stage = 'dependency_install'
+                result = _run_command(command + ['--offline'], cwd=root, env=cache_env,
                                       timeout=_remaining(),
-                                      stage='dependency_install', identity='node npm install --ignore-scripts')
-            if result.returncode:
-                raise RuntimeError('npm could not obtain production dependencies (cache and registry attempted)')
+                                      stage='dependency_install', identity='node npm install --offline --ignore-scripts')
+                if result.returncode and not offline:
+                    result = _run_command(command, cwd=root, env=child_env,
+                                          timeout=_remaining(),
+                                          stage='dependency_install', identity='node npm install --ignore-scripts')
+                if result.returncode:
+                    raise RuntimeError('npm could not obtain production dependencies (cache and registry attempted)')
+            (root / '.copilot-rea-runtime.json').write_text(json.dumps({'version': VERSION}), encoding='utf-8')
             stage = 'native_verify'
             validate_runtime(root, node, child_env)
             stage = 'publish'
@@ -476,8 +509,10 @@ def _install_node(project, *, environ=None, deadline_seconds=180, offline=False,
                 # new files into an old or potentially inconsistent installation.
                 target.rename(target.with_name('rea-incomplete-' + uuid.uuid4().hex))
             _stage('publish', root.rename, target)
+            # Verify loading from the final path, not only its staging location.
+            validate_runtime(target, node, child_env)
             print(f'REA {VERSION}: installed and CLI verified.', flush=True)
-            return {'available': True, 'repository': str(target), 'reused': False}
+            return {'available': True, 'repository': str(target), 'node_executable': str(node), 'reused': False}
         except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
             diagnostics = _DIAGNOSTICS.get()
             if diagnostics:
@@ -532,8 +567,8 @@ def _verify_scratch(path):
 
 
 def provision(project, *, environ=None, deadline_seconds=180, offline=False, config_path=None,
-              node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None):
-    """Setup may repair Node; Python-only mode never discovers or installs it."""
+              node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None, require_node=False):
+    """Repair REA; explicit upstream repair cannot succeed using Python fallback."""
     project = Path(project).resolve()
     env = dict(os.environ if environ is None else environ)
     diagnostics = SetupDiagnostics(project, env)
@@ -545,7 +580,9 @@ def provision(project, *, environ=None, deadline_seconds=180, offline=False, con
         if not isinstance(loaded, dict):
             raise ValueError('REA configuration must be a JSON object')
         settings = loaded
-        if settings.get('rea_backend', 'auto') == 'python_native' and settings.get('rea_enabled', True):
+        if require_node and settings.get('rea_enabled') is False:
+            raise RuntimeError('The required upstream Node backend is disabled by rea_enabled=false; enable REA before repairing it.')
+        if not require_node and settings.get('rea_backend', 'auto') == 'python_native' and settings.get('rea_enabled', True):
             from copilot_agent.rea import rea_health
             health = rea_health(dict(settings, root=project))
             if not health.get('available'):
@@ -555,9 +592,27 @@ def provision(project, *, environ=None, deadline_seconds=180, offline=False, con
         result = _provision_node(project, environ=env, deadline_seconds=deadline_seconds, offline=offline,
                                  config_path=config_path, node_path=node_path, prompt_for_node=prompt_for_node,
                                  ask_on_missing=ask_on_missing, input_fn=input_fn)
+        if require_node and not result.get('available'):
+            raise RuntimeError('The required upstream Node backend was not verified; Python fallback does not satisfy this setup.')
+        if result.get('available') and result.get('repository') and result.get('node_executable'):
+            # Retain the exact verified runtime across live/testing launches. A
+            # successful developer-sibling or temporary install is otherwise
+            # easy to lose when the next launch resolves a different source root.
+            saved = json.loads(io_path(settings_file).read_text(encoding='utf-8-sig')) if settings_file.is_file() else {}
+            if not isinstance(saved, dict):
+                raise ValueError('REA configuration must be a JSON object: ' + str(settings_file))
+            saved.update(rea_repository=result['repository'], rea_node_executable=result['node_executable'])
+            if require_node and saved.get('rea_backend') == 'python_native':
+                # Only a completed explicit upstream repair changes this choice;
+                # auto prefers verified Node while preserving emergency fallback.
+                saved['rea_backend'] = 'auto'
+            write_json(settings_file, saved)
+            if json.loads(io_path(settings_file).read_text(encoding='utf-8-sig')) != saved:
+                raise RuntimeError('Saved REA runtime configuration did not read back correctly; setup stopped.')
+            print('Verified upstream REA runtime saved: ' + result['repository'], flush=True)
         return dict(result, backend='node_cli', diagnostics=diagnostics.records)
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
-        if settings.get('rea_backend', 'auto') == 'auto' and settings.get('rea_enabled', True):
+        if not require_node and settings.get('rea_backend', 'auto') == 'auto' and settings.get('rea_enabled', True):
             from copilot_agent.rea import rea_health
             health = rea_health(dict(settings, root=project, rea_backend='python_native'))
             if health.get('available'):
@@ -586,14 +641,25 @@ def main():
     parser.add_argument('--config', type=Path, default=None)
     parser.add_argument('--timeout-seconds', type=int, default=180, choices=range(10, 181), metavar='10..180')
     parser.add_argument('--offline', action='store_true', help='Use only COPILOT_REA_ARCHIVE and the existing npm cache.')
+    parser.add_argument('--repository', type=Path, help='Exact existing trusted upstream REA folder (S:/UNC supported); verify/repair and save it for the orchestrator.')
+    parser.add_argument('--runtime-archive', type=Path, help='Complete trusted upstream runtime ZIP; skips npm/network installation.')
+    parser.add_argument('--runtime-archive-sha256', help='Trusted SHA256 supplied by the bundle creator separately from the ZIP.')
     parser.add_argument('--node-path', help='Absolute node.exe, extracted portable folder or Windows Node ZIP; accepts S:/UNC paths.')
     parser.add_argument('--prompt-node-path', action='store_true', help='Paste a Node path before continuing setup automatically.')
     parser.add_argument('--non-interactive', action='store_true', help='Never prompt for a missing Node path.')
+    parser.add_argument('--require-node', action='store_true', help='Require verified upstream REA Node runtime; Python fallback cannot report success.')
     args = parser.parse_args()
     try:
-        provision(args.project, deadline_seconds=args.timeout_seconds, offline=args.offline, config_path=args.config,
+        environment = dict(os.environ)
+        if args.repository is not None:
+            environment['COPILOT_REA_REPOSITORY'] = str(args.repository)
+        if args.runtime_archive is not None:
+            environment['COPILOT_REA_RUNTIME_ARCHIVE'] = str(args.runtime_archive)
+        if args.runtime_archive_sha256 is not None:
+            environment['COPILOT_REA_RUNTIME_SHA256'] = args.runtime_archive_sha256
+        provision(args.project, environ=environment, deadline_seconds=args.timeout_seconds, offline=args.offline, config_path=args.config,
                   node_path=args.node_path, prompt_for_node=args.prompt_node_path and not args.non_interactive,
-                  ask_on_missing=not args.non_interactive and sys.stdin.isatty())
+                  ask_on_missing=not args.non_interactive and sys.stdin.isatty(), require_node=args.require_node)
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
         print('REA setup: ' + str(error), file=sys.stderr)
         return 1

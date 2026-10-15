@@ -1,10 +1,10 @@
 {
   "analysis_inputs": [
     {
-      "bytes": 6720251,
+      "bytes": 6841652,
       "content_treatment": "generated local analysis input; selected relationships and metrics summarized in 02_CODE_AND_GRAPH_INDEX.md; raw graph omitted",
       "path": "Graphify output/graph.json",
-      "sha256": "8fcb572bdf2ab0e34449d78552591158be79d4df94e7ab97ac74f56c4122f00e"
+      "sha256": "1d903ff3afe2818c2f1bbfd4d8b0ba64d6fa12c319b8b185dcf7ed79a4b2d5d9"
     }
   ],
   "attachments": [
@@ -18,7 +18,7 @@
       "purpose": "Reading guide, scope, evidence labels and completeness boundary.",
       "recommended_reading_order": 1,
       "required": true,
-      "sha256": "e35fc3773d7f63a724cf4e18c0f2aad1b6468c601605ea42e5f9d0899fe97593",
+      "sha256": "5b63191c0265a857de6ded6f82b66ff356e6ac82bbca152f8a5547a0de010ea1",
       "source_files_represented": [
         "README.md"
       ]
@@ -33,7 +33,7 @@
       "purpose": "Self-contained purpose, architecture, execution path, trust boundaries and operational assumptions.",
       "recommended_reading_order": 2,
       "required": true,
-      "sha256": "32b2146a1dece7ec722c22a744cc877570efc9cbdf13d5b525a3528eee281859",
+      "sha256": "ec96489c88c9c9d9022128352a1655e752ffb2accee82bf308129f146d7432ee",
       "source_files_represented": [
         "Launcher.ps1",
         "README.md",
@@ -56,7 +56,7 @@
       ]
     },
     {
-      "bytes": 172754,
+      "bytes": 175764,
       "content_category": "generated source-symbol and Graphify summary",
       "content_treatment": "verbatim sections are source-bounded; generated analysis and summaries are explicitly labeled",
       "exclusions_or_summarization": "See package-level exclusions and per-source treatment records.",
@@ -65,7 +65,7 @@
       "purpose": "Python module/symbol/import inventory, summarized contracts and traceable Graphify relationship evidence.",
       "recommended_reading_order": 3,
       "required": true,
-      "sha256": "ed49c033fdaf4171fa35b5f09afb0b1b18d88aa4bf38fbdc1022efa4f0c5d1cb",
+      "sha256": "f046442ecb3098840de584f55a5fbe93d416e8765a96045b9db17acd8c967aa2",
       "source_files_represented": [
         "Launcher.ps1",
         "Run Tests.cmd",
@@ -80,6 +80,7 @@
         "agent_ui/uploads.py",
         "agent_ui/workspace.py",
         "app.py",
+        "bootstrap/rea_delivery.py",
         "bootstrap/setup_dependencies.py",
         "bootstrap/setup_rea.py",
         "config.example.json",
@@ -132,6 +133,7 @@
         "copilot_agent/protocol.py",
         "copilot_agent/rea.py",
         "copilot_agent/rea_backends.py",
+        "copilot_agent/rea_locations.py",
         "copilot_agent/rea_python_artifacts.py",
         "copilot_agent/rea_python_capture.py",
         "copilot_agent/rea_python_page.py",
@@ -226,7 +228,9 @@
         "tests/test_rea_availability.py",
         "tests/test_rea_availability_session.py",
         "tests/test_rea_backends.py",
+        "tests/test_rea_delivery.py",
         "tests/test_rea_full_paths.py",
+        "tests/test_rea_locations.py",
         "tests/test_rea_partial_observations.py",
         "tests/test_rea_python_artifacts.py",
         "tests/test_rea_python_capture.py",
@@ -234,6 +238,9 @@
         "tests/test_rea_python_registry.py",
         "tests/test_rea_readiness.py",
         "tests/test_rea_registry.py",
+        "tests/test_rea_setup_entry.py",
+        "tests/test_rea_testing_runtime.py",
+        "tests/test_rea_upstream_delivery.py",
         "tests/test_reconciliation.py",
         "tests/test_research_routing.py",
         "tests/test_scoped_research_session.py",
@@ -261,7 +268,7 @@
       ]
     },
     {
-      "bytes": 324248,
+      "bytes": 333268,
       "content_category": "verbatim source documentation bundle",
       "content_treatment": "verbatim sections are source-bounded; generated analysis and summaries are explicitly labeled",
       "exclusions_or_summarization": "See package-level exclusions and per-source treatment records.",
@@ -270,7 +277,7 @@
       "purpose": "Verbatim project README and docs sources with explicit source boundaries.",
       "recommended_reading_order": 4,
       "required": true,
-      "sha256": "bfbea50b7d343271926e9a13c9e21665553efab7cff6214b4b5bbd3ce3ac17d1",
+      "sha256": "79bde0c1a57a0ddbea034610bbdcbc9a69ece5778bba9ec489c0d77b24ff4bd3",
       "source_files_represented": [
         "README.md",
         "agent_ui/README.md",
@@ -302,6 +309,7 @@
         "docs/REA_INTEGRATION_ASSESSMENT.md",
         "docs/REA_PYTHON_BACKEND.md",
         "docs/REA_REQUIRED_IMPLEMENTATION_BRIEF.md",
+        "docs/REA_UPSTREAM_RUNTIME_FIX.md",
         "docs/REUSE_MAPPING.md",
         "docs/SESSION_CRAWLER_VALIDATION.md",
         "docs/SHARED_VDI.md",
@@ -317,7 +325,7 @@
       ]
     },
     {
-      "bytes": 87699,
+      "bytes": 88713,
       "content_category": "verbatim guidance with generated contract summaries",
       "content_treatment": "verbatim sections are source-bounded; generated analysis and summaries are explicitly labeled",
       "exclusions_or_summarization": "See package-level exclusions and per-source treatment records.",
@@ -326,7 +334,7 @@
       "purpose": "Verbatim behavioral guidance plus generated configuration, schema and tool summaries.",
       "recommended_reading_order": 5,
       "required": true,
-      "sha256": "886ac1ec65c870e3facf716702bd8f43fa17eba8b7d9f93ca92f6a7111b1bdce",
+      "sha256": "7ed0cb9ac716b40decaa7dd4578a46f3ffb0eb9d5063c8fe0f1684e66b008262",
       "source_files_represented": [
         "config.example.json",
         "guidance/01-copilot-orchestrator-contract.md",
@@ -355,7 +363,7 @@
       ]
     },
     {
-      "bytes": 92346,
+      "bytes": 95228,
       "content_category": "generated manifest",
       "content_treatment": "generated metadata; SHA-256 is omitted for the manifest itself because it would be self-referential",
       "exclusions_or_summarization": "Self size is recorded; self hash is omitted.",
@@ -390,7 +398,7 @@
   "project": "Copilot Local Agent",
   "project_path_in_workspace": "Scripts and projects/Copilot Local Agent",
   "source_coverage": {
-    "eligible_text_source_count": 268,
+    "eligible_text_source_count": 277,
     "summarized_or_catalogued_sources": [
       "agent_ui/runtime.py",
       "agent_ui/tests/test_launch_ui.py",
@@ -403,6 +411,7 @@
       "agent_ui/web/styles.css",
       "agent_ui/workspace.py",
       "app.py",
+      "bootstrap/rea_delivery.py",
       "bootstrap/setup_dependencies.py",
       "bootstrap/setup_rea.py",
       "copilot_agent/__init__.py",
@@ -454,6 +463,7 @@
       "copilot_agent/protocol.py",
       "copilot_agent/rea.py",
       "copilot_agent/rea_backends.py",
+      "copilot_agent/rea_locations.py",
       "copilot_agent/rea_python_artifacts.py",
       "copilot_agent/rea_python_capture.py",
       "copilot_agent/rea_python_page.py",
@@ -492,6 +502,7 @@
       "schemas/discovery/replanning-checkpoint.schema.json",
       "schemas/discovery/website-knowledge.schema.json",
       "schemas/tool-catalogue-v1.json",
+      "Setup REA.cmd",
       "tests/discovery_fixtures.py",
       "tests/fixtures/code_preview.html",
       "tests/inspect_download_settings.py",
@@ -557,7 +568,9 @@
       "tests/test_rea_availability.py",
       "tests/test_rea_availability_session.py",
       "tests/test_rea_backends.py",
+      "tests/test_rea_delivery.py",
       "tests/test_rea_full_paths.py",
+      "tests/test_rea_locations.py",
       "tests/test_rea_partial_observations.py",
       "tests/test_rea_python_artifacts.py",
       "tests/test_rea_python_capture.py",
@@ -565,6 +578,9 @@
       "tests/test_rea_python_registry.py",
       "tests/test_rea_readiness.py",
       "tests/test_rea_registry.py",
+      "tests/test_rea_setup_entry.py",
+      "tests/test_rea_testing_runtime.py",
+      "tests/test_rea_upstream_delivery.py",
       "tests/test_reconciliation.py",
       "tests/test_research_routing.py",
       "tests/test_scoped_research_session.py",
@@ -622,6 +638,7 @@
       "docs/REA_INTEGRATION_ASSESSMENT.md",
       "docs/REA_PYTHON_BACKEND.md",
       "docs/REA_REQUIRED_IMPLEMENTATION_BRIEF.md",
+      "docs/REA_UPSTREAM_RUNTIME_FIX.md",
       "docs/research/WEBSITE_DISCOVERY_OPTIONS.md",
       "docs/REUSE_MAPPING.md",
       "docs/SESSION_CRAWLER_VALIDATION.md",
@@ -732,22 +749,28 @@
       "sha256": "2400018f390bdfec5072fcd90390df169b77c42713d3cefc0693b6f11e06e5d4"
     },
     {
+      "bytes": 12682,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "bootstrap/rea_delivery.py",
+      "sha256": "2b9fd0493c68aa062bcedd08f35fcfe740038b4c8b7058868ff0642bcd07cb38"
+    },
+    {
       "bytes": 6206,
       "content_treatment": "verbatim_text_embedded",
       "path": "bootstrap/README.md",
       "sha256": "f4904d1d169c64fc4624e63319644db5128740fd1b296ed6a503fc79b0724898"
     },
     {
-      "bytes": 15941,
+      "bytes": 16221,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "bootstrap/setup_dependencies.py",
-      "sha256": "8a846a82aeea5d4e4f545b74fbf5a889c078d151f6e3448a4a569607f36e7266"
+      "sha256": "26bc28f87f17160e0ddf04c6936e23afeb55a3ae396d86a6d079986015ca3fa8"
     },
     {
-      "bytes": 33441,
+      "bytes": 38378,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "bootstrap/setup_rea.py",
-      "sha256": "1c5e224526983e04a3de939f419aa2d5a471d629859d9c5815e8ce00e232754e"
+      "sha256": "8248856b90d88326808d36d66affd5a727ac9dc113aa08a6d1d26ad93a6a3be3"
     },
     {
       "bytes": 1440,
@@ -822,10 +845,10 @@
       "sha256": "4b733ac0bee8658bb5ec886416f39337bd84c54b8f8e1f9f6eb980c87f50deb1"
     },
     {
-      "bytes": 14208,
+      "bytes": 15273,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/config.py",
-      "sha256": "ee5f3723722d53298d0114bc5c6c0e490b94d41bfa4c7bd4a52cb26fe35f393a"
+      "sha256": "865404106bf9ae91ab232a0659859be00195d031e808048f1c4a69cf8b5eaa44"
     },
     {
       "bytes": 2608,
@@ -1038,16 +1061,22 @@
       "sha256": "99dd427461d87487aa270f6bbe0c33b8e960520b39aee5ad524cfee486fb7583"
     },
     {
-      "bytes": 63524,
+      "bytes": 64567,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/rea.py",
-      "sha256": "97396e755cadf35b6c2faeab80ad18de3ed11c3355bc0922535704ea208dd07e"
+      "sha256": "2c38c4ea5c79f05034da88c496804a95fc96d58b4ea74321fc08fe3d1e371dc3"
     },
     {
       "bytes": 4087,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/rea_backends.py",
       "sha256": "d84ab4dbe5a4274c7b08e50c109f5b96096266f4e23eda341487abf3186a4057"
+    },
+    {
+      "bytes": 1223,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/rea_locations.py",
+      "sha256": "7ddfd8d9ad7c6fc01195cc1f7894aba43c548bd349356d9129cbfd4bca2abff4"
     },
     {
       "bytes": 27110,
@@ -1332,16 +1361,16 @@
       "sha256": "6be6bb508b14f1ef6c889cca8dbe208cc78bf3e767a536aafe318bbcfde28441"
     },
     {
-      "bytes": 4823,
+      "bytes": 5387,
       "content_treatment": "verbatim_text_embedded",
       "path": "docs/REA_AGREEMENT_UPDATE.md",
-      "sha256": "5ae3993d676a9b24344fc85302a3dfd45a89c77db967f7c8e122b01bcfe1ec26"
+      "sha256": "5aa1cef464f9a3ad6c7980797f2fb7ed235122015acd3470274b650a4e2bb559"
     },
     {
-      "bytes": 4426,
+      "bytes": 4598,
       "content_treatment": "verbatim_text_embedded",
       "path": "docs/REA_AVAILABILITY_RECOVERY.md",
-      "sha256": "b12ea7887c6daa1d9e489b2aade52272d7f5d006b8a373a3dbde21aa08459e4b"
+      "sha256": "138b9b9446653b06a21a56d47cce1575b3e31e717d1eeb1c96ee722b0f4889d7"
     },
     {
       "bytes": 20305,
@@ -1350,10 +1379,10 @@
       "sha256": "f7b680bcdf50a3891b7c31be2a5002b0342653e14d3585abf4dfebfc500bab80"
     },
     {
-      "bytes": 15835,
+      "bytes": 18149,
       "content_treatment": "verbatim_text_embedded",
       "path": "docs/REA_INTEGRATION.md",
-      "sha256": "3e18220c09dc8f661af3643496cc8f3ac5a2bc4073655817d1194989f61f9cb1"
+      "sha256": "4c9948798e206d468d6c6ad26f12e5d11e93dff06b1dac8a8f74b01f8bbb7ab6"
     },
     {
       "bytes": 5919,
@@ -1362,16 +1391,22 @@
       "sha256": "ef862116d139a94450524383d7cc571b4fdc3c41172142dd427a88772138b300"
     },
     {
-      "bytes": 4903,
+      "bytes": 5056,
       "content_treatment": "verbatim_text_embedded",
       "path": "docs/REA_PYTHON_BACKEND.md",
-      "sha256": "41bdb11386883f57da0c197899ba7e37b3f2352e17bef6d3fe5e367876de8811"
+      "sha256": "5cadb5701421a4fd339d57f296d32e9bd8f7ec5139314105051ea56516515aa4"
     },
     {
       "bytes": 8817,
       "content_treatment": "verbatim_text_embedded",
       "path": "docs/REA_REQUIRED_IMPLEMENTATION_BRIEF.md",
       "sha256": "1309eb6027d705361ab54b88191abe6bc9107911cab0607a98255504e34d4bf4"
+    },
+    {
+      "bytes": 5753,
+      "content_treatment": "verbatim_text_embedded",
+      "path": "docs/REA_UPSTREAM_RUNTIME_FIX.md",
+      "sha256": "83ce858154926d4a8666afa4b55a8bc68d4a20149f833f345874ddcd9be2c2fb"
     },
     {
       "bytes": 16269,
@@ -1464,10 +1499,10 @@
       "sha256": "f8ff95b2103dac7f87ab36d77a487bab313da0f9348c84de41d487ffacf6f70d"
     },
     {
-      "bytes": 16943,
+      "bytes": 17975,
       "content_treatment": "verbatim_text_embedded",
       "path": "guidance/03-tools-and-selection.md",
-      "sha256": "123b6b95dee0352efed2cb6f18597513c8c733a683202336d8962921497efdbf"
+      "sha256": "e533c69b5d8e2ca6d99ff97cc1f6a8d83a553b863e6de133dc0d127378a343ad"
     },
     {
       "bytes": 6626,
@@ -1566,10 +1601,10 @@
       "sha256": "e83ed0a8df74fc937452ca2d51d07f5cb79e892dc7280f4e243ad272d225b25e"
     },
     {
-      "bytes": 29440,
+      "bytes": 29767,
       "content_treatment": "verbatim_text_embedded_as_operational_entrypoint_or_core_contract",
       "path": "Launcher.ps1",
-      "sha256": "f3765af1124102c002744836929a1a9733dd7de334dec9b5f513881448a6801a"
+      "sha256": "af83cf34327e99166758e13413fcd83e51feedf1efaacb213bf16bff8b9b0c3f"
     },
     {
       "bytes": 18946,
@@ -1660,6 +1695,12 @@
       "content_treatment": "summarized_complete_tool_name_purpose_risk_approval_arguments_and_effects",
       "path": "schemas/tool-catalogue-v1.json",
       "sha256": "9d087b7b414ca8f0d215bb9b00c3f943846815461c7cdecaa7a676999039eccc"
+    },
+    {
+      "bytes": 158,
+      "content_treatment": "summarized_entrypoint_or_module_path; exact source hash recorded",
+      "path": "Setup REA.cmd",
+      "sha256": "d6f3f5ef9b770b8ab3921e38620282d59e2d799ff796f1999b67ed7357989411"
     },
     {
       "bytes": 155,
@@ -1968,10 +2009,10 @@
       "sha256": "156101bffbc3066a65c59915321a1e62311da82b61257ca11c56908d8067530c"
     },
     {
-      "bytes": 32900,
+      "bytes": 32912,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "tests/test_launcher.py",
-      "sha256": "a0f0e6eede71af8de8848c02589603f786faec18b36f7e850cd0b465dbefc2e4"
+      "sha256": "36cf4bb482b4731bc5ccb93a4d4ca77ebbfac518473d257fa6e092c06e22334f"
     },
     {
       "bytes": 15942,
@@ -2052,10 +2093,10 @@
       "sha256": "4f858cfe92d1ade9ab9404e7e55761aec0211f09af269389c1937b4f69b71d40"
     },
     {
-      "bytes": 8873,
+      "bytes": 11929,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "tests/test_rea_availability.py",
-      "sha256": "18536a14465f105523cad8213ff63fb14b4a413318fac60951c1bbeb86164df1"
+      "sha256": "35565f4ba65f97c456c337e89c41024d082285fa0dd51abde7b8ac4ecd7124f9"
     },
     {
       "bytes": 6921,
@@ -2064,16 +2105,28 @@
       "sha256": "d71dce049aa9831a03a469392a078ba5c37c7eacb5847df5feff7e5ef1e6b7fa"
     },
     {
-      "bytes": 4882,
+      "bytes": 5106,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "tests/test_rea_backends.py",
-      "sha256": "a8f0e44752663353da475a5f30da0e1394c84f59211f90e3d851b94ec1eada8b"
+      "sha256": "fb2fb9e0580d6630973ea1d20490e13d77f6c6e24c8e0edf550e37e7598ff494"
+    },
+    {
+      "bytes": 7808,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_rea_delivery.py",
+      "sha256": "bcf99035f4cc429cd374a4ffed2efe59c6e84bbb083bca4d12d82d70bb9c8ab2"
     },
     {
       "bytes": 4847,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "tests/test_rea_full_paths.py",
       "sha256": "cf2e4c32d84de426b2041abeaffb17b0d484855577a7379a49a63b88fe337295"
+    },
+    {
+      "bytes": 4340,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_rea_locations.py",
+      "sha256": "af337ac3a078d5c4607247c3c7f0abf53514f5dd51fbaef3448947c07219edb8"
     },
     {
       "bytes": 5227,
@@ -2118,6 +2171,24 @@
       "sha256": "671884e05c7ce09a4f11b98f604f29643eb61b83cac97529708390e86fd9afb9"
     },
     {
+      "bytes": 3763,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_rea_setup_entry.py",
+      "sha256": "8497ec34dd08090a82baede7b63e5ba3f989f71a7bd595d189c97d365c91cb01"
+    },
+    {
+      "bytes": 5538,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_rea_testing_runtime.py",
+      "sha256": "7ae5b92db763c36a8a0c70fe8716b067a4394a193d28d3b22e711315dbf8d884"
+    },
+    {
+      "bytes": 4265,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_rea_upstream_delivery.py",
+      "sha256": "1a943b2530aea18ee45c58d96a224ff3f2d6c1cb99041523c65fd3525e2b9c30"
+    },
+    {
       "bytes": 20157,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "tests/test_reconciliation.py",
@@ -2142,16 +2213,16 @@
       "sha256": "e455600d316050bcc35a27941d27ec72ba33e92fdd4fc4e594ad9c14ca236def"
     },
     {
-      "bytes": 10452,
+      "bytes": 11486,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "tests/test_setup_rea.py",
-      "sha256": "da9e8e5db787e0235a5fe2521c8e7e8d0096a931e384870e6ab42a8d0da8d5c1"
+      "sha256": "17a092e0e81362dc64163a924df8289e3c12436c3643d0ebd71fe7a5c7f32d96"
     },
     {
-      "bytes": 14137,
+      "bytes": 18436,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "tests/test_setup_rea_diagnostics.py",
-      "sha256": "aea0780a51279429a3126754852addc24da7cbfd4d0b9d853edc633e3af5b5c7"
+      "sha256": "fcc125557bf90f2a4b1c96f998fce5d1cd87f8ddffd6e64ebdf389e560c44a3e"
     },
     {
       "bytes": 7115,
@@ -2262,13 +2333,13 @@
       "sha256": "6ed2ff277d0ab4fe2487a095d18a1209c84ec52cf247f40adc5ddaae10c7b3c2"
     },
     {
-      "bytes": 7917,
+      "bytes": 9014,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "version_launcher.py",
-      "sha256": "a555da41f4e1f73e77d7ca4a83286580db6ce89ad054761a5d0b1aefdb68f386"
+      "sha256": "d0af5c482a8a708e0a2536df1addd0474813363c8a5001319fd6766146ef3a21"
     }
   ],
-  "source_revision_analyzed": "38abaa75d24f4e512a785bcac48c1501a9f2867b",
+  "source_revision_analyzed": "af0afd151bde4cd635e94d046adc706aaaae7165",
   "validation": {
     "absolute_maximum_files": 20,
     "archive_used": false,

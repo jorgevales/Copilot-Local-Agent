@@ -15,6 +15,26 @@ EXCLUDED = {'.git', '.venv', '__pycache__', 'runtime', 'workspace', '.history',
             'Copilot proposals', 'Copilot testing environment', 'node_modules', '.runtime', '.setup-cache'}
 PRIVATE = {'config.local.json', 'python-launcher.txt', '.venv-setup.lock'}
 DROP_FOLDER = Path('Copilot testing environment') / 'Updated files'
+REA_RUNTIME_FIELDS = frozenset({'rea_enabled', 'rea_backend', 'rea_repository', 'rea_node_executable',
+                                'rea_node_readiness_timeout_seconds'})
+
+
+def inherit_rea_runtime(live, environment):
+    """Share setup's runtime selection with testing copies, never grants/config."""
+    environment.pop('COPILOT_AGENT_REA_RUNTIME_SETTINGS', None)
+    if environment.get('COPILOT_AGENT_EXECUTION_MODE') != 'testing':
+        return
+    settings = live / 'config.local.json'
+    if not settings.is_file():
+        return
+    if settings.stat().st_size > 1024 * 1024:
+        raise ValueError('Live configuration exceeds the bounded runtime preferences size')
+    values = json.loads(settings.read_text(encoding='utf-8-sig'))
+    if not isinstance(values, dict):
+        raise ValueError('Live configuration must be a JSON object')
+    selected = {key: values[key] for key in REA_RUNTIME_FIELDS if key in values}
+    if selected:
+        environment['COPILOT_AGENT_REA_RUNTIME_SETTINGS'] = json.dumps(selected)
 
 
 def prepare_drop_folder(live):
@@ -155,6 +175,7 @@ def main():
             flags.append('-s')
         environment = os.environ.copy()
         environment['COPILOT_AGENT_EXECUTION_MODE'] = 'testing' if source.is_relative_to(live / 'Copilot testing environment' / 'versions') else 'live'
+        inherit_rea_runtime(live, environment)
         prepare_rea(source, flags, environment)
         command = ([sys.executable, *flags, '-m', 'agent_ui.runtime'] if use_ui else
                    [sys.executable, *flags, str(source / 'app.py')])

@@ -1,3 +1,5 @@
+> Current repair instructions: [upstream Node deployment](REA_UPSTREAM_RUNTIME_FIX.md).
+
 # REA availability deployment repair
 
 ## Cause and fix
@@ -8,8 +10,8 @@ The single generic manifest error hid both the searched path and subsequent depe
 This deployment defect explains the reported pre-selection failure; the VDI filesystem itself
 was not accessed during this repair.
 
-Setup and the selected live/testing startup now provision the integrity-pinned published
-runtime before creating the session catalogue. They reuse complete installations, try
+Explicit setup provisions the integrity-pinned published runtime before the next
+session catalogue is created. Ordinary live/testing startup never installs software. They reuse complete installations, try
 multiple writable runtime locations, and try cached dependencies before the registry.
 An explicit trusted installation and disconnected archive/cache repair are alternatives.
 See [exact recovery commands](REA_INTEGRATION.md#recovery-options).
@@ -42,8 +44,8 @@ still validates the current runtime before invoking a target.
 
 ## VDI acceptance
 
-Pull the fix and launch the current live version, or run Setup.cmd. If needed run the
-repair command in the linked guide, then start a new session. Confirm available:true in
+Pull the fix and run **Setup REA.cmd** (or normal Setup.cmd for auto/node_cli). If needed run the
+repair command in the linked guide, then start a new session. Confirm selected_backend:node_cli and upstream_available:true in
 research_routing.rea and each REA entry, then request a supported approved investigation
 and confirm research.route prefers rea.inspect_page. Existing sessions retain their
 contract snapshot. Supported Node/npm must be installed or explicitly configured.

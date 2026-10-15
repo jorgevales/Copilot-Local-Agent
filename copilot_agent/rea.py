@@ -69,7 +69,9 @@ def rea_repository_candidates(config):
             raise _AvailabilityError('repository_not_absolute', 'rea_repository must be an absolute trusted administrator path')
         return [root]
     project = Path(config_value(config, 'root', Path(__file__).resolve().parents[1])).resolve()
-    candidates = [project / '.runtime' / 'rea']
+    from .rea_locations import existing_runtime_candidates
+    candidates = [*existing_runtime_candidates(project, _node_candidates(config)),
+                  project / '.runtime' / 'rea']
     if os.environ.get('LOCALAPPDATA'):
         candidates.append(Path(os.environ['LOCALAPPDATA']) / 'Copilot Local Agent' / 'runtimes' / 'rea' / '6.5.0')
     candidates.extend([Path(tempfile.gettempdir()) / 'Copilot Local Agent' / 'runtimes' / 'rea' / '6.5.0',
@@ -251,14 +253,14 @@ def _node_health_uncached(config):
                    'capability_detection': 'Pinned rea-agents 6.5.x compiled entry points, Windows native integrity and fixed CLI --help capabilities verified.',
                    'readiness_timeout_seconds': allowance,
                    'remediation': ['Run the normal launcher dependency setup to provision pinned REA into a managed runtime folder.',
-                                   'Run .venv\\Scripts\\python.exe bootstrap\\setup_rea.py to repair or provision the managed runtime.',
+                                   'Run Setup REA.cmd or .venv\\Scripts\\python.exe bootstrap\\setup_rea.py --require-node to verify and save upstream Node REA.',
                                    'For an existing built trusted installation set absolute rea_repository and, if required, rea_node_executable, then start a new session.']}
     base = {'interface': 'cli', 'capabilities': list(REA_SPECS),
             'runtime_requirement': 'Node ^22.19.0, ^24.11.0 or >=26; version checked locally at availability assessment',
             'diagnostics': diagnostics}
     if not config_value(config, 'rea_enabled', True):
         return {**base, 'status': 'disabled', 'available': False, 'reason': 'REA disabled by administrator configuration'}
-    selected_root, package, selected_node, node_version = None, None, None, None
+    valid_repositories, selected_node, node_version = [], None, None
     try:
         roots = rea_repository_candidates(config)
     except (OSError, ValueError, TypeError) as error:
@@ -270,9 +272,8 @@ def _node_health_uncached(config):
         diagnostics['repository_candidates'].append(attempt)
         try:
             package = _check_repository(root)
-            attempt.update(available=True, code='ready', version=package['version'])
-            selected_root = root
-            break
+            attempt.update(code='structurally_ready', version=package['version'])
+            valid_repositories.append((root, package, attempt))
         except (OSError, ValueError, TypeError) as error:
             attempt.update(code=getattr(error, 'code', 'repository_unreadable'), reason=str(error))
     for executable in _node_candidates(config):
@@ -291,21 +292,35 @@ def _node_health_uncached(config):
             if getattr(error, 'code', '') == 'node_probe_cleanup_uncertain':
                 return {**base, 'status': 'unavailable', 'available': False, 'failure_stage': 'node',
                         'reason': str(error), 'cleanup_uncertain': True}
-    if selected_root is None or selected_node is None:
-        stage = 'repository' if selected_root is None else 'node'
+    if not valid_repositories or selected_node is None:
+        stage = 'repository' if not valid_repositories else 'node'
         attempts = diagnostics[stage + '_candidates']
         reason = attempts[0].get('reason', 'No candidate configured or detected') if attempts else 'No candidate configured or detected'
         if len(attempts) > 1:
             reason += f'; {len(attempts)} {stage} candidates checked; see diagnostics'
         return {**base, 'status': 'unavailable', 'available': False, 'failure_stage': stage, 'reason': reason}
-    remaining = deadline - time.monotonic()
-    smoke = _node_cli_probe(selected_root, selected_node, timeout=remaining) if remaining > 0 else 'cli_smoke_timeout'
-    if smoke:
-        return {**base, 'status': 'unavailable', 'available': False, 'failure_stage': 'cli_smoke',
-                'reason': smoke, 'cleanup_uncertain': smoke == 'cli_smoke_cleanup_uncertain'}
-    return {**base, 'status': 'available', 'available': True, 'version': package['version'],
-            'repository': str(selected_root.resolve()), 'node': str(selected_node.resolve()), 'node_version': node_version,
-            'windows_native_artifact_present': True if os.name == 'nt' else None, 'warnings': []}
+    failures = []
+    for root, package, attempt in valid_repositories:
+        remaining = deadline - time.monotonic()
+        smoke = _node_cli_probe(root, selected_node, timeout=remaining) if remaining > 0 else 'cli_smoke_timeout'
+        if smoke:
+            attempt.update(available=False, code=smoke, reason=smoke)
+            failures.append(smoke)
+            if smoke == 'cli_smoke_cleanup_uncertain':
+                return {**base, 'status': 'unavailable', 'available': False, 'failure_stage': 'cli_smoke',
+                        'reason': smoke, 'cleanup_uncertain': True}
+            if remaining <= 0:
+                break
+            continue
+        attempt.update(available=True, code='ready')
+        return {**base, 'status': 'available', 'available': True, 'version': package['version'],
+                'repository': str(root.resolve()), 'node': str(selected_node.resolve()), 'node_version': node_version,
+                'windows_native_artifact_present': True if os.name == 'nt' else None, 'warnings': []}
+    reason = failures[0]
+    if len(failures) > 1:
+        reason += f'; {len(failures)} CLI candidates checked; see diagnostics'
+    return {**base, 'status': 'unavailable', 'available': False, 'failure_stage': 'cli_smoke',
+            'reason': reason, 'cleanup_uncertain': False}
 
 
 def _public_diagnostic(value):
@@ -338,6 +353,9 @@ def rea_health(config):
     chosen = node if selected == 'node_cli' else python
     return {**base, 'status': 'available' if selected else 'unavailable', 'available': selected is not None,
             'selected_backend': selected, 'backend': selected,
+            'upstream_available': bool(node.get('available')),
+            'upstream_status': node.get('status', 'available' if node.get('available') else 'unavailable'),
+            'upstream_repair_command': 'Setup REA.cmd',
             'version': chosen.get('version') if selected else None,
             'backends': {'node_cli': _public_diagnostic(node), 'python_native': python},
             **({'execution_blocked': 'Node health probe cleanup is uncertain.'} if node.get('cleanup_uncertain') else {}),

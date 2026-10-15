@@ -12,7 +12,8 @@ raw MCP catalogue, or execution authority. No model API is introduced.
 
 The adapter targets `rea-agents` 6.5.0 (MIT), inspected source revision
 `d7651b6a0dde6cfe658144cc52794ae6aaf23306`. Runtime binaries are installed,
-not committed. Normal **Setup.cmd** may run the Node repair helper. Ordinary live/testing
+not committed. Normal **Setup.cmd** requires verified upstream Node REA in auto/node_cli mode.
+**Setup REA.cmd** repairs only upstream REA using the existing project Python. Ordinary live/testing
 startup checks available backends without installing anything. An external developer checkout is not required.
 Tool requests and availability checks never install software.
 
@@ -28,20 +29,34 @@ The original upstream license is retained in the installed distribution.
 1. **Automatic repair / explicit retry**, from the project directory:
 
    ```powershell
-   .venv\Scripts\python.exe bootstrap\setup_rea.py
+   .venv\Scripts\python.exe bootstrap\setup_rea.py --require-node
    ```
 
-   Installation tries project `.runtime/rea`, then
-   `%LOCALAPPDATA%/Copilot Local Agent/runtimes/rea/6.5.0`, then the corresponding
-   system temporary directory. A failed writable location advances to the next;
+   Installation retains project `.runtime/rea`,
+   `%LOCALAPPDATA%/Copilot Local Agent/runtimes/rea/6.5.0`, and the corresponding
+   system temporary directory. On redirected drives, local managed candidates
+   are tried first to avoid npm file operations over UNC; shared fallbacks remain. A failed writable location advances to the next;
    previous partial REA installations are preserved. Dependency setup tries the
    existing npm cache before a bounded registry request. `--timeout-seconds 180`
    sets the provisioning budget; individual version/download/smoke probes also
    have fixed limits. No manual unpack-folder prompt is added. Discovery data
    remains in the existing S:/UNC store.
 
-2. **Use an existing complete installation**: set absolute `rea_repository`
-   and, when Node is not on PATH, `rea_node_executable` in `config.local.json`.
+2. **Use the already tested executable runtime**: supply its exact folder,
+   containing `package.json`, using this explicit setup command:
+
+   ```powershell
+   .venv\Scripts\python.exe bootstrap\setup_rea.py --require-node --repository "<REA_RUNTIME_ROOT>"
+   ```
+
+   Use the real S:/UNC path internally. The source repository
+   `<PROJECTS_ROOT>\REA` and installed `<REA_RUNTIME_ROOT>` are distinct.
+   The known portable npm-global layout is also detected automatically. Setup checks the
+   existing build/dependencies/native addon and CLI before reusing it. An incomplete
+   dedicated REA folder is preserved and repaired. It saves the verified exact
+   repository and Node paths atomically for the orchestrator. Testing launches
+   inherit only REA preferences from live setup, with testing overrides respected.
+   Existing absolute `rea_repository`/`rea_node_executable` configuration is supported.
    PATH and standard Program Files / LocalAppData Node locations are checked.
    Explicit configuration is authoritative; an invalid override is diagnosed
    instead of silently replaced with a different installation.
@@ -51,7 +66,7 @@ The original upstream license is retained in the installed distribution.
    Set `COPILOT_REA_ARCHIVE` to that archive's absolute path, then run:
 
    ```powershell
-   .venv\Scripts\python.exe bootstrap\setup_rea.py --offline
+   .venv\Scripts\python.exe bootstrap\setup_rea.py --require-node --offline
    ```
 
    The same pinned integrity check applies. An archive alone does not contain
@@ -63,6 +78,30 @@ The original upstream license is retained in the installed distribution.
    Build the pinned revision with `npm ci` and `npm run build:cached`; Windows
    requires the exact-version published native addon as documented upstream in
    `native/windows/README.md`. New installations should prefer the repair helper.
+
+5. **Complete portable runtime ZIP, without npm or registry access**: on a
+   trusted machine with a complete installed upstream runtime, export it:
+
+   ```powershell
+   .venv\Scripts\python.exe -B -m bootstrap.rea_delivery --source "C:\trusted\rea" --output "S:\Tools\rea-runtime.zip"
+   ```
+
+   Transfer the ZIP and the printed SHA256 through a trusted channel. On the VDI:
+
+   ```powershell
+   .venv\Scripts\python.exe bootstrap\setup_rea.py --require-node --offline --runtime-archive "S:\Tools\rea-runtime.zip" --runtime-archive-sha256 "<trusted SHA256>"
+   ```
+
+   This carries actual upstream compiled files, production dependencies and
+   exact Windows native addon. Node itself is supplied separately using the
+   configured/pasted executable, folder or portable ZIP. Package scripts never
+   run. Import verifies the whole archive, every member and runtime identity,
+   then runs the actual CLI from staging and its final installation path.
+
+Strict setup fails if Node REA cannot be verified; Python fallback is not setup
+success. Explicit Python-only/disabled configurations remain intentional in
+normal Setup; **Setup REA.cmd** explicitly requests upstream repair. Runtime
+availability exposes `upstream_available` separately from general `available`.
 
 After repair, start a **new session**. It refreshes one authoritative availability
 snapshot used by `research_routing.rea`, all three REA catalogue entries and

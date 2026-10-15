@@ -25,6 +25,8 @@ class BackendSelectionTests(unittest.TestCase):
                 result = rea_health({'rea_backend': 'auto'})
             self.assertTrue(result['available'])
             self.assertEqual('python_native', result['selected_backend'])
+            self.assertFalse(result['upstream_available'])
+            self.assertEqual('Setup REA.cmd', result['upstream_repair_command'])
             self.assertEqual(stage, result['backends']['node_cli']['failure_stage'])
 
     def test_auto_recovers_node_validation_exception(self):

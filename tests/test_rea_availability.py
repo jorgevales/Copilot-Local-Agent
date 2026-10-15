@@ -8,11 +8,49 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from copilot_agent.rea import _node_health
+from copilot_agent.rea import _node_health, _node_health_uncached
 from copilot_agent.rea_readiness import HEALTH_CACHE, UNCERTAIN_NODE_PROBES
 
 
 class REAAvailabilityTests(unittest.TestCase):
+    def test_broken_cli_candidate_does_not_hide_later_working_runtime(self):
+        first = self.install(self.project / '.runtime/rea')
+        second = self.install(self.root / 'global/rea-agents')
+        with patch('copilot_agent.rea.rea_repository_candidates', return_value=[first, second]), patch('copilot_agent.rea._node_cli_probe', side_effect=['cli_smoke_failed_or_capabilities_missing', None]) as smoke:
+            health = _node_health_uncached(self.config)
+        self.assertTrue(health['available'], health)
+        self.assertEqual(str(second.resolve()), health['repository'])
+        self.assertEqual(2, smoke.call_count)
+        self.assertEqual(1, self.run.call_count)
+        attempts = health['diagnostics']['repository_candidates']
+        self.assertEqual('cli_smoke_failed_or_capabilities_missing', attempts[0]['code'])
+        self.assertFalse(attempts[0]['available'])
+        self.assertTrue(attempts[1]['available'])
+
+    def test_all_failed_cli_candidates_keep_individual_diagnostics(self):
+        roots = [self.install(self.root / name) for name in ('first', 'second')]
+        with patch('copilot_agent.rea.rea_repository_candidates', return_value=roots), patch('copilot_agent.rea._node_cli_probe', side_effect=['cli_smoke_failed_or_capabilities_missing', 'cli_smoke_timeout']) as smoke:
+            health = _node_health_uncached(self.config)
+        self.assertFalse(health['available'])
+        self.assertEqual('cli_smoke', health['failure_stage'])
+        self.assertEqual(2, smoke.call_count)
+        self.assertEqual(['cli_smoke_failed_or_capabilities_missing', 'cli_smoke_timeout'], [item['code'] for item in health['diagnostics']['repository_candidates']])
+
+    def test_candidate_cli_probes_share_one_readiness_deadline(self):
+        roots = [self.install(self.root / name) for name in ('first', 'second')]
+        with patch('copilot_agent.rea.rea_repository_candidates', return_value=roots), patch('copilot_agent.rea.time.monotonic', side_effect=[0, 10, 20, 50]), patch('copilot_agent.rea._node_cli_probe', side_effect=['cli_smoke_failed_or_capabilities_missing', None]) as smoke:
+            health = _node_health_uncached(self.config)
+        self.assertTrue(health['available'], health)
+        self.assertEqual([160, 130], [call.kwargs['timeout'] for call in smoke.call_args_list])
+        self.assertEqual(170, self.run.call_args.kwargs['timeout'])
+
+    def test_cli_cleanup_uncertainty_stops_before_another_candidate(self):
+        roots = [self.install(self.root / name) for name in ('first', 'second')]
+        with patch('copilot_agent.rea.rea_repository_candidates', return_value=roots), patch('copilot_agent.rea._node_cli_probe', return_value='cli_smoke_cleanup_uncertain') as smoke:
+            health = _node_health_uncached(self.config)
+        self.assertTrue(health['cleanup_uncertain'])
+        self.assertEqual(1, smoke.call_count)
+
     def setUp(self):
         HEALTH_CACHE.clear()
         UNCERTAIN_NODE_PROBES.clear()
@@ -62,7 +100,8 @@ class REAAvailabilityTests(unittest.TestCase):
         health = _node_health(self.config)
         self.assertTrue(health['available'], health)
         self.assertEqual(str(expected.resolve()), health['repository'])
-        self.assertEqual('manifest_invalid_json', health['diagnostics']['repository_candidates'][0]['code'])
+        attempt = next(item for item in health['diagnostics']['repository_candidates'] if Path(item['path']).resolve() == broken.resolve())
+        self.assertEqual('manifest_invalid_json', attempt['code'])
 
     def test_invalid_explicit_override_never_uses_default_fallback(self):
         self.install(self.project / '.runtime/rea')

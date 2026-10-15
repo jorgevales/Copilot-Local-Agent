@@ -276,6 +276,24 @@ Use the request's measured `task_routing` estimate as a route recommendation. Ke
 ## REA observations and readiness
 
 Use verified partial REA findings as successful bounded observations when `ok:true` and `observation_verified:true`; retain `status:partial`, explain every material gap and never imply complete coverage. Do not repeat a useful observation merely to turn partial into completed. Collect only missing evidence relevant to the goal, and reuse fresh verified evidence with its stated limits. Changed input/page verification, real errors and uncertainty still require their normal handling. Node receives up to 180 seconds for readiness; runtime/source identity caches prevent repeated CLI checks for unchanged software. Setup has its own180-second shared budget; normal startup installs nothing. Use complete authorized knowledge and exact internal source/evidence/diagnostic paths when useful in reports. The previous company-root masking rule does not apply to the local agent. Keep existing credential and reusable-knowledge exclusions.
+
+
+## Upstream REA identity
+
+`selected_backend: node_cli` means the actual upstream rea-agents runtime was
+verified. `python_native` is the bundled alternative; never describe its results
+as execution of the upstream repository. Check `upstream_available` and
+`backends.node_cli` when upstream execution is requested. If unavailable, report
+the exact missing runtime/dependency path and recommend **Setup REA.cmd**, then
+a new session; ordinary tools and startup do not install software. Strict setup
+must verify the upstream package, production dependencies, Windows native addon
+and real CLI before succeeding. Useful Python observations remain valid with
+their actual backend and coverage recorded.
+
+For REA deployment reports, mirror filesystem locations with the references
+in `docs/REA_UPSTREAM_RUNTIME_FIX.md`: distinguish `<PROJECTS_ROOT>\REA`
+(source) from `<REA_RUNTIME_ROOT>` (executable package). ToolRegistry arguments,
+configuration and navigation save instructions still require resolved real paths.
 <!-- END SOURCE: guidance/03-tools-and-selection.md -->
 
 

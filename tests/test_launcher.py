@@ -180,7 +180,7 @@ class SharedRuntimeProbeTests(unittest.TestCase):
         self.assertEqual(shared,('-B','-E','-s'))
         self.assertEqual(development,('-B',))
         calls = re.findall(r'(?m)^\s*& \$python\s+([^\r\n]+)',self.source)
-        self.assertEqual(len(calls),7)  # Probe, setup, start, tests-setup, core tests, and UI tests.
+        self.assertEqual(len(calls),8)  # Probe, REA repair, setup, start, tests-setup, core tests, and UI tests.
         self.assertTrue(all(call.startswith('@pythonArgs ') for call in calls))
 
 
