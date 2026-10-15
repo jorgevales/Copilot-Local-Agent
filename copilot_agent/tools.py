@@ -808,7 +808,11 @@ class ToolRegistry:
                 fallback = (config_value(config, 'rea_fallback_timeout_seconds', 15)
                             if config_value(config, 'rea_backend', 'auto') == 'auto' else 0)
                 timeout = config_value(config, 'rea_timeout_seconds', 600) + readiness + fallback + 12
-            result=await asyncio.wait_for(self._execute(name,args,context,policy),timeout=timeout)
+            from .automatic_visuals import execute_with_visuals, relevant
+            async def bounded_operation():
+                return await asyncio.wait_for(self._execute(name,args,context,policy), timeout=timeout)
+            result=await asyncio.wait_for(execute_with_visuals(name, args, context,
+                bounded_operation), timeout=None if timeout is None else timeout + (28 if relevant(name, args) else 0))
             if name in REA_SPECS and not observation_usable(result):
                 status = result.get('status', 'failed')
                 code = status if status in {'partial', 'unavailable', 'cancelled', 'timeout', 'output_limit', 'uncertain'} else 'operation_failed'

@@ -24,6 +24,7 @@ class TerminalInputBroker:
         self._attachments = []
         self._sequence = 0
         self._approval_prompt_active = False
+        self._waiting = False
         self._active_run_id = None
         self._cancel_event = None
         self._closed = threading.Event()
@@ -45,6 +46,18 @@ class TerminalInputBroker:
                 continue
             line = line.strip()
             if not line:
+                continue
+            if line.casefold() in {':new', '/new'}:
+                from . import app
+                with self._lock:
+                    if self._cancel_event is not None:
+                        self._cancel_event.set()
+                    self._steering.clear()
+                    self._attachments.clear()
+                    app._NEW_SESSION_REQUESTED.set()
+                    if self._waiting:
+                        self._answers.put({'text': ':new', 'attachments': []})
+                self.output('[System] Cancelling this run and opening a fresh session.')
                 continue
             # The read may have started before a turn became active.
             with self._lock:
@@ -117,7 +130,13 @@ class TerminalInputBroker:
 
     async def ask(self, prompt):
         self.output(prompt + ' ', end='', flush=True)
-        item = await asyncio.to_thread(self._answers.get)
+        with self._lock:
+            self._waiting = True
+        try:
+            item = await asyncio.to_thread(self._answers.get)
+        finally:
+            with self._lock:
+                self._waiting = False
         with self._lock:
             self._attachments = list(item.get('attachments', []))
         return item['text']
@@ -126,6 +145,7 @@ class TerminalInputBroker:
         """Read only an explicit approval token; other input remains steering."""
         with self._lock:
             self._approval_prompt_active = True
+            self._waiting = True
         try:
             self.output(prompt + ' ', end='', flush=True)
             item = await asyncio.to_thread(self._answers.get)
@@ -133,6 +153,7 @@ class TerminalInputBroker:
         finally:
             with self._lock:
                 self._approval_prompt_active = False
+                self._waiting = False
 
     def take_attachments(self):
         with self._lock:

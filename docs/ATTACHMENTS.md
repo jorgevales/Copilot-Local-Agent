@@ -1,5 +1,24 @@
 # Attach files to a request
 
+Website investigations automatically receive visual context through the orchestrator,
+including REA, Crawl4AI and API investigation when an approved owned page is available.
+Each discovery batch produces one merged, labeled PDF with up to 12 sampled pictures:
+the actual page overview, readable control closeups and sampled scroll positions.
+Scrolls during concurrent analysis use an independently opened authenticated page;
+captions identify these revisits because transient application state can differ.
+Capture runs alongside passive investigation. Navigation results are captured after
+the navigation completes. Missing pages, unavailable capture and incomplete coverage
+are reported in `visual_context` without replacing the investigation result.
+
+The PDF is attached automatically to the next Copilot message with space available.
+Explicit user files and complete result documents retain their attachment slots;
+visual evidence that cannot fit within the 20-file limit stays queued for a later
+message. PDFs and source pictures are retained under the session's `screenshots` folder.
+
+**New session** is available during an active run. It cancels that run, opens a fresh
+conversation and asks for fresh session access approval. Previous records and unresolved
+effects remain in the old session. The configured browser and tools are reused.
+
 Choose **Attach files** or enter `:attach` in the visible conversation console. The native Windows file picker supports selecting several files at once. Review the pending queue, then write the message that should use those files. Selecting a file queues it; the next request requires approval of the actual upload.
 
 | Command | Effect |

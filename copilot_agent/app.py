@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import sys
+import threading
 from pathlib import Path
 import uuid
 from .browser import (BrowserAdapter, BrowserUIError, CaptureTimeoutError,
@@ -41,6 +42,33 @@ _UI_TAKE_ATTACHMENTS = None
 _UI_UPLOAD_ROOT = None
 _UI_PERMISSION_CONTEXT = None
 _TERMINAL_INPUT = None
+_NEW_SESSION_REQUESTED = threading.Event()
+
+
+class SessionRestartRequested(Exception):
+    """User requested cancellation and an independent chat."""
+
+
+async def _interruptible_session(work):
+    task = asyncio.ensure_future(work)
+    try:
+        while not task.done():
+            if _NEW_SESSION_REQUESTED.is_set():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                raise SessionRestartRequested()
+            await asyncio.wait({task}, timeout=.05)
+        result = await task
+        if _NEW_SESSION_REQUESTED.is_set():
+            raise SessionRestartRequested()
+        return result
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
 def system(message):
     _TERMINAL.emit('System', message)
@@ -312,20 +340,37 @@ async def choose_browser_endpoint(config, args, settings, *, interactive=False,
     return config
 
 
-async def start_new_session(config, previous, model_label, registry=None):
+async def start_new_session(config, previous, model_label, registry=None, *, user_requested=False):
     """Archive the old conversation and initialize an independent owned UI chat."""
     old = previous.state
-    if old.data['pending_submission'] or any(call['status'] == 'uncertain' and
+    if not user_requested and (old.data['pending_submission'] or any(call['status'] == 'uncertain' and
                                              (call.get('state_changing', True) or call.get('request', {}).get('name', '').startswith('rea.'))
-                                             for call in old.data['calls'].values()):
+                                             for call in old.data['calls'].values())):
         raise RuntimeError('Reconcile uncertain submissions or state-changing calls before starting a new session.')
     from .session_mode import START_PROMPT, configure_session, discovery_mode
-    renew_discovery = discovery_mode(config) and not getattr(config, '_automation_test_mode', False)
-    if renew_discovery and (await ask(START_PROMPT)).strip().lower() not in {'', 'y', 'yes'}:
+    renew_discovery = (user_requested or discovery_mode(config)) and not getattr(config, '_automation_test_mode', False)
+    if user_requested:
+        for call_id, record in old.data['calls'].items():
+            if record.get('status') == 'executing':
+                record['status'] = 'uncertain'
+                record['cancellation_reason'] = 'User opened a fresh session; final effects were not verified.'
+                old.event('call_interrupted_for_new_session', call_id=call_id)
+        old.save()
+        preparation, previous._next_turn_preparation = previous._next_turn_preparation, None
+        if preparation is not None:
+            preparation.cancel()
+            await asyncio.gather(preparation, return_exceptions=True)
+    confirmation = await _interruptible_session(ask(START_PROMPT)) if user_requested and renew_discovery else (
+        await ask(START_PROMPT) if renew_discovery else 'yes')
+    if renew_discovery and confirmation.strip().lower() not in {'', 'y', 'yes'}:
         raise RuntimeError('New session cancelled; the current session remains open.')
-    old.event('new_session_requested')
+    old.event('new_session_requested', user_requested=user_requested,
+              unresolved_submission=bool(old.data['pending_submission']),
+              unresolved_calls=[key for key, value in old.data['calls'].items()
+                                if value.get('status') in {'executing', 'uncertain'}])
     owned_process = getattr(previous.browser, '_launched_process', None)
     await previous.close(preserve_browser_process=True)
+    previous.cancel_event.clear()
     fresh_config = replace(config, attach_existing=True, model=model_label)
     for name in ('_ui_upload_root', '_automation_test_mode', '_local_knowledge_test_mode',
                  '_proof_exact_edge_endpoint', '_s_storage_verified',
@@ -336,6 +381,9 @@ async def start_new_session(config, previous, model_label, registry=None):
     configure_session(fresh_config, renew_discovery)
     directory = config.runtime_dir / 'sessions' / uuid.uuid4().hex
     state = SessionState(directory)
+    if user_requested and _UI_EVENT_SINK is not None:
+        _UI_EVENT_SINK('session', {'title': 'Copilot session ' + state.session_id[:8],
+                                 'reset_context': True})
     browser = BrowserAdapter(fresh_config)
     browser._launched_process = owned_process
     engine = None
@@ -369,6 +417,15 @@ async def start_new_session(config, previous, model_label, registry=None):
             _UI_EVENT_SINK('session', {'title': 'Copilot session ' + state.session_id[:8]})
             _UI_EVENT_SINK('model', {'name': model_label, 'verified': True})
         return engine
+    except asyncio.CancelledError:
+        state.event('new_session_setup_cancelled')
+        state.data['status'] = 'closed'
+        state.save()
+        if engine is not None:
+            await engine.close(preserve_browser_process=True)
+        else:
+            await browser.close(preserve_browser_process=True)
+        raise
     except Exception as exc:
         state.event('new_session_setup_failed', error=str(exc))
         state.data['status'] = 'blocked'
@@ -748,7 +805,7 @@ async def run(args):
             if terminal_input is not None:
                 terminal_input.set_active(active_run_id, orchestrator.cancel_event)
             try:
-                return await orchestrator.turn(text, attachments=paths, active_run_id=active_run_id)
+                return await _interruptible_session(orchestrator.turn(text, attachments=paths, active_run_id=active_run_id))
             finally:
                 if terminal_input is not None:
                     terminal_input.set_active()
@@ -762,14 +819,17 @@ async def run(args):
                 system('Now type your request. You will review this exact file batch once before upload. :remove <number> or :clear changes the queue.')
         while True:
             try:
-                text = (await ask('You: ')).strip()
+                text = ':new' if _NEW_SESSION_REQUESTED.is_set() else (await _interruptible_session(ask('You: '))).strip()
                 if not text:
                     continue
                 if text.lower() in {':exit', 'exit', 'quit'}:
                     break
                 if text == ':new' or text.startswith(':new '):
                     first_message = text[4:].strip()
-                    orchestrator = await start_new_session(config, orchestrator, chosen['label'])
+                    _NEW_SESSION_REQUESTED.clear()
+                    orchestrator.cancel_event.set()
+                    orchestrator = await _interruptible_session(start_new_session(
+                        config, orchestrator, chosen['label'], user_requested=True))
                     browser, state = orchestrator.browser, orchestrator.state
                     directory = state.directory
                     pending_files = orchestrator.attachment_queue()
@@ -814,6 +874,8 @@ async def run(args):
                 await run_user_turn(text, [*pending_files.paths(), *submitted_attachments])
                 if state.message_count > before_send:
                     pending_files.clear()
+            except SessionRestartRequested:
+                continue
             except CaptureTimeoutError as exc:
                 _record_turn_error(state, exc)
                 error('Copilot reply capture timed out. No local action ran for this reply.')

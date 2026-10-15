@@ -149,9 +149,19 @@ async def discover(args, context):
                 if page.url == state['url']:
                     with Image.open(BytesIO(raw)) as source:
                         image = source.convert('RGB')
-                    pictures.append(({'number': len(pictures)+1, 'requested_total': 0,
-                        'label': 'State '+str(state['id']), 'url': page.url,
-                        'scroll': {'x': metrics['x'], 'y': metrics['y']}, 'kind': 'viewport'}, image))
+                    if len(pictures) < 12:
+                        pictures.append(({'number': len(pictures)+1, 'requested_total': 0,
+                            'label': 'State '+str(state['id']), 'url': page.url,
+                            'scroll': {'x': metrics['x'], 'y': metrics['y']}, 'kind': 'viewport'}, image))
+                    else:
+                        image.close()
+                        data['gaps'].append({'state': state['id'], 'collector': 'screenshots', 'error': 'Twelve-picture visual sample limit'})
+                    if state['id'] == 0 and len(pictures) <= 10:
+                        for caption, box in [('upper navigation and controls closeup', (0, 0, image.width, max(1, image.height//2))),
+                                             ('lower content and controls closeup', (0, image.height//2, image.width, image.height))]:
+                            pictures.append(({'number': len(pictures)+1, 'requested_total': 0,
+                                'label': 'State 0 '+caption, 'url': page.url,
+                                'scroll': {'x': metrics['x'], 'y': metrics['y']}, 'kind': 'closeup'}, image.crop(box)))
                 else:
                     data['gaps'].append({'state': state['id'], 'collector': 'visual_consistency', 'error': 'Page changed during paired capture'})
             except Exception as exc:
@@ -161,12 +171,12 @@ async def discover(args, context):
                     pixels.cancel()
                     await asyncio.gather(pixels, return_exceptions=True)
             # Reveal lazy/virtualized content and preserve each sampled DOM, not just the final scroll.
-            if len(pictures) < 30 and time.monotonic() < deadline:
+            if len(pictures) < 12 and time.monotonic() < deadline:
                 original = await page.evaluate(METRICS)
                 state['scroll_samples'] = []
                 try:
                     for y in sorted({round(original['maxY']/2), original['maxY']} - {original['y']}):
-                        if len(pictures) >= 30 or time.monotonic() >= deadline or page.url != state['url']:
+                        if len(pictures) >= 12 or time.monotonic() >= deadline or page.url != state['url']:
                             break
                         await page.evaluate('(y)=>window.scrollTo({top:y,behavior:"instant"})', y)
                         await asyncio.sleep(.15)
@@ -281,8 +291,16 @@ async def discover(args, context):
             except asyncio.CancelledError:
                 await saving
                 raise
-            files.insert(1, pdf)
-            visual = {'path': str(pdf), 'pictures': len(pictures)}
+            from .automatic_visuals import merge_visual_pages
+            try:
+                visual = await merge_visual_pages(pictures, context)
+                visual['discovery_artifact_path'] = str(pdf)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                visual = {'path': str(pdf), 'pictures': len(pictures), 'queued_for_copilot': False,
+                          'status': 'unavailable', 'note': 'Visual merge failed; discovery PDF retained locally.'}
+                data['gaps'].append({'collector': 'visual_attachment', 'error': 'Unable to queue merged visual context'})
         manifest = []
         for path in files:
             payload = io_path(path).read_bytes()

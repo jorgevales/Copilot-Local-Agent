@@ -72,6 +72,7 @@ class Orchestrator:
                              'path_policy': self.policy,
                              'pending_image_attachments': [], 'created_snapshots': {},
                              'pending_file_attachments': [],
+                             'pending_visual_attachments': [], 'automatic_visual_context': {},
                              'approved_attachment_hashes': self.approved_attachment_hashes,
                              'site_knowledge_bindings': {},
                              'session_path_extensions': [],
@@ -849,6 +850,7 @@ class Orchestrator:
             paths.append(self.findings.attachment)
         paths.extend(map(Path, self.base_context['pending_image_attachments']))
         paths.extend(map(Path, self.base_context['pending_file_attachments']))
+        paths.extend(map(Path, self.base_context.get('pending_visual_attachments', [])))
         unique = list(dict.fromkeys(map(Path, paths)))
         if len(unique) > 20:
             return []
@@ -960,6 +962,19 @@ class Orchestrator:
                 'session_only': True, 'instruction': 'Continue navigation-only browser.open/back/forward/plans and bounded same-origin new tabs within this approved scope without another approval prompt. Identity-checked customer navigation uses the same origin grant. Forms, searches, downloads, scripts and consequential controls retain their applicable approval. After a lost tab, open fresh and observe live; never credit the lost operation.'}
             text = json.dumps(message, ensure_ascii=False, indent=2)
         text, attachments = await self._pack_outbound_response(text, attachments)
+        # Add automatic visual evidence after result packing so it cannot consume
+        # slots required for complete tool results or explicitly selected files.
+        pending_visuals = self.base_context.get('pending_visual_attachments', [])
+        selected_visuals = []
+        for path in dict.fromkeys(map(Path, pending_visuals)):
+            if path in attachments:
+                selected_visuals.append(path)
+            elif len(attachments) < 20:
+                attachments.append(path)
+                selected_visuals.append(path)
+        if len(selected_visuals) < len(set(map(Path, pending_visuals))):
+            self.state.event('automatic_visual_attachments_deferred',
+                             pending=len(pending_visuals), attached=len(selected_visuals))
         snapshot = [{'path': str(p), 'sha256': self._bounded_hash(p)} for p in attachments]
         upload_paths = []
         for entry in snapshot:
@@ -1010,6 +1025,7 @@ class Orchestrator:
                 self._prepared_attachment_uploads.pop((entry['path'], entry['sha256']), None)
             pending_images.clear()
             pending_files.clear()
+            pending_visuals[:] = [path for path in pending_visuals if Path(path) not in selected_visuals]
             self.state.save()
         try:
             raw = await self.browser.exchange(text, request_id, attachments=upload_paths,
@@ -1835,7 +1851,9 @@ class Orchestrator:
                     self.event_sink('tool', {'name': call['name'], 'status': 'running',
                                              'summary': 'Executing under the recorded approval and policy.'})
                 try:
-                    result = await asyncio.wait_for(self.registry.execute(call['name'], call['arguments'], context), timeout=float(definition.get('timeout', definition.get('limits', {}).get('timeout_seconds', 30))) + 1)
+                    from .automatic_visuals import relevant as visual_companion
+                    visual_allowance = 28 if visual_companion(call['name'], call['arguments']) else 0
+                    result = await asyncio.wait_for(self.registry.execute(call['name'], call['arguments'], context), timeout=float(definition.get('timeout', definition.get('limits', {}).get('timeout_seconds', 30))) + visual_allowance + 1)
                 except asyncio.TimeoutError:
                     result = {'ok': False, 'error': {'code': 'timeout', 'message': 'Tool timed out; inspect partial effects before any retry.'}}
                 except Exception as exc:
@@ -2287,6 +2305,10 @@ class Orchestrator:
         return bool(actual) and expected.issubset(actual)
 
     async def close(self, *, preserve_browser_process=False):
+        preparation, self._next_turn_preparation = self._next_turn_preparation, None
+        if preparation is not None:
+            preparation.cancel()
+            await asyncio.gather(preparation, return_exceptions=True)
         self.approvals.revoke_session_grants()
         self.state.data['status'] = 'closed'
         self.state.save()

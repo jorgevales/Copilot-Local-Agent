@@ -73,7 +73,7 @@ async def open_login_page(browser, url):
         raise
 
 
-def crawler_factory(browser, scratch, page_timeout):
+def crawler_factory(browser, scratch, page_timeout, *, visual_context=None):
     """Supply Crawl4AI with the company's live browser rather than launching one."""
     os.environ['CRAWL4AI_NO_CLOUD_NOTICE'] = '1'
     from crawl4ai import AsyncWebCrawler, BrowserConfig
@@ -105,7 +105,20 @@ def crawler_factory(browser, scratch, page_timeout):
                 else:
                     from .site_discovery import settle
                     await settle(page, time.monotonic() + min(12, page_timeout/1000), [])
-                return AsyncCrawlResponse(html=await page.content(),
+                captured_html = await page.content()  # Preserve the observed DOM before visual scrolls reveal virtualized content.
+                if visual_context is not None:
+                    from .automatic_visuals import capture_visuals
+                    try:
+                        visual_context['crawl_visual_context'] = await asyncio.wait_for(capture_visuals(page, visual_context,
+                            label='crawl4ai discovered page', revisit=False, scroll_owned_page=True), 20)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        visual_context['crawl_visual_context'] = {'status': 'unavailable',
+                            'note': 'Crawl page visual capture was unavailable; saved page evidence remains authoritative.'}
+                        visual_context.setdefault('automatic_visual_gaps', []).append(
+                            {'source': 'crawl4ai', 'status': 'capture_unavailable'})
+                return AsyncCrawlResponse(html=captured_html,
                     response_headers={}, status_code=response.status if response else 200,
                     redirected_url=page.url)
             finally:
@@ -226,7 +239,10 @@ async def crawl_websites(args, context, *, factory=None):
 
     try:
         save('running')
-        async with (factory or crawler_factory)(browser, scratch, args.get('page_timeout_seconds', 60) * 1000) as crawler:
+        crawler_manager = (factory(browser, scratch, args.get('page_timeout_seconds', 60) * 1000)
+                           if factory else crawler_factory(browser, scratch,
+                               args.get('page_timeout_seconds', 60) * 1000, visual_context=context))
+        async with crawler_manager as crawler:
             while not stopped() and (not cycles or cycle < cycles):
                 seen = set(index['pages']) if resumed_frontier and cycle == 0 else set()
                 while frontier and not stopped() and (not max_pages or page_count < max_pages):

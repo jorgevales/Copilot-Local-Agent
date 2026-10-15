@@ -16,6 +16,35 @@ from tests.test_protocol_state import make_fixture
 
 
 class AssembledCapacityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_automatic_visual_pdf_is_sent_and_cleared_only_after_commit(self):
+        root, state, browser, engine, extras = self.fixture(0)
+        visual = state.directory / 'visual-context.pdf'
+        visual.write_text('%PDF-1.4 synthetic visual attachment', encoding='ascii')
+        engine.base_context['pending_visual_attachments'].append(str(visual))
+        with patch('builtins.print'):
+            await engine._send('tool_results', {'results': [], 'instruction': 'Read visual context.'})
+        sent = browser.sent[0]['attachments']
+        self.assertTrue(any(path.name == visual.name for path in sent))
+        self.assertEqual([], engine.base_context['pending_visual_attachments'])
+
+    async def test_visual_pdf_defers_without_breaking_full_user_batch(self):
+        root, state, browser, engine, extras = self.fixture(11)
+        visual = state.directory / 'visual-context.pdf'
+        visual.write_text('%PDF-1.4 synthetic visual attachment', encoding='ascii')
+        engine.base_context['pending_visual_attachments'].append(str(visual))
+        async def already_packed(text, attachments):
+            return text, attachments
+        # Isolate attachment prioritization from composer result-packing limits.
+        with patch('builtins.print'), patch.object(engine, '_pack_outbound_response', side_effect=already_packed):
+            await engine._send('initialize', 'Use reviewed files.', extras)
+        self.assertEqual(20, len(browser.sent[0]['attachments']))
+        self.assertEqual([str(visual)], engine.base_context['pending_visual_attachments'])
+        browser.responders.append(final_response)
+        with patch('builtins.print'):
+            await engine._send('tool_results', {'results': []})
+        self.assertTrue(any(path.name == visual.name for path in browser.sent[1]['attachments']))
+        self.assertEqual([], engine.base_context['pending_visual_attachments'])
+
     def fixture(self, extra_count):
         root, config, state, registry = make_fixture('attachment-capacity-')
         config.max_context_chars = 300

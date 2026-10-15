@@ -21,6 +21,8 @@ class PromptBroker:
         self.active_reply = None
         self.active_prompt = None
         self.previous_completion = None
+        self._interrupted_replies = set()
+        self.generation = 0
         self.closed = False
 
     def ask(self, prompt):
@@ -37,14 +39,22 @@ class PromptBroker:
             self.prompts.put(reply)
         text, completed = reply.get()
         with self.lock:
-            self.active_reply = None
-            self.active_prompt = None
-            self.previous_completion = completed
+            if self.active_reply is reply:
+                self.active_reply = None
+                self.active_prompt = None
+            if reply in self._interrupted_replies:
+                self._interrupted_replies.discard(reply)
+                completed.set()
+            else:
+                self.previous_completion = completed
         return text
 
-    def submit(self, text):
+    def submit(self, text, *, generation=None):
+        generation = self.generation if generation is None else generation
         completed = threading.Event()
         while not self.closed:
+            if generation != self.generation:
+                return
             try:
                 reply = self.prompts.get(timeout=0.2)
                 break
@@ -54,8 +64,16 @@ class PromptBroker:
             raise RuntimeError('The agent session has ended; restart the UI launcher.')
         if reply is None:
             raise RuntimeError('The agent session has ended; restart the UI launcher.')
-        reply.put((text, completed))
-        completed.wait()
+        with self.lock:
+            if generation != self.generation:
+                # A fresh prompt belongs to the new session, never this stale action.
+                if self.active_reply is reply:
+                    self.prompts.put(reply)
+                return
+            reply.put((text, completed))
+        while not completed.wait(.05):
+            if generation != self.generation or self.closed:
+                return
 
     def submit_if_waiting(self, text, before_reply=None):
         """Answer the currently displayed prompt, without waiting for a future one."""
@@ -82,6 +100,23 @@ class PromptBroker:
                 self.previous_completion.set()
                 self.previous_completion = None
             self.prompts.put(None)
+
+    def interrupt(self):
+        """Release an abandoned prompt without delivering a command to approval UI."""
+        with self.lock:
+            self.generation += 1
+            if self.active_reply is not None:
+                self._interrupted_replies.add(self.active_reply)
+            if self.active_reply is not None and not self.active_reply.full():
+                self.active_reply.put_nowait((':exit', threading.Event()))
+            if self.previous_completion is not None:
+                self.previous_completion.set()
+                self.previous_completion = None
+            while True:
+                try:
+                    self.prompts.get_nowait()
+                except Empty:
+                    break
 
 
 class AgentRuntime:
@@ -328,6 +363,32 @@ class AgentRuntime:
         return asyncio.run(execute_permissions(name,args,context))
 
     def action(self, name, value=None):
+        if name == 'new_session':
+            from copilot_agent import app
+            self.cancel_event.set()
+            self._cancel_pending_steering('New session requested before incorporation')
+            with self._submitted_attachments_lock:
+                self._submitted_attachments.clear()
+            app._NEW_SESSION_REQUESTED.set()
+            self.broker.interrupt()
+            shutdown = False
+            while True:
+                try:
+                    shutdown = self.action_queue.get_nowait() is None or shutdown
+                except Empty:
+                    break
+            if shutdown:
+                self.action_queue.put(None)
+            self.action_busy.clear()
+            workspace = getattr(self.request_approval, '__self__', None)
+            if workspace is not None and hasattr(workspace, 'pending'):
+                with workspace.lock:
+                    for item in workspace.pending.values():
+                        if item['decision'] is None:
+                            item['decision'] = 'deny'
+                            item['gate'].set()
+            self.emit('status', {'state': 'action_active', 'summary': 'Cancelling the previous run and opening a fresh session.'})
+            return
         if name == 'stop':
             self.cancel_event.set()
             self._cancel_pending_steering('Run cancelled before incorporation')
@@ -339,7 +400,7 @@ class AgentRuntime:
         if value:
             command += ' ' + str(value)
         self.action_busy.set()
-        self.action_queue.put(command)
+        self.action_queue.put((self.broker.generation, command))
         self.emit('status', {'state': 'action_active', 'summary': 'Waiting for the agent to finish the requested action.'})
 
     def _dispatch_actions(self):
@@ -348,7 +409,8 @@ class AgentRuntime:
             if command is None:
                 return
             try:
-                self.broker.submit(command)
+                generation, command = command
+                self.broker.submit(command, generation=generation)
             except Exception:
                 self.emit('error', {'summary': 'The requested UI action could not be completed.'})
             finally:
