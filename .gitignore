@@ -2,6 +2,7 @@
 .venv-incomplete-*
 .venv-setup.lock
 .setup-cache/
+.runtime/
 __pycache__/
 *.pyc
 runtime/

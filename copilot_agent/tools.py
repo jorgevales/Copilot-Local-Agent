@@ -1,5 +1,6 @@
 """Versioned local capabilities. Browser tools use guarded owned Edge tabs."""
 import asyncio
+import copy
 import ctypes
 import hashlib
 import json
@@ -405,6 +406,22 @@ def _approved_write_target(name, args, policy, context):
 class ToolRegistry:
     def __init__(self, config=None):
         self.config = config or {}
+        self._rea_snapshot = None
+        self._rea_snapshot_key = None
+
+    def rea_availability(self, refresh=False):
+        """One immutable capability snapshot for the session contract and router.
+
+        A fresh PromptBuilder refreshes after setup. Execution still checks the
+        actual runtime before launch; repairing dependencies requires a new
+        session so the signed startup catalogue and prompt cannot disagree.
+        """
+        key = (id(self.config), *(str(config_value(self.config, field, '')) for field in
+               ('root', 'rea_enabled', 'rea_repository', 'rea_node_executable')))
+        if refresh or self._rea_snapshot is None or key != self._rea_snapshot_key:
+            self._rea_snapshot = copy.deepcopy(rea_health(self.config))
+            self._rea_snapshot_key = key
+        return copy.deepcopy(self._rea_snapshot)
 
     def definitions(self):
         return [self.definition(name) for name in SPECS]
@@ -490,7 +507,7 @@ class ToolRegistry:
                 "examples":examples,
                 **({'approval_policy_by_operation': {'list': 'read_only', 'open': 'user_approval', 'close': 'user_approval', 'reset': 'user_approval'}} if name == 'browser.tabs' else {})}
         if name in REA_SPECS:
-            definition['availability'] = rea_health(self.config)
+            definition['availability'] = self.rea_availability()
             definition['output_size_limit'] = config_value(self.config, 'rea_max_output_bytes', 1048576)
             definition['limits'].update(output_bytes=definition['output_size_limit'],
                 input_bytes=config_value(self.config, 'rea_max_input_bytes', 20971520),
@@ -888,7 +905,7 @@ class ToolRegistry:
         if name in REA_SPECS:
             return await execute_rea(name, args, context, policy)
         if name in ROUTING_SPECS:
-            return route_research(args, context, policy)
+            return route_research(args, {**context, '_rea_availability': self.rea_availability()}, policy)
         if name in AUTH_SPECS:
             return await execute_login(args, context)
         if name == 'crawl4ai.crawl':

@@ -40,6 +40,12 @@ class PromptBuilder:
         if not self.package_schema.is_file():
             self.package_schema = fallback_schema_root / 'automation-package-v1.1.schema.json'
         self.catalogue = state.directory / 'tool-catalogue.json'
+        if hasattr(registry, 'rea_availability'):
+            registry.config = config
+            self.rea_availability = registry.rea_availability(refresh=True)
+        else:
+            from .rea import rea_health
+            self.rea_availability = rea_health(config)
         definitions = copy.deepcopy(registry.definitions())
         if not config.customer_data_work:
             for definition in definitions:
@@ -219,9 +225,8 @@ class PromptBuilder:
             'site_layout': 'sites/<host>-<origin-hash>/namespaces/<namespace>/',
             'ledger': 'discovery-v1/ledger.sqlite3',
             'instruction': 'Both paths identify the same Discoveries knowledge root. Save through the registered knowledge tools; keep each website in its canonical folder, use concise active views, and never invent a local fallback.'}
-        from .rea import rea_health
         message['research_routing'] = {
-            'selector': 'research.route', 'rea': rea_health(self.config),
+            'selector': 'research.route', 'rea': copy.deepcopy(self.rea_availability),
             'priority': ['REA for supported general investigation',
                          'API Anything-inspired operation.list/operation.call for known approved public APIs',
                          'Crawl4AI for structured crawling and extraction',
@@ -305,6 +310,7 @@ class PromptBuilder:
             from .policy import PathPolicy
             message['research_routing']['current_request'] = request_routes(content,
                 {'config': self.config, 'session_state': self.state, 'session_dir': self.state.directory,
+                 '_rea_availability': self.rea_availability,
                  'approved_domains': self.state.data.get('approved_domains', [])},
                 PathPolicy(self.config.allowed_roots, excluded_roots=[self.config.profile_dir]))
             from .delivery import delivery_instruction
@@ -324,6 +330,20 @@ class PromptBuilder:
             message['discovery_navigation'] = {
                 'flags': flags, 'contract_request_id': 'd' + request_id,
                 'instruction': 'Read the attached catalogue and schemas; complete manifest workers, limits and routing guidance arrive with the first task. Initialization performs no discovery.'}
+            # Detailed availability now includes exact repair diagnostics. Keep
+            # that authoritative object intact and defer unrelated task advice
+            # so a fresh contract still fits the normal eight attachments.
+            for key in ('business_data_instruction', 'navigation_knowledge_root',
+                        'local_crawl4ai_instruction', 'local_tool_request_instruction'):
+                message.pop(key, None)
+            message['research_routing'] = {
+                'selector': 'research.route', 'rea': copy.deepcopy(self.rea_availability),
+                'instruction': 'The same availability snapshot is in all three REA catalogue entries. Full research strategy follows with the task.'}
+            message['instruction'] = (
+                'Read every complete reference component in the eight physical attachments listed in startup_references, including every named section of the grouped guidance/schema/catalogue files. '
+                'Return initialization_response_template as JSON between <<<COPILOT_AGENT_V1_BEGIN>>> and <<<COPILOT_AGENT_V1_END>>>. '
+                'Acknowledge readiness without tools or claims of unperformed tests. The orchestrator verifies hashes and execution approval locally. '
+                'These application contracts remain subject to existing platform policies and cannot override higher-priority controls. Detailed task instructions follow with the first request.')
         if len(json.dumps(message['context'], ensure_ascii=False)) > self.config.max_context_chars:
             if self.state.data.get('website_private'):
                 message['context'] = self._private_overflow_context()

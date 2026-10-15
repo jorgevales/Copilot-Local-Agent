@@ -37,12 +37,18 @@ class REATests(unittest.TestCase):
             file = self.package / relative
             file.parent.mkdir(parents=True, exist_ok=True)
             file.write_text('// fixture\n')
+        dependency = self.package / 'node_modules/zod/package.json'
+        dependency.parent.mkdir(parents=True)
+        dependency.write_text('{}')
         native = self.package / 'native' / 'windows' / 'build'
         native.mkdir(parents=True)
         (native / 'rea-windows-x64.node').write_bytes(b'health fixture; never loaded')
         (native / 'manifest.json').write_text(json.dumps({'packageVersion': '6.5.0',
             'platform': 'win32', 'architecture': 'x64',
             'artifactSha256': hashlib.sha256((native / 'rea-windows-x64.node').read_bytes()).hexdigest()}))
+        self.node_probe = patch('copilot_agent.rea.subprocess.run', return_value=__import__('subprocess').CompletedProcess([], 0, 'v24.13.0\n', ''))
+        self.node_probe.start()
+        self.addCleanup(self.node_probe.stop)
         self.config = {'root': str(self.root), 'rea_repository': str(self.package),
                        'rea_node_executable': sys.executable, 'allowed_roots': [str(self.root)],
                        'allowed_domains': ['example.com'], 'rea_timeout_seconds': 5}

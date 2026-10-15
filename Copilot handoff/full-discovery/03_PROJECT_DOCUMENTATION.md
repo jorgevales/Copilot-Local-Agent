@@ -112,6 +112,35 @@ and failure categories without asking for a manual unpacking folder. Correct sha
 connectivity/permissions or set `COPILOT_SETUP_TEMP` to a writable absolute scratch
 folder, then rerun Setup. Live S:/UNC availability still needs validation on the
 target Windows/VDI environment.
+
+## Portable REA runtime repair
+
+Normal dependency setup also provisions the optional pinned `rea-agents` 6.5.0
+runtime. A developer's sibling research checkout is not required in the VDI.
+Setup reuses a complete verified installation, or obtains the published npm
+archive with a fixed SHA-512 digest and installs production dependencies without
+package lifecycle scripts. The Windows native addon is included and its exact
+version/hash checked. `node scripts/rea.mjs --help` must load successfully before
+an install is accepted. Node 24.11+ LTS (or supported 22.19+/26+) and npm are needed.
+
+Repair independently from the project folder:
+
+```powershell
+.venv\Scripts\python.exe bootstrap\setup_rea.py
+```
+
+Fallback locations are `.runtime/rea` under the project, then
+`%LOCALAPPDATA%/Copilot Local Agent/runtimes/rea/6.5.0`, then the corresponding
+`%TEMP%` path. Existing runtimes and partial installations are preserved; every
+new install is staged separately and verified before publishing. Setup tries the
+npm offline cache before the registry and bounds the overall installation work.
+For disconnected setup, set `COPILOT_REA_ARCHIVE` to the absolute path of the
+unchanged published 6.5.0 tarball and populate the npm cache in advance. A complete
+existing installation can instead be selected with `rea_repository` in
+`config.local.json`. `COPILOT_REA_NODE` selects a Node executable during repair;
+set `rea_node_executable` in local configuration too when Node is not on PATH.
+Failures explicitly identify REA as unavailable while retaining working Python
+tools. Runtime setup never changes durable S:-backed discovery storage.
 <!-- END SOURCE: bootstrap/README.md -->
 
 
@@ -1409,10 +1438,72 @@ startup choice.
 
 ---
 
+<!-- BEGIN VERBATIM SOURCE: docs/REA_AVAILABILITY_RECOVERY.md -->
+## Source: `docs/REA_AVAILABILITY_RECOVERY.md` (verbatim text; line endings normalized to LF)
+
+# REA availability deployment repair
+
+## Cause and fix
+
+The original default searched only the developer sibling `Copilot Local Agent Research/rea`.
+That external checkout was not delivered by Git, and normal setup did not install REA.
+The single generic manifest error hid both the searched path and subsequent dependency checks.
+This deployment defect explains the reported pre-selection failure; the VDI filesystem itself
+was not accessed during this repair.
+
+Setup and the selected live/testing startup now provision the integrity-pinned published
+runtime before creating the session catalogue. They reuse complete installations, try
+multiple writable runtime locations, and try cached dependencies before the registry.
+An explicit trusted installation and disconnected archive/cache repair are alternatives.
+See [exact recovery commands](REA_INTEGRATION.md#recovery-options).
+
+Availability now reports package.json paths and per-candidate failures, compiled CLI files,
+production dependencies, compatible Node version and matching Windows native integrity.
+The ToolRegistry owns one immutable session snapshot shared by prompt research metadata,
+all three REA tools and research.route. Fresh session creation refreshes it. Execution
+still validates the current runtime before invoking a target.
+
+## Validation
+
+- New health regressions reproduce the missing developer-checkout case and verify managed
+  fallback, explicit overrides, malformed/unreadable manifests, dependencies and Node cases.
+- Three session tests verify identical metadata/catalogue/router availability and recovery
+  from a prior unavailable session.
+- Real clean install from the published 6.5.0 archive, production dependency installation,
+  exact native integrity and CLI help: passed.
+- Fresh local session using that managed install with no repository override: available;
+  all three catalogue entries matched; research.route preferred rea.inspect_page;
+  actual synthetic HAR analysis completed.
+- Final startup/session/protocol/health-contract/setup regression run:103 tests passed.
+  Additional setup/version/installer run:38 passed; final setup/version run:22 passed.
+  Counts overlap. REA unit and actual gated integrations passed during the 100-test run;
+  its one launcher-call-count regression was resolved by provisioning the selected version
+  at the correct launch boundary and covered by the subsequent passing launcher tests.
+- Initial larger diagnostics caused a ninth startup attachment; redundant first-task advice
+  was deferred, retaining full diagnostics and the eight complete contract attachments.
+- Python compilation, exact91-tool inventory regeneration and whitespace checks passed.
+
+## VDI acceptance
+
+Pull the fix and launch the current live version, or run Setup.cmd. If needed run the
+repair command in the linked guide, then start a new session. Confirm available:true in
+research_routing.rea and each REA entry, then request a supported approved investigation
+and confirm research.route prefers rea.inspect_page. Existing sessions retain their
+contract snapshot. Supported Node/npm must be installed or explicitly configured.
+
+Live VDI, S:/UNC installation and production authenticated Copilot were not exercised here.
+Durable discovery storage and target/effect approvals remain unchanged.
+<!-- END SOURCE: docs/REA_AVAILABILITY_RECOVERY.md -->
+
+
+---
+
 <!-- BEGIN VERBATIM SOURCE: docs/REA_IMPLEMENTATION_REPORT.md -->
 ## Source: `docs/REA_IMPLEMENTATION_REPORT.md` (verbatim text; line endings normalized to LF)
 
 # REA implementation report
+
+Update: the later [availability deployment repair](REA_AVAILABILITY_RECOVERY.md) supersedes this report's original manual-only dependency setup and startup availability behavior.
 
 Implementation baseline: `3a22557`. The interview agreement overrides conflicting requirements in the original implementation brief. No project files were removed. External REA dependencies remain in a separate research checkout.
 
@@ -1605,43 +1696,75 @@ Copilot Chat plans; the existing local orchestrator validates and authorizes
 ToolRegistry calls. REA is a one-shot CLI adapter, never another reasoning agent,
 raw MCP catalogue, or execution authority. No model API is introduced.
 
-## Install the inspected runtime
+## Install and recover the runtime
 
-The adapter was inspected against `morluto/rea` revision
-`d7651b6a0dde6cfe658144cc52794ae6aaf23306`, package `rea-agents` 6.5.0.
-REA uses the MIT license. This integration does not vendor its source or binary;
-retain the upstream copyright/permission notice when redistributing REA.
+The adapter targets `rea-agents` 6.5.0 (MIT), inspected source revision
+`d7651b6a0dde6cfe658144cc52794ae6aaf23306`. Runtime binaries are installed,
+not committed. Normal **Setup.cmd** and the selected live/testing version's
+**Start Agent.cmd / Start Agent UI.cmd** now run the repair helper before the
+session catalogue is built. An external developer checkout is not required.
+Tool requests and availability checks never install software.
 
-Install Node in one of REA's declared ranges: `^22.19.0`, `^24.11.0`, or `>=26`.
-From the project's parent directory:
+Node must support `^22.19.0`, `^24.11.0`, or `>=26`, with npm available for a new
+installation. The helper obtains the exact published npm archive, verifies its
+pinned SHA-512, safely extracts it, installs production dependencies with scripts
+and optional dependencies disabled, checks the matching Windows native artifact,
+and runs the actual CLI `--help`. Existing complete installations are reused.
+The original upstream license is retained in the installed distribution.
 
-```powershell
-git clone https://github.com/morluto/rea.git "Copilot Local Agent Research/rea"
-git -C "Copilot Local Agent Research/rea" checkout d7651b6a0dde6cfe658144cc52794ae6aaf23306
-Push-Location "Copilot Local Agent Research/rea"
-npm ci
-npm run build:cached
-```
+### Recovery options
 
-Windows source checkouts omit the native controls from Git. Follow the inspected
-upstream `native/windows/README.md` matching-version recovery:
+1. **Automatic repair / explicit retry**, from the project directory:
 
-```powershell
-npm pack rea-agents@6.5.0 --ignore-scripts
-New-Item -ItemType Directory -Force .setup-cache/rea-native | Out-Null
-tar -xzf rea-agents-6.5.0.tgz -C .setup-cache/rea-native package/native/windows/build/manifest.json package/native/windows/build/rea-windows-x64.node
-New-Item -ItemType Directory -Force native/windows/build | Out-Null
-Copy-Item .setup-cache/rea-native/package/native/windows/build/manifest.json native/windows/build/
-Copy-Item .setup-cache/rea-native/package/native/windows/build/rea-windows-x64.node native/windows/build/
-npm run verify:windows-native:artifact
-Pop-Location
-```
+   ```powershell
+   .venv\Scripts\python.exe bootstrap\setup_rea.py
+   ```
 
-The compatible sibling checkout is discovered by project-relative convention.
-Alternatively set an absolute trusted `rea_repository` and native Node executable
-in administrator configuration. Copilot cannot choose these paths or command
-arguments. Optional missing/disabled dependencies produce an unavailable tool
-and leave the rest of the stack working; startup never installs REA implicitly.
+   Installation tries project `.runtime/rea`, then
+   `%LOCALAPPDATA%/Copilot Local Agent/runtimes/rea/6.5.0`, then the corresponding
+   system temporary directory. A failed writable location advances to the next;
+   previous partial REA installations are preserved. Dependency setup tries the
+   existing npm cache before a bounded registry request. `--timeout-seconds 90`
+   sets the provisioning budget; individual version/download/smoke probes also
+   have fixed limits. No manual unpack-folder prompt is added. Discovery data
+   remains in the existing S:/UNC store.
+
+2. **Use an existing complete installation**: set absolute `rea_repository`
+   and, when Node is not on PATH, `rea_node_executable` in `config.local.json`.
+   PATH and standard Program Files / LocalAppData Node locations are checked.
+   Explicit configuration is authoritative; an invalid override is diagnosed
+   instead of silently replaced with a different installation.
+
+3. **Disconnected repair**: transfer the unchanged `rea-agents-6.5.0.tgz`
+   published archive and a populated npm cache from a successful installation.
+   Set `COPILOT_REA_ARCHIVE` to that archive's absolute path, then run:
+
+   ```powershell
+   .venv\Scripts\python.exe bootstrap\setup_rea.py --offline
+   ```
+
+   The same pinned integrity check applies. An archive alone does not contain
+   Node dependencies; an incomplete offline cache produces a clear failure.
+   Alternatively select a complete offline installation using option 2.
+
+4. **Trusted source checkout**: the prior sibling
+   `Copilot Local Agent Research/rea` remains a supported discovery fallback.
+   Build the pinned revision with `npm ci` and `npm run build:cached`; Windows
+   requires the exact-version published native addon as documented upstream in
+   `native/windows/README.md`. New installations should prefer the repair helper.
+
+After repair, start a **new session**. It refreshes one authoritative availability
+snapshot used by `research_routing.rea`, all three REA catalogue entries and
+`research.route`. Actual execution checks the runtime again before launch.
+Diagnostics identify `package.json`, every checked repository/manifest path,
+missing/unreadable/invalid/incompatible files, CLI and dependency admission,
+Node candidates and compatible versions, and native identity failures. Reported
+capabilities describe the pinned adapter contract; the setup CLI smoke check
+verifies actual loading. A missing dependency is never called healthy.
+
+For a supported approved website investigation, `research.route` must return
+`preferred: rea.inspect_page` when REA is available. Dependency failure remains
+explicit and preserves browser/API/Crawl4AI alternatives and existing approvals.
 
 ## Typed capabilities and limits
 
@@ -2582,7 +2705,7 @@ when the session ends. See [session behavior](docs/SUPERVISED_SESSIONS.md).
 inspection capability through three typed ToolRegistry tools. Deterministic
 `research.route` retains the API Anything-inspired public operation adapter,
 Crawl4AI and specialized browser/file tools. Independent bounded reads run in
-parallel. [Centralized knowledge](docs/KNOWLEDGE_PERSISTENCE.md) reuses concise
+parallel. Startup and Setup automatically provision the pinned runtime with multiple writable-location and offline-cache fallbacks; see [REA repair options](docs/REA_INTEGRATION.md#recovery-options). [Centralized knowledge](docs/KNOWLEDGE_PERSISTENCE.md) reuses concise
 per-site views while the S:-backed ledger retains evidence and revisions.
 
 The optional `--discover-first` Crawl4AI guide lets you sign in, title each website campaign,

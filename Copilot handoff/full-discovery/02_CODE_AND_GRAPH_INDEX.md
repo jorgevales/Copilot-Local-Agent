@@ -57,6 +57,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `__future__`, `collections`, `hashlib`, `importlib`, `json`, `ntpath`, `os`, `pathlib`, `re`, `subprocess`, `sys`, `types`, `uuid`
 - Public symbols: `candidates(project, env)`; `diagnostic_path(path, project, env)`; `failure_category(error)`; `folder(value)`; `health_check(pins)`; `install(requirements, prefix, *, versions=installed_versions, run=run_python, health=None, environ=None, probe_folder=probe, ask=input)`; `installed_versions()`; `main()`; `path_failure(output)`; `pins_from(path)`; `probe(path)`; `run_python(args, env)`; `shared_root(env)`
 
+### `bootstrap/setup_rea.py`
+
+- Role: Provision the pinned optional REA runtime without administrator rights.
+- Direct imports: `__future__`, `argparse`, `base64`, `hashlib`, `json`, `os`, `pathlib`, `re`, `shutil`, `subprocess`, `sys`, `tarfile`, `tempfile`, `time`, `urllib.request`, `uuid`
+- Public symbols: `archive_bytes(env)`; `extract_archive(archive, destination)`; `find_node(env)`; `find_npm(node, env)`; `main()`; `provision(project, *, environ=None, deadline_seconds=90, offline=False, config_path=None)`; `runtime_candidates(project, env)`; `validate_runtime(root, node, env, *, smoke=True)`
+
 ### `copilot_agent/__init__.py`
 
 - Role: Local, policy-controlled Copilot web UI agent.
@@ -327,8 +333,8 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `copilot_agent/rea.py`
 
 - Role: Bounded, passive REA CLI capabilities owned by the existing ToolRegistry.
-- Direct imports: `.logging_utils`, `.persistence`, `.policy`, `__future__`, `asyncio`, `hashlib`, `ipaddress`, `json`, `os`, `pathlib`, `re`, `shutil`, `subprocess`, `tempfile`, `time`, `urllib.parse`, `uuid`
-- Public symbols: `_artifact_identity(path, kind, policy, limit) [private helper]`; `_bounded(config, name, default, minimum, maximum) [private helper]`; `_capture_metadata(value) [private helper]`; `_clean_scratch(path) [private helper]`; `_copy_bounded(source, target, limit) [private helper]`; `_endpoint(browser) [private helper]`; `_file_identity(path, policy, limit) [private helper]`; `_fixed_local(path) [private helper]`; `_incomplete(value) [private helper]`; `_json_object(data) [private helper]`; `_normalize(data, returncode) [private helper]`; `_page_scope(args, context) [private helper]`; `_repository(config) [private helper]`; `_restore_source_paths(value, staging) [private helper]`; `_run(command, *, cwd, timeout, output_limit, context) [private helper]`; `_safe(value, depth=0) [private helper]`; `_save(result, context) [private helper]`; `_schema(properties, required=()) [private helper]`; `_stage_input(prepared, kind, context, policy) [private helper]`; `execute_rea(name, args, context, policy)`; `rea_health(config)`; `validate_rea(name, args, context, policy)`
+- Direct imports: `.logging_utils`, `.persistence`, `.policy`, `__future__`, `asyncio`, `hashlib`, `ipaddress`, `json`, `os`, `pathlib`, `re`, `shutil`, `stat`, `subprocess`, `tempfile`, `time`, `urllib.parse`, `uuid`
+- Public symbols: `_artifact_identity(path, kind, policy, limit) [private helper]`; `_bounded(config, name, default, minimum, maximum) [private helper]`; `_capture_metadata(value) [private helper]`; `_check_node(executable) [private helper]`; `_check_repository(root) [private helper]`; `_clean_scratch(path) [private helper]`; `_copy_bounded(source, target, limit) [private helper]`; `_endpoint(browser) [private helper]`; `_file_identity(path, policy, limit) [private helper]`; `_fixed_local(path) [private helper]`; `_incomplete(value) [private helper]`; `_json_object(data) [private helper]`; `_node_candidates(config) [private helper]`; `_normalize(data, returncode) [private helper]`; `_page_scope(args, context) [private helper]`; `_repository(config) [private helper]`; `_restore_source_paths(value, staging) [private helper]`; `_run(command, *, cwd, timeout, output_limit, context) [private helper]`; `_safe(value, depth=0) [private helper]`; `_save(result, context) [private helper]`; `_schema(properties, required=()) [private helper]`; `_stage_input(prepared, kind, context, policy) [private helper]`; `class _AvailabilityError(ValueError); 1 public methods`; `execute_rea(name, args, context, policy)`; `rea_health(config)`; `rea_repository_candidates(config)`; `validate_rea(name, args, context, policy)`
 
 ### `copilot_agent/reconciliation.py`
 
@@ -423,8 +429,8 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `copilot_agent/tools.py`
 
 - Role: Versioned local capabilities. Browser tools use guarded owned Edge tabs.
-- Direct imports: `.archives`, `.browser_auth`, `.browser_inspection`, `.code_runner`, `.discovery_contracts`, `.discovery_engine`, `.discovery_knowledge`, `.downloads`, `.local_navigation`, `.logging_utils`, `.policy`, `.rea`, `.reconciliation`, `.research_permissions`, `.research_routing`, `.screenshot_evidence`, `.session_mode`, `.site_discovery`, `.site_knowledge`, `.state`, `.sync`, `.web_documents`, `.web_navigation`, `.web_operations`, `asyncio`, `ctypes`, `hashlib`, `importlib.metadata`, `json`, `os`, `pathlib`, `platform`, `re`, `shutil`, `sys`, `urllib.parse`, `uuid`
-- Public symbols: `_approved_write_target(name, args, policy, context) [private helper]`; `_atomic_replace(path, payload, expected_sha256, context, policy, *, operation_name='files.replace') [private helper]`; `_require_extended_read(path, policy) [private helper]`; `_swap_replacement_file(path, temp) [private helper]`; `_write_target(name, args, policy, context) [private helper]`; `class ToolRegistry; method names: __init__, definitions, definition, validate_input, validate_call, _limit, execute, _rea_failure, _execute`; `configured_path_policy(config, session_dir)`; `definitions()`; `execute(name, args, context)`; `obj(properties, required=None)`; `schema_example(schema)`; `tool_path_policy(name, context)`; `validate(value, schema)`
+- Direct imports: `.archives`, `.browser_auth`, `.browser_inspection`, `.code_runner`, `.discovery_contracts`, `.discovery_engine`, `.discovery_knowledge`, `.downloads`, `.local_navigation`, `.logging_utils`, `.policy`, `.rea`, `.reconciliation`, `.research_permissions`, `.research_routing`, `.screenshot_evidence`, `.session_mode`, `.site_discovery`, `.site_knowledge`, `.state`, `.sync`, `.web_documents`, `.web_navigation`, `.web_operations`, `asyncio`, `copy`, `ctypes`, `hashlib`, `importlib.metadata`, `json`, `os`, `pathlib`, `platform`, `re`, `shutil`, `sys`, `urllib.parse`, `uuid`
+- Public symbols: `_approved_write_target(name, args, policy, context) [private helper]`; `_atomic_replace(path, payload, expected_sha256, context, policy, *, operation_name='files.replace') [private helper]`; `_require_extended_read(path, policy) [private helper]`; `_swap_replacement_file(path, temp) [private helper]`; `_write_target(name, args, policy, context) [private helper]`; `class ToolRegistry; method names: __init__, rea_availability, definitions, definition, validate_input, validate_call, _limit, execute, _rea_failure, _execute`; `configured_path_policy(config, session_dir)`; `definitions()`; `execute(name, args, context)`; `obj(properties, required=None)`; `schema_example(schema)`; `tool_path_policy(name, context)`; `validate(value, schema)`
 
 ### `copilot_agent/web_documents.py`
 
@@ -798,6 +804,18 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `asyncio`, `copilot_agent.policy`, `copilot_agent.rea`, `hashlib`, `json`, `os`, `pathlib`, `shutil`, `socket`, `sys`, `tempfile`, `types`, `unittest`, `unittest.mock`
 - Public symbols: `class REALocalIntegrationTests(unittest.TestCase); 2 public methods`; `class REATests(unittest.TestCase); 22 public methods`; `evidence(**changes)`
 
+### `tests/test_rea_availability.py`
+
+- Role: REA installation discovery and precise bounded availability diagnostics.
+- Direct imports: `copilot_agent.rea`, `hashlib`, `json`, `os`, `pathlib`, `subprocess`, `tempfile`, `unittest`, `unittest.mock`
+- Public symbols: `class REAAvailabilityTests(unittest.TestCase); 14 public methods`
+
+### `tests/test_rea_availability_session.py`
+
+- Role: Fresh-session REA availability agrees across model metadata and dispatch.
+- Direct imports: `copilot_agent.findings`, `copilot_agent.policy`, `copilot_agent.prompts`, `copilot_agent.session_mode`, `copilot_agent.state`, `copilot_agent.tools`, `hashlib`, `json`, `pathlib`, `subprocess`, `sys`, `tests.test_protocol_state`, `unittest`, `unittest.mock`
+- Public symbols: `class REAAvailabilitySessionTests(unittest.IsolatedAsyncioTestCase); 6 public methods`
+
 ### `tests/test_rea_registry.py`
 
 - Role: Public registry/routing/ledger integration contracts for the REA adapter.
@@ -827,6 +845,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Role: Installer path/reuse regressions; simulated VDI error, actual offline pip proof.
 - Direct imports: `importlib.util`, `json`, `os`, `pathlib`, `subprocess`, `sys`, `tempfile`, `types`, `unittest`, `unittest.mock`, `zipfile`
 - Public symbols: `class DependencySetupTests(unittest.TestCase); 18 public methods`
+
+### `tests/test_setup_rea.py`
+
+- Role: Portable REA provisioning: integrity, archive safety and recovery contracts.
+- Direct imports: `base64`, `hashlib`, `importlib.util`, `io`, `json`, `os`, `pathlib`, `subprocess`, `tarfile`, `tempfile`, `types`, `unittest`, `unittest.mock`
+- Public symbols: `class ReaSetupTests(unittest.TestCase); 12 public methods`
 
 ### `tests/test_setup_resources.py`
 
@@ -886,7 +910,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Implementation module; responsibilities are identified by its public symbols and imports.
 - Direct imports: `importlib.util`, `pathlib`, `subprocess`, `sys`, `tempfile`, `unittest`, `unittest.mock`
-- Public symbols: `class VersionTests(unittest.TestCase); 9 public methods`
+- Public symbols: `class VersionTests(unittest.TestCase); 12 public methods`
 
 ### `tests/test_web_documents.py`
 
@@ -934,7 +958,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Local complete-copy testing versions. Requires neither Git nor extra packages.
 - Direct imports: `__future__`, `datetime`, `hashlib`, `json`, `os`, `pathlib`, `shutil`, `subprocess`, `sys`, `uuid`
-- Public symbols: `choose_source(live, ask=input, choice=None)`; `create_version(live, proposals, previous=None)`; `digest(path)`; `main()`; `prepare_drop_folder(live)`; `replacement_map(live, proposals)`; `source_files(root)`
+- Public symbols: `choose_source(live, ask=input, choice=None)`; `create_version(live, proposals, previous=None)`; `digest(path)`; `main()`; `prepare_drop_folder(live)`; `prepare_rea(source, flags, environment)`; `replacement_map(live, proposals)`; `source_files(root)`
 
 
 ## Graphify relationship evidence
@@ -942,31 +966,31 @@ This is a static AST inventory of the current source, not a verbatim code packag
 Generated from the local Graphify code-only AST graph. The raw graph, cache, and Graphify report are not attachments; the statistics and selected relationships below preserve their useful navigation evidence.
 
 - Graphify version: `0.9.79`
-- Source revision analyzed: `3a22557a369ec9c4c079536cbc2d3cd1c3537e0c`
-- Nodes / edges / hyperedges: 3652 / 11345 / 0
-- Relationship counts: calls=4561, contains=1148, imports=1826, imports_from=842, indirect_call=434, inherits=41, method=1659, rationale_for=387, references=97, uses=350
+- Source revision analyzed: `9823919f75542c679c550fffdd058791e901bf1d`
+- Nodes / edges / hyperedges: 3727 / 11541 / 0
+- Relationship counts: calls=4646, contains=1166, imports=1872, imports_from=858, indirect_call=439, inherits=42, method=1696, rationale_for=396, references=97, uses=329
 - Graph origin: Graphify AST extraction; inferred edges are hypotheses, not verified behavior.
 
 ### Highest-connectivity source symbols
 
-- `PolicyError` — 261 graph links; `copilot_agent/policy.py` at `L9`.
-- `ToolRegistry` — 164 graph links; `copilot_agent/tools.py` at `L405`.
-- `tools.py` — 156 graph links; `copilot_agent/tools.py` at `L1`.
+- `PolicyError` — 256 graph links; `copilot_agent/policy.py` at `L9`.
+- `ToolRegistry` — 158 graph links; `copilot_agent/tools.py` at `L406`.
+- `tools.py` — 158 graph links; `copilot_agent/tools.py` at `L1`.
 - `Orchestrator` — 155 graph links; `copilot_agent/orchestrator.py` at `L29`.
-- `PathPolicy` — 151 graph links; `copilot_agent/policy.py` at `L42`.
-- `SessionState` — 115 graph links; `copilot_agent/state.py` at `L67`.
-- `DiscoveryError` — 114 graph links; `copilot_agent/discovery_contracts.py` at `L64`.
-- `BrowserAdapter` — 107 graph links; `copilot_agent/browser.py` at `L324`.
+- `PathPolicy` — 150 graph links; `copilot_agent/policy.py` at `L42`.
+- `SessionState` — 117 graph links; `copilot_agent/state.py` at `L67`.
+- `DiscoveryError` — 113 graph links; `copilot_agent/discovery_contracts.py` at `L64`.
 - `orchestrator.py` — 107 graph links; `copilot_agent/orchestrator.py` at `L1`.
+- `BrowserAdapter` — 106 graph links; `copilot_agent/browser.py` at `L324`.
 - `final_response()` — 98 graph links; `tests/test_orchestrator.py` at `L86`.
 - `Store` — 94 graph links; `copilot_agent/discovery_store.py` at `L44`.
 - `copilot_agent/app.py` — 89 graph links; `copilot_agent/app.py` at `L1`.
 - `site_knowledge.py` — 89 graph links; `copilot_agent/site_knowledge.py` at `L1`.
 - `Config` — 86 graph links; `copilot_agent/config.py` at `L26`.
-- `policy.py` — 79 graph links; `copilot_agent/policy.py` at `L1`.
+- `policy.py` — 80 graph links; `copilot_agent/policy.py` at `L1`.
 - `automation_packages.py` — 76 graph links; `copilot_agent/automation_packages.py` at `L1`.
+- `rea.py` — 65 graph links; `copilot_agent/rea.py` at `L1`.
 - `._turn()` — 63 graph links; `copilot_agent/orchestrator.py` at `L1338`.
-- `OrchestratorTests` — 63 graph links; `tests/test_orchestrator.py` at `L98`.
 
 ### Direct, source-derived relationships
 

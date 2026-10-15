@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 
 EXCLUDED = {'.git', '.venv', '__pycache__', 'runtime', 'workspace', '.history',
-            'Copilot proposals', 'Copilot testing environment', 'node_modules'}
+            'Copilot proposals', 'Copilot testing environment', 'node_modules', '.runtime', '.setup-cache'}
 PRIVATE = {'config.local.json', 'python-launcher.txt', '.venv-setup.lock'}
 DROP_FOLDER = Path('Copilot testing environment') / 'Updated files'
 
@@ -131,6 +131,23 @@ def choose_source(live, ask=input, choice=None):
     return create_version(live, inbox, previous)
 
 
+def prepare_rea(source, flags, environment):
+    """Repair the selected live/testing copy before its session catalogue exists."""
+    helper = source / 'bootstrap' / 'setup_rea.py'
+    if not helper.is_file():
+        print('REA setup helper is absent in this saved version; use the current live version or run Setup.cmd.')
+        return
+    try:
+        status = subprocess.call([sys.executable, *flags, str(helper), '--project', str(source)],
+                                 cwd=source, env=environment)
+    except OSError as error:
+        print(f'REA startup recovery could not run ({type(error).__name__}).')
+        status = 1
+    if status:
+        print('REA runtime unavailable: see the exact setup diagnostic above. Other tools remain available. '
+              'Run Setup.cmd or bootstrap/setup_rea.py to retry, then start a new session.')
+
+
 def main():
     live = Path(__file__).resolve().parent
     try:
@@ -150,6 +167,7 @@ def main():
             flags.append('-s')
         environment = os.environ.copy()
         environment['COPILOT_AGENT_EXECUTION_MODE'] = 'testing' if source.is_relative_to(live / 'Copilot testing environment' / 'versions') else 'live'
+        prepare_rea(source, flags, environment)
         command = ([sys.executable, *flags, '-m', 'agent_ui.runtime'] if use_ui else
                    [sys.executable, *flags, str(source / 'app.py')])
         return subprocess.call(command, cwd=source, env=environment)

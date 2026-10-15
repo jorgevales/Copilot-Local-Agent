@@ -28,3 +28,32 @@ and failure categories without asking for a manual unpacking folder. Correct sha
 connectivity/permissions or set `COPILOT_SETUP_TEMP` to a writable absolute scratch
 folder, then rerun Setup. Live S:/UNC availability still needs validation on the
 target Windows/VDI environment.
+
+## Portable REA runtime repair
+
+Normal dependency setup also provisions the optional pinned `rea-agents` 6.5.0
+runtime. A developer's sibling research checkout is not required in the VDI.
+Setup reuses a complete verified installation, or obtains the published npm
+archive with a fixed SHA-512 digest and installs production dependencies without
+package lifecycle scripts. The Windows native addon is included and its exact
+version/hash checked. `node scripts/rea.mjs --help` must load successfully before
+an install is accepted. Node 24.11+ LTS (or supported 22.19+/26+) and npm are needed.
+
+Repair independently from the project folder:
+
+```powershell
+.venv\Scripts\python.exe bootstrap\setup_rea.py
+```
+
+Fallback locations are `.runtime/rea` under the project, then
+`%LOCALAPPDATA%/Copilot Local Agent/runtimes/rea/6.5.0`, then the corresponding
+`%TEMP%` path. Existing runtimes and partial installations are preserved; every
+new install is staged separately and verified before publishing. Setup tries the
+npm offline cache before the registry and bounds the overall installation work.
+For disconnected setup, set `COPILOT_REA_ARCHIVE` to the absolute path of the
+unchanged published 6.5.0 tarball and populate the npm cache in advance. A complete
+existing installation can instead be selected with `rea_repository` in
+`config.local.json`. `COPILOT_REA_NODE` selects a Node executable during repair;
+set `rea_node_executable` in local configuration too when Node is not on PATH.
+Failures explicitly identify REA as unavailable while retaining working Python
+tools. Runtime setup never changes durable S:-backed discovery storage.

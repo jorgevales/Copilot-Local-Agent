@@ -108,7 +108,9 @@ def _fresh_evidence(target, selected, context, args, policy):
 def route_research(args, context, policy):
     target = validate_route(args, context, policy)
     config = context.get('config', {})
-    health = rea_health(config)
+    health = context.get('_rea_availability')
+    if health is None:
+        health = rea_health(config)
     api = config_value(config, 'operation_reuse', False) is True
     crawl = importlib.util.find_spec('crawl4ai') is not None
     kind, objective = args['target_type'], args['objective']

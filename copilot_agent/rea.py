@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -51,65 +52,175 @@ _OMIT_KEYS = frozenset({'raw_result', 'reported', 'text', 'body', 'postData', 'p
                         'numeric_literals', 'binary_fields', 'captured_output', 'console', 'storage'})
 
 
-def _repository(config):
+class _AvailabilityError(ValueError):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+def rea_repository_candidates(config):
+    """Deterministic trusted install locations; explicit administrator config wins."""
     configured = config_value(config, 'rea_repository', '')
     if configured:
         root = Path(configured).expanduser()
         if not root.is_absolute():
-            raise ValueError('rea_repository must be an absolute trusted administrator path')
-        return root
+            raise _AvailabilityError('repository_not_absolute', 'rea_repository must be an absolute trusted administrator path')
+        return [root]
     project = Path(config_value(config, 'root', Path(__file__).resolve().parents[1])).resolve()
-    return project.parent / 'Copilot Local Agent Research' / 'rea'
+    candidates = [project / '.runtime' / 'rea']
+    if os.environ.get('LOCALAPPDATA'):
+        candidates.append(Path(os.environ['LOCALAPPDATA']) / 'Copilot Local Agent' / 'runtimes' / 'rea' / '6.5.0')
+    candidates.extend([Path(tempfile.gettempdir()) / 'Copilot Local Agent' / 'runtimes' / 'rea' / '6.5.0',
+                       project.parent / 'Copilot Local Agent Research' / 'rea'])
+    return list(dict.fromkeys(candidates))
+
+
+def _repository(config):
+    # Compatibility helper; actual selection is validated by rea_health.
+    return rea_repository_candidates(config)[0]
+
+
+def _node_candidates(config):
+    selected = config_value(config, 'rea_node_executable', '')
+    if selected:
+        return [Path(selected).expanduser()]
+    candidates = []
+    detected = shutil.which('node')
+    if detected:
+        candidates.append(Path(detected))
+    for variable, relative in (('ProgramFiles', 'nodejs/node.exe'),
+                               ('ProgramW6432', 'nodejs/node.exe'),
+                               ('LOCALAPPDATA', 'Programs/nodejs/node.exe')):
+        if os.environ.get(variable):
+            candidates.append(Path(os.environ[variable]) / relative)
+    return list(dict.fromkeys(candidates))
+
+
+def _check_repository(root):
+    reject_path_redirection(root)
+    manifest = root / 'package.json'
+    try:
+        manifest_stat = manifest.stat()
+    except FileNotFoundError as error:
+        raise _AvailabilityError('manifest_missing', f'REA package manifest missing: {manifest}') from error
+    if not stat.S_ISREG(manifest_stat.st_mode):
+        raise _AvailabilityError('manifest_not_file', f'REA package manifest is not a regular file: {manifest}')
+    if manifest_stat.st_size > 100000:
+        raise _AvailabilityError('manifest_oversized', f'REA package manifest exceeds 100000 bytes: {manifest}')
+    try:
+        package = json.loads(manifest.read_text(encoding='utf-8'))
+    except (json.JSONDecodeError, UnicodeError) as error:
+        raise _AvailabilityError('manifest_invalid_json', f'REA package manifest invalid JSON: {manifest}') from error
+    if not isinstance(package, dict) or package.get('name') != 'rea-agents' or not re.fullmatch(r'6\.5\.\d+', str(package.get('version', ''))):
+        raise _AvailabilityError('manifest_incompatible', f'REA package must be a compatible rea-agents 6.5.x installation: {manifest}')
+    files = ['scripts/rea.mjs', 'dist/cli-runtime/cli.js', 'dist/cli-runtime/cliOutput.js',
+             'dist/cli-runtime/cliResultOutput.js']
+    for name in files:
+        reject_path_redirection(root / name)
+        if not (root / name).is_file():
+            raise _AvailabilityError('compiled_runtime_missing', f'REA compiled runtime missing: {root / name}; run bootstrap/setup_rea.py')
+    dependencies = package.get('dependencies', {})
+    if not isinstance(dependencies, dict) or len(dependencies) > 100:
+        raise _AvailabilityError('manifest_dependencies_invalid', f'REA package dependency manifest invalid: {manifest}')
+    for dependency in dict.fromkeys(['zod', *dependencies]):
+        if not isinstance(dependency, str) or not re.fullmatch(r'(?:@[a-zA-Z0-9_.-]+/)?[a-zA-Z0-9_.-]+', dependency):
+            raise _AvailabilityError('manifest_dependencies_invalid', f'REA package dependency name invalid: {manifest}')
+        dependency_manifest = root / 'node_modules' / dependency / 'package.json'
+        reject_path_redirection(dependency_manifest)
+        if not dependency_manifest.is_file():
+            raise _AvailabilityError('runtime_dependency_missing', f'REA runtime dependency missing: {dependency_manifest}; run bootstrap/setup_rea.py')
+    if os.name == 'nt':
+        native = root / 'native' / 'windows' / 'build'
+        manifest_path = native / 'manifest.json'
+        addon = native / 'rea-windows-x64.node'
+        reject_path_redirection(manifest_path)
+        reject_path_redirection(addon)
+        if not manifest_path.is_file() or manifest_path.stat().st_size > 16384 or not addon.is_file():
+            raise _AvailabilityError('native_artifact_missing', f'REA Windows native controls missing: {native}; restore exact matching published artifact with bootstrap/setup_rea.py')
+        try:
+            metadata = json.loads(manifest_path.read_text(encoding='utf-8'))
+        except (json.JSONDecodeError, UnicodeError) as error:
+            raise _AvailabilityError('native_manifest_invalid', f'REA Windows native manifest invalid JSON: {manifest_path}') from error
+        if (not isinstance(metadata, dict) or metadata.get('packageVersion') != package['version']
+                or metadata.get('platform') != 'win32' or metadata.get('architecture') != 'x64'
+                or addon.stat().st_size > 16777216
+                or hashlib.sha256(addon.read_bytes()).hexdigest() != metadata.get('artifactSha256')):
+            raise _AvailabilityError('native_identity_mismatch', f'REA Windows native artifact version/identity mismatch: {native}; run npm run verify:windows-native:artifact')
+    return package
+
+
+def _check_node(executable):
+    if not executable.is_absolute() or not executable.is_file():
+        raise _AvailabilityError('node_missing', f'Node runtime unavailable: {executable}; configure a trusted absolute rea_node_executable')
+    reject_path_redirection(executable)
+    if executable.suffix.lower() in {'.cmd', '.bat', '.ps1'}:
+        raise _AvailabilityError('node_shell_wrapper', f'REA Node runtime must be a native executable, not a shell wrapper: {executable}')
+    try:
+        result = subprocess.run([str(executable), '--version'], capture_output=True, text=True,
+                                timeout=2, check=False, **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}))
+    except subprocess.TimeoutExpired as error:
+        raise _AvailabilityError('node_probe_timeout', f'Node version check timed out after 2 seconds: {executable}') from error
+    version = re.fullmatch(r'v?(\d+)\.(\d+)\.(\d+)\s*', result.stdout[:256]) if result.returncode == 0 else None
+    if version is None:
+        raise _AvailabilityError('node_probe_invalid', f'Node --version failed or returned an invalid version: {executable}')
+    major, minor, patch = map(int, version.groups())
+    if not (major >= 26 or major == 24 and minor >= 11 or major == 22 and minor >= 19):
+        raise _AvailabilityError('node_version_unsupported', f'Node {major}.{minor}.{patch} is unsupported; need ^22.19.0, ^24.11.0 or >=26')
+    return f'{major}.{minor}.{patch}'
 
 
 def rea_health(config):
-    """Cheap availability only; never install packages or launch REA at startup."""
+    """Bounded local checks only: no install, network, REA CLI or target execution."""
+    diagnostics = {'manifest_filename': 'package.json', 'repository_candidates': [], 'node_candidates': [],
+                   'required_files': ['scripts/rea.mjs', 'dist/cli-runtime/cli.js', 'dist/cli-runtime/cliOutput.js', 'dist/cli-runtime/cliResultOutput.js'],
+                   'capability_commands': {'rea.inspect_page': ['inspect-web-page'], 'rea.analyze_capture': ['inspect-web-network-capture'], 'rea.analyze_artifact': list(COMMANDS.values())},
+                   'runtime_dependencies': 'Declared production dependency manifests plus zod must exist.',
+                   'capability_detection': 'Supported adapters pinned to rea-agents 6.5.x; compiled entry points and Windows native integrity checked, no REA invocation.',
+                   'remediation': ['Run the normal launcher dependency setup to provision pinned REA into a managed runtime folder.',
+                                   'Run .venv\\Scripts\\python.exe bootstrap\\setup_rea.py to repair or provision the managed runtime.',
+                                   'For an existing built trusted installation set absolute rea_repository and, if required, rea_node_executable, then start a new session.']}
     base = {'interface': 'cli', 'capabilities': list(REA_SPECS),
-            'runtime_requirement': 'Node ^22.19.0, ^24.11.0 or >=26; runtime checked by REA on invocation'}
+            'runtime_requirement': 'Node ^22.19.0, ^24.11.0 or >=26; version checked locally at availability assessment',
+            'diagnostics': diagnostics}
     if not config_value(config, 'rea_enabled', True):
         return {**base, 'status': 'disabled', 'available': False, 'reason': 'REA disabled by administrator configuration'}
+    selected_root, package, selected_node, node_version = None, None, None, None
     try:
-        root = _repository(config)
-        reject_path_redirection(root)
-        manifest = root / 'package.json'
-        if not manifest.is_file() or manifest.stat().st_size > 100000:
-            raise ValueError('REA package manifest unavailable')
-        package = json.loads(manifest.read_text(encoding='utf-8'))
-        if package.get('name') != 'rea-agents' or not re.fullmatch(r'6\.5\.\d+', str(package.get('version', ''))):
-            raise ValueError('REA package must be a compatible rea-agents 6.5.x installation')
-        files = ['scripts/rea.mjs', 'dist/cli-runtime/cli.js', 'dist/cli-runtime/cliOutput.js',
-                 'dist/cli-runtime/cliResultOutput.js']
-        for name in files:
-            reject_path_redirection(root / name)
-            if not (root / name).is_file():
-                raise ValueError('REA compiled runtime missing; in its checkout run npm ci then npm run build:cached')
-        if os.name == 'nt':
-            native = root / 'native' / 'windows' / 'build'
-            manifest_path = native / 'manifest.json'
-            addon = native / 'rea-windows-x64.node'
-            reject_path_redirection(manifest_path)
-            reject_path_redirection(addon)
-            if not manifest_path.is_file() or manifest_path.stat().st_size > 16384 or not addon.is_file():
-                raise ValueError('REA Windows native controls missing; restore the exact matching published artifact and run npm run verify:windows-native:artifact')
-            metadata = json.loads(manifest_path.read_text(encoding='utf-8'))
-            if (metadata.get('packageVersion') != package['version'] or metadata.get('platform') != 'win32'
-                    or metadata.get('architecture') != 'x64' or addon.stat().st_size > 16777216
-                    or hashlib.sha256(addon.read_bytes()).hexdigest() != metadata.get('artifactSha256')):
-                raise ValueError('REA Windows native artifact version/identity mismatch; run npm run verify:windows-native:artifact')
-        selected = config_value(config, 'rea_node_executable', '')
-        executable = str(Path(selected).expanduser()) if selected else shutil.which('node')
-        if not executable or not Path(executable).is_absolute() or not Path(executable).is_file():
-            raise ValueError('Node runtime unavailable; configure a trusted absolute rea_node_executable')
-        reject_path_redirection(executable)
-        if Path(executable).suffix.lower() in {'.cmd', '.bat', '.ps1'}:
-            raise ValueError('REA Node runtime must be a native executable, not a shell wrapper')
-        native = (root / 'native/windows/build/manifest.json').is_file() and (root / 'native/windows/build/rea-windows-x64.node').is_file()
-        return {**base, 'status': 'available', 'available': True, 'version': package['version'],
-                'repository': str(root.resolve()), 'node': executable,
-                'windows_native_artifact_present': native if os.name == 'nt' else None,
-                'warnings': ['Windows HAR/SAZ and JavaScript analysis need the exact-version packaged native addon; follow REA native/windows/README.md.'] if os.name == 'nt' and not native else []}
+        roots = rea_repository_candidates(config)
     except (OSError, ValueError, TypeError) as error:
-        return {**base, 'status': 'unavailable', 'available': False, 'reason': str(error)}
+        roots = []
+        diagnostics['repository_candidates'].append({'path': str(config_value(config, 'rea_repository', '')), 'manifest': str(Path(str(config_value(config, 'rea_repository', ''))) / 'package.json'),
+            'available': False, 'code': getattr(error, 'code', 'repository_unreadable'), 'reason': str(error)})
+    for root in roots:
+        attempt = {'path': str(root), 'manifest': str(root / 'package.json'), 'available': False}
+        diagnostics['repository_candidates'].append(attempt)
+        try:
+            package = _check_repository(root)
+            attempt.update(available=True, code='ready', version=package['version'])
+            selected_root = root
+            break
+        except (OSError, ValueError, TypeError) as error:
+            attempt.update(code=getattr(error, 'code', 'repository_unreadable'), reason=str(error))
+    for executable in _node_candidates(config):
+        attempt = {'path': str(executable), 'available': False}
+        diagnostics['node_candidates'].append(attempt)
+        try:
+            node_version = _check_node(executable)
+            selected_node = executable
+            attempt.update(available=True, code='ready', version=node_version)
+            break
+        except (OSError, ValueError, TypeError) as error:
+            attempt.update(code=getattr(error, 'code', 'node_unreadable'), reason=str(error))
+    if selected_root is None or selected_node is None:
+        stage = 'repository' if selected_root is None else 'node'
+        attempts = diagnostics[stage + '_candidates']
+        reason = attempts[0].get('reason', 'No candidate configured or detected') if attempts else 'No candidate configured or detected'
+        if len(attempts) > 1:
+            reason += f'; {len(attempts)} {stage} candidates checked; see diagnostics'
+        return {**base, 'status': 'unavailable', 'available': False, 'failure_stage': stage, 'reason': reason}
+    return {**base, 'status': 'available', 'available': True, 'version': package['version'],
+            'repository': str(selected_root.resolve()), 'node': str(selected_node.resolve()), 'node_version': node_version,
+            'windows_native_artifact_present': True if os.name == 'nt' else None, 'warnings': []}
 
 
 def _bounded(config, name, default, minimum, maximum):

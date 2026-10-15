@@ -39,10 +39,10 @@ Sources: `copilot_agent/orchestrator.py`, `copilot_agent/browser.py`, `copilot_a
 - Shared S: workflows require the checkout to resolve to the expected UNC share; the application fails closed when that identity is unavailable.
 - `local_python` is approved host execution with defense in depth, not an operating-system sandbox.
 - Production, VDI, current Copilot UI, downloads, physical displays and mapped-drive behavior require fresh target-environment evidence.
-- Repository history and configuration vary over time. This package analyzes source revision `3a22557a369ec9c4c079536cbc2d3cd1c3537e0c`.
+- Repository history and configuration vary over time. This package analyzes source revision `9823919f75542c679c550fffdd058791e901bf1d`.
 
 ## Source understanding and packaging decision
 
-The source scan found 239 eligible text files. Project docs and guidance are included verbatim, along with compact launchers, the safe example config, and the response schema. Python modules are represented by their paths, AST-derived imports and symbols, and Graphify relationships; implementation bodies are summarized rather than copied. The repository contains multiple megabytes of source, so a verbatim code mirror would consume the model context without improving the initial architectural map. Exact source remains identifiable by stable repository-relative path and hash in the manifest.
+The source scan found 244 eligible text files. Project docs and guidance are included verbatim, along with compact launchers, the safe example config, and the response schema. Python modules are represented by their paths, AST-derived imports and symbols, and Graphify relationships; implementation bodies are summarized rather than copied. The repository contains multiple megabytes of source, so a verbatim code mirror would consume the model context without improving the initial architectural map. Exact source remains identifiable by stable repository-relative path and hash in the manifest.
 
 No additional project files are needed to understand the package's essential architecture, workflows, security boundaries, configuration, operations or known limits. This statement does not claim the handoff contains full source code.

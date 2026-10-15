@@ -320,6 +320,15 @@ def main():
     if sys.prefix==sys.base_prefix or not os.path.samefile(prefix, sys.prefix):
         raise ValueError('Setup must use the verified project Python environment.')
     install(Path(sys.argv[2]), prefix)
+    project = Path(sys.argv[2]).resolve().parent
+    if (project / 'bootstrap' / 'setup_rea.py').is_file():
+        from setup_rea import provision
+        try:
+            provision(project)
+        except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
+            print('REA OPTIONAL RUNTIME NOT READY: ' + str(error), file=sys.stderr, flush=True)
+            print('Python setup completed. Run .venv\\Scripts\\python.exe bootstrap\\setup_rea.py to repair REA.',
+                  file=sys.stderr, flush=True)
 
 
 if __name__=='__main__':
