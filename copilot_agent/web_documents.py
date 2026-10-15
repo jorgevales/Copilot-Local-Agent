@@ -23,6 +23,7 @@ from .archives import ArchiveError, verify_file
 from .attachments import AttachmentQueue, MAX_USER_FILES
 from .document_catalogue import CATALOGUE_SPECS, FILE_SPEC, build_catalogue, rank_records, export_catalogue, execute_catalogue, current_scope
 from .policy import PolicyError, URLPolicy, config_value, reject_path_redirection
+from .session_mode import fast_mode, website_policy
 
 
 def _obj(properties, required=()):
@@ -180,7 +181,7 @@ def _page(context, tab_id=None):
         record=state.get('tabs',{}).get(tab_id)
         if record is None: raise PolicyError('Unknown or closed document tab')
         for field in ('task_id','customer_key'):
-            if context.get(field) is not None and record.get(field)!=context[field]: raise PolicyError('Document tab belongs to another task or customer')
+            if not fast_mode(context.get('config', {})) and context.get(field) is not None and record.get(field)!=context[field]: raise PolicyError('Document tab belongs to another task or customer')
         page=record['page']
     else: page=context.get('web_page') or getattr(browser,'tool_page',None)
     if page is None or callable(getattr(page,'is_closed',None)) and page.is_closed(): raise PolicyError('Owned document page is unavailable')
@@ -190,6 +191,8 @@ def _page(context, tab_id=None):
 
 
 def _urls(context, browser):
+    if fast_mode(context.get('config', {})):
+        return website_policy(context.get('config', {}))
     domains=set(getattr(browser,'tool_domains',set())) & set(context.get('approved_domains',getattr(browser,'tool_domains',set())))
     if not domains: raise PolicyError('The current website needs explicit domain approval')
     return URLPolicy(domains)
@@ -199,13 +202,13 @@ def _scope(context, browser, page):
     """Inherit a planning tab's scope without widening the caller's authority."""
     tabs=(getattr(browser,'_navigation_state',{}) or {}).get('tabs',{})
     record=next((value for value in tabs.values() if value.get('page') is page),None)
-    if record is not None and record.get('customer_key') is not None and context.get('customer_key')!=record['customer_key']:
+    if not fast_mode(context.get('config', {})) and record is not None and record.get('customer_key') is not None and context.get('customer_key')!=record['customer_key']:
         raise PolicyError('Explicit current customer context is required for this document page')
     result={}
     for field in ('task_id','customer_key','tenant_id','site_namespace_id'):
         requested=context.get(field)
         bound=record.get(field) if record is not None and field in record else requested
-        if requested is not None and bound!=requested: raise PolicyError('Document page belongs to another task or customer')
+        if not fast_mode(context.get('config', {})) and requested is not None and bound!=requested: raise PolicyError('Document page belongs to another task or customer')
         result[field]=bound
     return result
 
@@ -254,11 +257,11 @@ async def _bound(item, context, browser):
     page=ticket['page']
     current_scope=_scope(context,browser,page)
     for field in ('task_id','customer_key','tenant_id','site_namespace_id'):
-        if ticket.get(field)!=current_scope[field]: raise PolicyError('Document identity belongs to another task or customer')
+        if not fast_mode(context.get('config', {})) and ticket.get(field)!=current_scope[field]: raise PolicyError('Document identity belongs to another task or customer')
     if callable(getattr(page,'is_closed',None)) and page.is_closed() or page.url!=ticket['source_url']:
         raise PolicyError('Document source page changed; rediscover before downloading')
     _urls(context,browser).resolve(ticket['url'])
-    if _origin(ticket['url'])!=_origin(page.url): raise PolicyError('Document source is no longer same-origin')
+    if not fast_mode(context.get('config', {})) and _origin(ticket['url'])!=_origin(page.url): raise PolicyError('Document source is no longer same-origin')
     valid=await page.evaluate(_RECHECK,{'keys':ticket['keys'],'href':ticket['url']})
     if valid is not True: raise PolicyError('Observed document anchor changed or disappeared; rediscover it')
     return ticket
@@ -321,7 +324,7 @@ async def _download_batch(args, context, policy):
         if ticket is None: continue
         scope={field:ticket.get(field) for field in ('task_id','customer_key','tenant_id','site_namespace_id')}
         parsed=urlsplit(ticket['source_url']); scope['origin']=parsed.scheme+'://'+(parsed.hostname or '')
-        if batch_scope is not None and scope!=batch_scope: raise PolicyError('One download batch cannot combine different tasks, customers, tenants or website namespaces')
+        if not fast_mode(context.get('config', {})) and batch_scope is not None and scope!=batch_scope: raise PolicyError('One download batch cannot combine different tasks, customers, tenants or website namespaces')
         batch_scope=scope
     if batch_scope is None: batch_scope=current_scope(context)
     per_file=min(args.get('max_file_bytes',20971520),config_value(config,'max_download_bytes',20971520))

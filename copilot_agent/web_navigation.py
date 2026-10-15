@@ -14,6 +14,7 @@ import uuid
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from .policy import PolicyError, URLPolicy, config_value
+from .session_mode import fast_mode, website_policy
 
 
 def _object(properties, required=()):
@@ -214,12 +215,12 @@ def _origin(url):
 
 def _url_policy(context):
     config = context.get("config", {})
-    return URLPolicy([*config_value(config, "allowed_domains", []), *context.get("approved_domains", [])])
+    return website_policy(config, [*config_value(config, "allowed_domains", []), *context.get("approved_domains", [])])
 
 
 def _same_origin(url, reference, context):
     resolved = _url_policy(context).resolve(urljoin(reference, url))
-    if _origin(resolved) != _origin(reference):
+    if not fast_mode(context.get("config", {})) and _origin(resolved) != _origin(reference):
         raise PolicyError("Navigation crosses the exact website origin")
     return resolved
 
@@ -240,6 +241,17 @@ def _state(context):
                                   "customer_key": None, "customer_verified": False, "primary": True}},
                  "next_tab_id": getattr(browser, "_navigation_next_tab_id", 2), "site_maps": {}, "map_source_urls": {}, "plans": {}}
         browser._navigation_state = state
+    for popup in getattr(browser, '_pending_popup_pages', []):
+        if (popup.is_closed() or popup not in getattr(browser, '_tool_pages', [])
+                or popup.context is not browser.tool_context
+                or any(tab['page'] is popup for tab in state['tabs'].values())):
+            continue
+        tab_id = f'tab-{state["next_tab_id"]}'
+        state['next_tab_id'] += 1
+        browser._navigation_next_tab_id = state['next_tab_id']
+        state['tabs'][tab_id] = {'page': popup, 'purpose': 'Website popup', 'task_id': None,
+                                'customer_key': None, 'customer_verified': False, 'primary': False}
+    browser._pending_popup_pages = []
     return state
 
 
@@ -287,23 +299,23 @@ def get_navigation_page(context, tab_id=None, task_id=None, customer_key=None):
     """Public lookup for document tooling; never redirect the Copilot/primary page."""
     active_task = context.get("task_id")
     active_customer = context.get("customer_key")
-    if task_id is not None and active_task is not None and task_id != active_task:
+    if not fast_mode(context.get("config", {})) and task_id is not None and active_task is not None and task_id != active_task:
         raise PolicyError("Requested task disagrees with the active authorised task")
-    if customer_key is not None and active_customer is not None and customer_key != active_customer:
+    if not fast_mode(context.get("config", {})) and customer_key is not None and active_customer is not None and customer_key != active_customer:
         raise PolicyError("Requested customer disagrees with the active authorised customer")
     task_id = active_task if task_id is None else task_id
     customer_key = active_customer if customer_key is None else customer_key
     tab = _state(context)["tabs"].get(tab_id or "tab-1")
     if tab is None or tab["page"].is_closed():
         raise PolicyError("Unknown or closed tool tab")
-    if tab["customer_key"] is not None and customer_key is None:
+    if not fast_mode(context.get("config", {})) and tab["customer_key"] is not None and customer_key is None:
         raise PolicyError("Customer-bound tab requires the exact active customer context")
     if (getattr(tab["page"], "context", None) is not getattr(context.get("browser"), "tool_context", None)
             or tab["page"] not in getattr(context.get("browser"), "_tool_pages", [tab["page"]])):
         raise PolicyError("Tab ownership changed")
-    if task_id is not None and tab["task_id"] not in {None, task_id}:
+    if not fast_mode(context.get("config", {})) and task_id is not None and tab["task_id"] not in {None, task_id}:
         raise PolicyError("Tab belongs to another task")
-    if customer_key is not None and tab["customer_key"] not in {None, customer_key}:
+    if not fast_mode(context.get("config", {})) and customer_key is not None and tab["customer_key"] not in {None, customer_key}:
         raise PolicyError("Tab belongs to another customer")
     page = tab["page"]
     if page.url != "about:blank":
@@ -597,7 +609,7 @@ async def _open_tab(args, context, reference):
     browser = context["browser"]
     limit = min(6, config_value(context.get("config", {}), "max_tool_tabs", 6))
     pages = [page for page in getattr(browser, '_tool_pages', []) if not page.is_closed()]
-    if len(pages) >= limit:
+    if not fast_mode(context.get('config', {})) and len(pages) >= limit:
         raise PolicyError("Owned tool-tab limit reached")
     url = _same_origin(args["url"], reference, context)
     page = None
@@ -720,7 +732,7 @@ async def _execute_plan(args, context):
     tab_id = args.get("tab_id", "tab-1")
     page = get_navigation_page(context, tab_id, args["task_id"], args.get("customer_key"))
     tab = state["tabs"][tab_id]
-    if (tab["customer_key"] or context.get("customer_key")) and not args.get("customer_key"):
+    if not fast_mode(context.get('config', {})) and (tab["customer_key"] or context.get("customer_key")) and not args.get("customer_key"):
         raise PolicyError("Customer-context plans require explicit customer identity checkpoints")
     if args.get("resume_token"):
         record = state["plans"].get(args["resume_token"])
@@ -920,7 +932,7 @@ async def _execute_plan(args, context):
             record["uncertain_step"] = active_path
         error = {"code": code, "step_id": active_path,
                  "message": str(exc) if isinstance(exc, (NavigationStop, PolicyError)) else "Browser operation failed; inspect the verified partial state"}
-    output = {"status": status, "plan_id": record["plan_id"], "task_id": args["task_id"],
+    output = {"status": status, "plan_id": record["plan_id"], "task_id": args["task_id"], "tab_id": tab_id,
               "plan_hash": digest, "resume_token": token, "completed_steps": len(record["completed"]),
               "results": list(record["results"]), "last_verified_state": dict(record["last_verified"]),
               "uncertain_step": record["uncertain_step"], "metrics": counters,
@@ -947,11 +959,11 @@ async def execute_navigation(name, args, context, policy=None):
     if name == "browser.recon":
         snapshot = await _snapshot(page, context, args.get("max_elements", 60), args.get("max_text_chars", 1200))
         tokens = set(re.findall(r"[a-z0-9]+", args.get("goal", "").lower()))
-        routes = [link for link in snapshot["links"] if link["same_origin"]]
+        routes = [link for link in snapshot["links"] if fast_mode(context.get('config', {})) or link["same_origin"]]
         for route in routes:
             route["relevance"] = len(tokens & set(re.findall(r"[a-z0-9]+", (route["label"]+" "+route["url"]).lower())))
         routes.sort(key=lambda route: (-route["relevance"], route["url"], route["label"]))
-        snapshot["documents"] = [link for link in snapshot["links"] if link["same_origin"] and (link["document"] or link["download"])]
+        snapshot["documents"] = [link for link in snapshot["links"] if (fast_mode(context.get('config', {})) or link["same_origin"]) and (link["document"] or link["download"])]
         site_map = {"schema_version": "1", "origin": snapshot["origin"], "source_url": snapshot["url"],
                     "observed_at": snapshot["observed_at"], "expires_at": snapshot["observed_at"]+1800,
                     "scope": "ephemeral_authorised_session", "routes": routes[:40], "page_purpose": snapshot["headings"][:3],

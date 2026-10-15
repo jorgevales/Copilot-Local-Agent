@@ -18,7 +18,7 @@
       "purpose": "Reading guide, scope, evidence labels and completeness boundary.",
       "recommended_reading_order": 1,
       "required": true,
-      "sha256": "810e851a55e34631129ab6ad26cfb3c9fc63a4326da9f20e052b170ee5fb8b7f",
+      "sha256": "a0fa314a6fd6708bbf4627e624f33a996ede1208501fe18ce69eab2735277b1d",
       "source_files_represented": [
         "README.md"
       ]
@@ -33,7 +33,7 @@
       "purpose": "Self-contained purpose, architecture, execution path, trust boundaries and operational assumptions.",
       "recommended_reading_order": 2,
       "required": true,
-      "sha256": "f6d55d1fe829e67b2a9ae4e61fd77d25eb14a83bb48974b8640aacaa2ffd3220",
+      "sha256": "d1482f0300f71d868355041df35a36ee788769214a7f428eaa00e529fb20011d",
       "source_files_represented": [
         "Launcher.ps1",
         "README.md",
@@ -56,7 +56,7 @@
       ]
     },
     {
-      "bytes": 148145,
+      "bytes": 149276,
       "content_category": "generated source-symbol and Graphify summary",
       "content_treatment": "verbatim sections are source-bounded; generated analysis and summaries are explicitly labeled",
       "exclusions_or_summarization": "See package-level exclusions and per-source treatment records.",
@@ -65,7 +65,7 @@
       "purpose": "Python module/symbol/import inventory, summarized contracts and traceable Graphify relationship evidence.",
       "recommended_reading_order": 3,
       "required": true,
-      "sha256": "b2668820a5a1bdcd10904245a42d71322a2e4ec1e1136deddc3ad3d2344e5b37",
+      "sha256": "e99a751abe7afbe18be10d58ee533658f46058faa048854617a1b61c1c9d37b8",
       "source_files_represented": [
         "Launcher.ps1",
         "Run Tests.cmd",
@@ -127,6 +127,7 @@
         "copilot_agent/reconciliation.py",
         "copilot_agent/research_permissions.py",
         "copilot_agent/reused_browser.py",
+        "copilot_agent/session_mode.py",
         "copilot_agent/session_setup.py",
         "copilot_agent/setup_resources.py",
         "copilot_agent/site_knowledge.py",
@@ -194,6 +195,7 @@
         "tests/test_orchestrator.py",
         "tests/test_outbound_results.py",
         "tests/test_package_terminal_flow.py",
+        "tests/test_permissive_mode.py",
         "tests/test_persistence.py",
         "tests/test_protocol_state.py",
         "tests/test_reconciliation.py",
@@ -217,7 +219,7 @@
       ]
     },
     {
-      "bytes": 223055,
+      "bytes": 222137,
       "content_category": "verbatim source documentation bundle",
       "content_treatment": "verbatim sections are source-bounded; generated analysis and summaries are explicitly labeled",
       "exclusions_or_summarization": "See package-level exclusions and per-source treatment records.",
@@ -226,7 +228,7 @@
       "purpose": "Verbatim project README and docs sources with explicit source boundaries.",
       "recommended_reading_order": 4,
       "required": true,
-      "sha256": "f0bd870b1a0e29fa37d33f03dc118f34e1b798a9d8007c43291bc5b4ad0c343e",
+      "sha256": "dd489d35088adf68fb7bb82123eb019ab03261162e9a8b94f185448bdc2a5a93",
       "source_files_represented": [
         "README.md",
         "agent_ui/README.md",
@@ -300,7 +302,7 @@
       ]
     },
     {
-      "bytes": 73908,
+      "bytes": 74567,
       "content_category": "generated manifest",
       "content_treatment": "generated metadata; SHA-256 is omitted for the manifest itself because it would be self-referential",
       "exclusions_or_summarization": "Self size is recorded; self hash is omitted.",
@@ -335,7 +337,7 @@
   "project": "Copilot Local Agent",
   "project_path_in_workspace": "Scripts and projects/Copilot Local Agent",
   "source_coverage": {
-    "eligible_text_source_count": 212,
+    "eligible_text_source_count": 214,
     "summarized_or_catalogued_sources": [
       "agent_ui/runtime.py",
       "agent_ui/tests/test_launch_ui.py",
@@ -394,6 +396,7 @@
       "copilot_agent/reconciliation.py",
       "copilot_agent/research_permissions.py",
       "copilot_agent/reused_browser.py",
+      "copilot_agent/session_mode.py",
       "copilot_agent/session_setup.py",
       "copilot_agent/setup_resources.py",
       "copilot_agent/site_knowledge.py",
@@ -469,6 +472,7 @@
       "tests/test_orchestrator.py",
       "tests/test_outbound_results.py",
       "tests/test_package_terminal_flow.py",
+      "tests/test_permissive_mode.py",
       "tests/test_persistence.py",
       "tests/test_protocol_state.py",
       "tests/test_reconciliation.py",
@@ -561,10 +565,10 @@
       "sha256": "1ffe5a8dcdfdfb42428e8fa21abf923dac2b1625684d53ac07aba3a6e193a6e9"
     },
     {
-      "bytes": 13211,
+      "bytes": 13219,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "agent_ui/tests/test_launch_ui.py",
-      "sha256": "b88ac8217f663bcc4fac28a8b56547567afee703c6cf6629e25f27943334c7f8"
+      "sha256": "698931a18dd621f5e52197b3c7fa2fd69c81cb7f9ba6eee5a5dfe7ce2aa6aeee"
     },
     {
       "bytes": 2430,
@@ -591,16 +595,16 @@
       "sha256": "ea9952eb14194bf4a7b519379001be1193861eac17dc5da7bfcee80b79048abf"
     },
     {
-      "bytes": 33868,
+      "bytes": 33895,
       "content_treatment": "summarized_entrypoint_or_module_path; exact source hash recorded",
       "path": "agent_ui/web/app.js",
-      "sha256": "18506d94dc5357bd9e02e0ca8b97cbf9b6caaef57b716ccb73b1846056907846"
+      "sha256": "3a8a30ee1f1232e7fa29981814f9c63e2369b3cb5c63662544a6cc8ce66e3f28"
     },
     {
-      "bytes": 6985,
+      "bytes": 6989,
       "content_treatment": "summarized_entrypoint_or_module_path; exact source hash recorded",
       "path": "agent_ui/web/index.html",
-      "sha256": "ef560aeb1c2de975365d56ea0f88a0ec730ab5597f475c39b751b35a2f09d326"
+      "sha256": "b0fcdb0175c6ad9b32a8de0f02030080cc4d1f1f28e2be654cbd0af897fb4109"
     },
     {
       "bytes": 23043,
@@ -645,16 +649,16 @@
       "sha256": "47c38e9ee6353b2d85889c239fb5671560aa9bde08b379e416bb1c5efc838ab8"
     },
     {
-      "bytes": 50754,
+      "bytes": 50524,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/app.py",
-      "sha256": "4edc6a0cf8bf540dc08eca602924520a12cc027b1d20d80b3af660e4c3d66729"
+      "sha256": "c4d59be8b27d7ee01e0be3212acbdb527378855f3311ce0857b61b8371fa0e9a"
     },
     {
-      "bytes": 17181,
+      "bytes": 16910,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/approvals.py",
-      "sha256": "be5bab06bbfeee6fc4a6f145e96b6ff9396d5e955b693e7e57b6dd408995bdb2"
+      "sha256": "f47270c8500b0796b2dd6d63422ce883633bd7259189a079cbe1b4e4a31460bf"
     },
     {
       "bytes": 21970,
@@ -669,16 +673,16 @@
       "sha256": "2d99320f2dea00cf7f5f8ffb8fadf2dddad6502796017512e73bec4c98540263"
     },
     {
-      "bytes": 117844,
+      "bytes": 118146,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/automation_packages.py",
-      "sha256": "ffc30a46ca3e3d9682a96e5482d143623ee7dfd9dbdbb10e0b266d41f1d36c12"
+      "sha256": "c363f2aaff859df0a314b30f6d0e17b2919eb9604b24abfc185e9381621bf6a7"
     },
     {
-      "bytes": 102314,
+      "bytes": 103293,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/browser.py",
-      "sha256": "37cfa27cbd129f7b3458cb19eb1240c285f6b9feac205531e3d44c5f18af0b21"
+      "sha256": "71745a8f9011f3376978dba21de796d51a4c757e0131b0e4245ac98e2d4009c1"
     },
     {
       "bytes": 15540,
@@ -687,10 +691,10 @@
       "sha256": "8a266775c18a5d769454a80431f3f71fde14ff731566db7acb0a4b1d6c7f1702"
     },
     {
-      "bytes": 33477,
+      "bytes": 33539,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/code_runner.py",
-      "sha256": "9d8d18ffa8dd9ef674723821f0dfa1f8b14bda13cf57eeb89851669fbc0702ff"
+      "sha256": "4b733ac0bee8658bb5ec886416f39337bd84c54b8f8e1f9f6eb980c87f50deb1"
     },
     {
       "bytes": 12663,
@@ -825,22 +829,22 @@
       "sha256": "708bcc44b3b1a8734776b730a3180ee69be62d161c58cd1e77a1c6f42f413d77"
     },
     {
-      "bytes": 11944,
+      "bytes": 12597,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/local_navigation.py",
-      "sha256": "e3ce3546bb42ac7a987b16022004e52df36ad031668a5a8f3dbf31f0f027cd6d"
+      "sha256": "34486ec2a798cc2cb1d605c367860967dadd9913bc3fffdb731af06183524605"
     },
     {
-      "bytes": 18546,
+      "bytes": 18698,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/local_python_runner.py",
-      "sha256": "8fd63c93203f7487d9588fac8e5382618ccc9daf54ff2970935555fe55f4fe37"
+      "sha256": "e6c427d666f888b7147ff7fcca38c1f2564b5e6e27a5be3a169100f567ccb5c1"
     },
     {
-      "bytes": 19926,
+      "bytes": 20988,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/local_python_worker.py",
-      "sha256": "ebf6f750a4d65291f90d0961930c64d3a9bde7ecbe9de37c148966829f6137e6"
+      "sha256": "262f68dad69b028109793fa4d5769121913dc7437f64c554b8b0624bbfaa8199"
     },
     {
       "bytes": 2125,
@@ -849,10 +853,10 @@
       "sha256": "6b4d5842ff1dcdea56c823accaccc5e8ea17093a21775d027a67196dde7da092"
     },
     {
-      "bytes": 155239,
+      "bytes": 156690,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/orchestrator.py",
-      "sha256": "d7181c0f9443c48f6e47849df90f25eeea389b87a33726a68dfa83365a0aa6e1"
+      "sha256": "b26e34f38def18b89dfaea53be550dbff321198ff6526a82cf44b45a484b0596"
     },
     {
       "bytes": 7484,
@@ -879,10 +883,10 @@
       "sha256": "ca489e13f012cce7ebae3e2c056d01f73cf773c6bca88af1d4498ab712f5f17f"
     },
     {
-      "bytes": 39936,
+      "bytes": 42448,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/prompts.py",
-      "sha256": "a1e8b11b00875f3ca3fd10aa32c92ba4dab8b11a38a640468ec976797884bbbb"
+      "sha256": "839fae915c43bce55a79717e570b1cb810fcf2e9aa3276b3f67ce7102b571fdc"
     },
     {
       "bytes": 12893,
@@ -891,10 +895,10 @@
       "sha256": "99dd427461d87487aa270f6bbe0c33b8e960520b39aee5ad524cfee486fb7583"
     },
     {
-      "bytes": 16769,
+      "bytes": 19440,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/reconciliation.py",
-      "sha256": "e5acaccf6d14d483eed08871ae31e9933989ca6d05d49fafb134d00be582ac98"
+      "sha256": "9336c4f9f562b69a451387169773ed45d89960e9940093f66868898d35fd8066"
     },
     {
       "bytes": 25669,
@@ -909,6 +913,12 @@
       "sha256": "0cc9ac4aff52872c0c67c4634fad99117a4d5723a4be4fd06d0fade550174776"
     },
     {
+      "bytes": 1676,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "copilot_agent/session_mode.py",
+      "sha256": "54db1d1180d0cd01040084a1a9f785c03e188adeee80cef25e30770c4ba4b4e8"
+    },
+    {
       "bytes": 6370,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/session_setup.py",
@@ -921,10 +931,10 @@
       "sha256": "19c23691c38503272176225443d74804364fae962d4a9bf2e37fa7877bad852a"
     },
     {
-      "bytes": 51519,
+      "bytes": 51932,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/site_knowledge.py",
-      "sha256": "d673b08c63005a11d64268b71482c8f3f2b24907838407dd671257f84036a777"
+      "sha256": "690dd6b845a7734992c0335fd571f2c492564da0c8e72eb2c84ba784f3fb9762"
     },
     {
       "bytes": 24720,
@@ -957,22 +967,22 @@
       "sha256": "24a690df72702ad6320f8a25c72dae6bb06c92fee96366e27640f87ff003b948"
     },
     {
-      "bytes": 90691,
+      "bytes": 92940,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/tools.py",
-      "sha256": "94bfc7a95ae8decc8f7db15daee6dd1fe9d729b78f6cac06ded4327231522a60"
+      "sha256": "0398c1b585ae53a665560541049f03752cd1f64cc9e07503c8d146ac240f72d5"
     },
     {
-      "bytes": 38270,
+      "bytes": 38694,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/web_documents.py",
-      "sha256": "9fc06e4032351f6ed8d7a614b4c8e86075efc85684e7e4f1afeb58e9faf22a7f"
+      "sha256": "6dccd8079338b5d3c7971485b495307e371e8eab1ba7704a4283b81180eeb430"
     },
     {
-      "bytes": 60530,
+      "bytes": 61738,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "copilot_agent/web_navigation.py",
-      "sha256": "7f7ac5e6c2af931318d808079621b38f826cda6049ace7e68134ebec5309782b"
+      "sha256": "0e753515cdaa6da2fa309efa35b7d12f0f7f31495762fd6a738b91f8e856f5c0"
     },
     {
       "bytes": 25586,
@@ -1017,10 +1027,10 @@
       "sha256": "6e09474326eb7a3baa83634097e0e43739b00712e7da30d665042194c5bf0429"
     },
     {
-      "bytes": 3275,
+      "bytes": 2990,
       "content_treatment": "verbatim_text_embedded",
       "path": "docs/BUSINESS_DATA_WORK.md",
-      "sha256": "e660eaa2798339d35ec54c3f4667e399ccc87de1a8f766d06cec181f77c5ea11"
+      "sha256": "e4a91995a8a8d0a6579cf9ed3772d0e13b4907951b49e7ceabac5cb4624bfd15"
     },
     {
       "bytes": 3636,
@@ -1095,10 +1105,10 @@
       "sha256": "bc80e483fbdb8e6d92da077eff80d1f2d0e3f3f28ca97d62b740ea6d5d49beae"
     },
     {
-      "bytes": 4514,
+      "bytes": 4422,
       "content_treatment": "verbatim_text_embedded",
       "path": "docs/LOCAL_WEBSITE_DISCOVERY.md",
-      "sha256": "78f1bdc929dcd748d8566806151745101a8444f6bcd96a63c52f507ba04c0c29"
+      "sha256": "b151117d954de6f8948b2debd1ac8ab7f60802a76ea5cec663769f458bfce362"
     },
     {
       "bytes": 9145,
@@ -1119,10 +1129,10 @@
       "sha256": "ee0a1371ee3f5e56ecfd7c172c64fe6b57f5f6d77087896c15c293f7892f20f6"
     },
     {
-      "bytes": 2812,
+      "bytes": 2524,
       "content_treatment": "verbatim_text_embedded",
       "path": "docs/SUPERVISED_SESSIONS.md",
-      "sha256": "9bbec781eb4c15c83428fd38763d444671c24df2d8c67205b299c00c8f5f1df1"
+      "sha256": "5798ef8990ff8ac6523af531f3b2a761e10c8200a93d555b79dcacbf1076130d"
     },
     {
       "bytes": 13933,
@@ -1281,10 +1291,10 @@
       "sha256": "949553fecd97f0122177b2ce8391d932eeeada87c50ffb905ae4b5fa83f80eab"
     },
     {
-      "bytes": 17698,
+      "bytes": 17445,
       "content_treatment": "verbatim_text_embedded",
       "path": "README.md",
-      "sha256": "40c341b3afbc655070c3dbc273a9d7514f8b826a8c52321ea2fbe9b333d953f9"
+      "sha256": "dfad40a5e26eb7a6f20f8f2ac985d5adcde22ca6907da73ba935119b019c4608"
     },
     {
       "bytes": 1819,
@@ -1503,10 +1513,10 @@
       "sha256": "1bf3eb00703aa2f347936a3e85d9d52449b9cb4005f38fb92200d55ebb3f01b4"
     },
     {
-      "bytes": 13044,
+      "bytes": 13056,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "tests/test_automation_approval.py",
-      "sha256": "af8be39d2ad7f4d7f7ab5e802134259a916639ea09168f30f3e711d8d83db0ff"
+      "sha256": "067621097865d9026d3359c24ce61da4f5e2060f01cae7022f1624d6e1c71024"
     },
     {
       "bytes": 114947,
@@ -1521,10 +1531,10 @@
       "sha256": "bf2ef10b6acf6cec3407671ebdb988816cb9afb38c405b5fc6af35d89cb51a66"
     },
     {
-      "bytes": 3615,
+      "bytes": 3643,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "tests/test_browser_plan_extensions.py",
-      "sha256": "7d5e25e0821d7f4c5e27d4b0cf2c6f3fd3311dd9e92a51152d93d57f8dbb6a94"
+      "sha256": "abb1bb89544d292134527656700e3ff10674a4f86a9bb71f5db62ae9815164a1"
     },
     {
       "bytes": 1746,
@@ -1695,6 +1705,12 @@
       "sha256": "dc1ef1b81e11e692ceead5a1ad4a576ae0cc3c945cdedddd576baef433e9f3bd"
     },
     {
+      "bytes": 10049,
+      "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
+      "path": "tests/test_permissive_mode.py",
+      "sha256": "9509cde880486ba2cba9feaca0c998887e677924aca502d63a14941fc92d8427"
+    },
+    {
       "bytes": 2379,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "tests/test_persistence.py",
@@ -1707,10 +1723,10 @@
       "sha256": "f4426c228d3e2d9377391c6d0ed0f758f92b413a820093b26c8a3c16fcf4e3c4"
     },
     {
-      "bytes": 18529,
+      "bytes": 20157,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "tests/test_reconciliation.py",
-      "sha256": "6e133a49e4d482abd4538e6816ed03f3630397b0b89224e4671c7285a23967fb"
+      "sha256": "16ba0193bf9bbfd17d9c3cb8f31c738016087c1d69a869f22d7494a90ce14fcd"
     },
     {
       "bytes": 8195,
@@ -1779,10 +1795,10 @@
       "sha256": "7fc3337dc3d70983c76c1e0a696119c38f969455c2b9d6753ffefd0341d0dd7b"
     },
     {
-      "bytes": 33580,
+      "bytes": 35035,
       "content_treatment": "summarized_ast_imports_symbols_and_graph_relationships",
       "path": "tests/test_web_navigation.py",
-      "sha256": "735e17739570d0cbb8ea5b3cbd4399bc3298bad94dd4832324fd038301b18bb3"
+      "sha256": "660160f263ec21c873efde9b71367146babbabca95ecc56d0a3814bb3ee40875"
     },
     {
       "bytes": 8710,

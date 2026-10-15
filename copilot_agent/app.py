@@ -552,26 +552,23 @@ async def run(args):
     if getattr(config, '_local_knowledge_test_mode', False):
         system('Direct reads and new-file/folder creation in the explicit local test store are granted for this run; deletion or overwrite requires separate confirmation.')
     elif not getattr(config, '_automation_test_mode', False):
-        system('Direct reads and new-file/folder creation in Discoveries knowledge are granted for this run; deletion or overwrite requires separate confirmation.')
+        system('The fast session option permits ordinary file reads and edits without individual approval; file deletion remains blocked.')
     if config.customer_data_work:
         system('Customer and company data: local discovery, reads and requested business artifacts are enabled for every authorized customer.')
     system('Browser: Visible. Non-visible Copilot operation has not passed acceptance and is unavailable.')
     system('Permitted file roots: ' + ', '.join(Path(root).name for root in config.allowed_roots))
     system('Agent-owned writes are restricted to the explicit local C: test store.' if getattr(config, '_local_knowledge_test_mode', False)
            else 'Agent-owned writes are restricted to the isolated proof workspace.' if getattr(config, '_automation_test_mode', False)
-           else 'Agent-owned writes are restricted to the S: share; no C: or OneDrive storage fallback is permitted.')
-    system('Third-party browser domains: ' + ', '.join(config.allowed_domains))
-    system('Starting this supervised session authorizes valid local plans and revisions without individual approval prompts. Stop remains available.')
+           else 'Runtime and saved website knowledge use the shared Discoveries store. The fast session option permits ordinary file reads and edits elsewhere, subject to OS access.')
+    system('The fast session option permits navigation across websites without a domain allowlist. Sign in manually when needed.')
+    system('One fast session option skips package quality review and individual plan approvals. Stop remains available.')
     system('Useful Findings are saved on any valid turn; their file is attached every ten messages.')
     system('File delivery: actual Copilot UI downloads and verified ZIP extraction; no Created-folder monitoring.')
     isolated_proof = getattr(config, '_automation_test_mode', False)
-    from .session_setup import choose_package_mode, guided_discovery
-    await choose_package_mode(config, ask, system,
-        supplied=getattr(args, 'package_mode', None) or
-                 ('reviewed' if isolated_proof or args.yes_setup and _UI_ASK is None else None))
-    confirmed = False if isolated_proof else bool(args.yes_setup) or (await ask('Allow all valid local plans and revisions without individual approval for this supervised session [Y/n]? ')).strip().lower() in {'', 'y', 'yes'}
-    config._local_navigation_confirmed = confirmed
-    config._supervised_session = confirmed
+    from .session_setup import guided_discovery
+    from .session_mode import START_PROMPT, configure_session
+    confirmed = False if isolated_proof else bool(args.yes_setup) or (await ask(START_PROMPT)).strip().lower() in {'', 'y', 'yes'}
+    configure_session(config, confirmed)
     state.data['visible'] = True
     if not confirmed and not isolated_proof:
         state.data['status'] = 'cancelled'
@@ -860,10 +857,10 @@ def main():
     parser.add_argument('--port', type=int)
     parser.add_argument('--profile', type=Path)
     parser.add_argument('--model', help='Exact currently displayed UI label')
-    parser.add_argument('--yes-setup', action='store_true', help='Accept supplied browser settings; does not approve tools or scripts')
+    parser.add_argument('--yes-setup', action='store_true', help='Accept supplied settings and the fast full-access session grant; isolated proof remains separate')
     parser.add_argument('--setup-only', action='store_true', help='Verify configured per-user storage and Edge without opening Copilot')
     parser.add_argument('--package-mode', choices=['reviewed', 'immediate'],
-                        help='Session-only package review choice; immediate authorizes continuous downloads and package runs')
+                        help='Legacy compatibility option; normal startup uses one fast full-access session choice')
     parser.add_argument('--discover-first', action='store_true',
                         help='Show the guided local Crawl4AI website discovery even with --yes-setup')
     parser.add_argument('--isolated-test-workspace', type=Path, help=argparse.SUPPRESS)

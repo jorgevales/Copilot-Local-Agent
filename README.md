@@ -1,22 +1,19 @@
 # Copilot Local Agent
 
-Startup can authorize **all valid plans and revisions for one supervised session**,
-without individual approval prompts. Small repairs may keep the same approach;
-unnamed controls support role, CSS, XPath and explicit positions. See
-[supervised continuous execution](docs/SUPERVISED_SESSIONS.md).
+Startup offers **one fast full-access option for this session**: skip package quality
+review and individual plan approvals, read and edit ordinary accessible files,
+and navigate across websites without domain or customer-category bindings.
+File deletion stays blocked. Small corrections may retry the same approach;
+unnamed controls support role, CSS, XPath and explicit positions. Quarantined
+owned tabs close after a usable replacement is established. See
+[session behavior](docs/SUPERVISED_SESSIONS.md).
 
-Customer and company data work is enabled by default. Authorized customer reads,
-discovery and requested artifacts use the normal local tools, with no separate
-customer-category gate. Customer navigation and declared internal package hosts
-reuse applicable session approvals. See [business data work](docs/BUSINESS_DATA_WORK.md).
-
-Startup now offers **review packages** or **skip quality review and run
-continuously for this session**, followed by a plain-language local Crawl4AI
-website guide. Sign in manually, title each website's knowledge, explore once
-or keep refreshing, then pass saved shared-storage paths to the agent. See the
-[local discovery guide](docs/LOCAL_WEBSITE_DISCOVERY.md). Crawl4AI is also directly
-callable through `crawl4ai.crawl` and `crawl4ai.read`, using the connected Edge
-session for public or internal websites without fixed page/depth ceilings.
+The local Crawl4AI guide lets you sign in manually, title each website's knowledge,
+explore once or keep refreshing, then pass saved shared-storage paths to the
+agent. See [local discovery](docs/LOCAL_WEBSITE_DISCOVERY.md) and
+[business data work](docs/BUSINESS_DATA_WORK.md). Crawl4AI is directly callable
+through `crawl4ai.crawl` and `crawl4ai.read`, using connected Edge for public or
+internal websites without fixed page/depth ceilings.
 
 Edge startup now isolates native ownership queries and retries failed new-session
 launches through direct installed Edge and verified S:/UNC profile spellings.
@@ -75,7 +72,7 @@ Tool/code approvals offer **1: deny, 2: once, 3: plan** for the exact displayed 
 
 ## Configuration
 
-Run the project from its S: checkout. Settings, sessions, profiles, downloads and knowledge use the `Discoveries knowledge` folder beside (one level above) the project root; S: is resolved to its live UNC filesystem identity before use. A configured C: or OneDrive `storage_dir` is redirected to that canonical S: location. File tools cannot write to C:; one run confirmation grants local reads and new-file/folder creation within Discoveries knowledge, while deletion or overwrite still requires separate confirmation. Copilot's own UI is controlled separately. Root expansion is a user configuration decision; Copilot cannot expand it.
+Run the project from its S: checkout. Settings, sessions, profiles, downloads and knowledge use the `Discoveries knowledge` folder beside (one level above) the project root; S: is resolved to its live UNC filesystem identity before use. A configured C: or OneDrive `storage_dir` is redirected to that canonical S: location. The fast session option permits ordinary file reads and edits outside the configured roots, including other OS-accessible drives. Shared runtime and durable knowledge storage remain authoritative. File deletion, credential stores and browser control/profile protection remain enforced.
 
 Public operation reuse is an opt-in preview. Set `operation_reuse` to `true` only with `persistent_graph` enabled. An explicitly approved `operation.learn` call can derive one public JSON GET operation from two already-observed URLs and validate it with a third unseen input. Later `operation.call` requests use the existing pinned public-HTTPS transport without opening the browser or returning to Copilot UI. This path never accepts authentication material, cookies, headers, non-GET methods, private destinations or automatic writes. See [API Anything integration](docs/API_ANYTHING_INTEGRATION.md).
 

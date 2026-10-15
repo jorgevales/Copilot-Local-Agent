@@ -1,44 +1,39 @@
-# Supervised continuous execution
+# Fast full-access sessions
 
-Starting a normal visible agent run asks once: allow all valid local plans and
-revisions without individual approval for this supervised session. Accepting
-authorizes current and newly proposed valid plans, generated code, packages,
-downloads, file-access grants, attachment transfers and consequential plans.
-Each execution still receives its current prepared-plan hash and operational
-audit record. Individual approval dialogs, including consequential confirmations,
-are satisfied by this one session authorization.
+Normal startup asks one question: start a fast full-access session, skipping
+package quality review and individual plan approvals? Accepting grants both for
+this session. There is no second package-mode question. `--yes-setup` accepts
+this same startup grant; the legacy `--package-mode` argument no longer adds a
+separate startup decision. Isolated proof mode retains its own approvals.
 
-The grant exists only in the live ApprovalManager. It is absent from serialized
-configuration and session grants, is revoked on close, and is not restored by a
-new process or inherited by a new conversation's fresh manager. Isolated proof
-mode retains its separate explicit approvals. The startup package quality-review
-choice remains independent; choose immediate package mode to skip optional review.
+The grant covers valid current plans, revisions, packages, generated local Python,
+attachment transfers, downloads and consequential plans. Ordinary accessible file
+reads and edits can cross configured directory roots without another grant.
+Website navigation, internal HTTP/non-default ports and owned popups are allowed
+without an origin allowlist or task/customer tag restriction. Knowledge namespaces
+can be inferred automatically. Shared runtime and durable discovery storage still
+use Discoveries knowledge and its S:/UNC fallbacks.
 
-Supervised runs may implement a newly proposed workflow through registered
-`code_runner` using `local_python` and its complete declared scope. Task-routing
-recommendations do not force a delivered ZIP before a valid local code/file plan
-can run. Unknown tool names still receive a correction with the available
-catalogue; executable proposals use registered tools rather than arbitrary
-evaluation of unvalidated chat text. Keep `approval_required` aligned with each
-tool's catalogue classification; the session supplies approval automatically.
+File deletion is blocked in the registered file tools and managed Python worker.
+Credential stores, browser profiles, manual sign-in, OS permissions, valid tool
+schemas, Stop and uncertain-effect reconciliation remain active. Archive structure,
+file identity and executable contracts still have to be usable; skipping quality
+review does not make a corrupt ZIP executable. Managed Python is not an OS sandbox
+for arbitrary hostile native code. The grant is in memory, absent from serialized
+configuration and revoked on close; fresh conversations do not inherit it.
 
-Unnamed elements support observed CSS, explicit `xpath`, `role` without `name`,
-and an explicit zero-based `nth`. Without an explicit position, ambiguous
-matches remain an error so the agent can inspect and correct its locator.
+New workflows may use registered `code_runner` with `local_python`. Unknown tool
+names receive the available catalogue so the agent can correct its call. Observed
+CSS, explicit XPath, role without name and zero-based `nth` handle unnamed controls.
 
-Recovery favors a small justified repair to the same approach: fix a selector,
-argument, path, timeout or script typo, preserve successful steps, and explain
-why the change addresses the observed failure. The runtime already distinguishes
-changed arguments from identical failed actions. Changing only a call ID does
-not permit repeating the unchanged failure. Uncertain effects require fresh
-reconciliation before replay; submitted messages retain duplicate-send protection.
+Recovery favors small repairs to selectors, arguments, paths, timeouts or scripts,
+preserving successful steps. A failure proven not_started or explicitly without
+uncertain side effects can be retried without requiring a new technique. Uncertain
+effects must be reconciled before replay; submitted messages retain duplicate-send
+protection. Recovering an unknowable browser effect verifies a fresh checkpoint,
+then closes the quarantined owned tab without crediting the failed action as
+completed. Failed closes stay queued for the next exchange. Chat, current recovery
+and unrelated tabs stay open.
 
-Manual sign-in, credentials, actual OS permissions, tool schemas, declared
-execution scope/resource checks, observed customer identity and Stop remain
-active. An unavailable dependency, malformed call or missing access returns an
-actual tool error for a corrected proposal; supervision is not proof of success.
-
-Validation covers changing plans without prompts, fresh-confirmation packages,
-ephemeral revocation, mismatched prepared-code rejection, focused repaired calls,
-and actual browser execution against unnamed synthetic controls. Production
-Copilot/VDI acceptance remains a separate live check.
+Tests use synthetic files, a real managed Python worker and local browser fixtures.
+Production Copilot/VDI acceptance remains a separate live check.

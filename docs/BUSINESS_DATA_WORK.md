@@ -29,21 +29,17 @@ attachments before Copilot submission. Existing file/attachment/resource limits
 still apply; exceeding a real transport budget reports an unsent result rather
 than claiming completion from a truncated preview.
 
-Navigation-only customer plans reuse the approved origin/profile session scope.
-Automation session grants cover identity-checked customer summaries and
-navigation-only plans, plus declared canonical internal/private hosts. Result-bound
-URLs are still checked against the inspected stage/package hosts at runtime;
-ambiguous numeric destinations remain invalid. A package may use `research.perform`
-under an already active matching durable grant. Changing grants remains a
-dedicated management action. Optional durable grants still enforce their own
-requested limits, expiry and revocation; ordinary authorized reads do not need one.
+In a fast full-access session, navigation and package URLs may cross websites,
+customer/task tags do not gate owned-tab access, and optional generic knowledge
+namespaces need no manual binding. Ordinary reads do not require a durable research
+grant. Explicitly selected durable grant tools keep their own contract.
 
-The existing startup choice still controls reviewed versus immediate package
-execution, for that session only. Manual sign-in, credential protection, exact
-hashes and record identity, stop controls, allowed file destinations,
-consequential-action confirmation and uncertain-effect reconciliation remain
-active. These protect the operation being performed and do not reject work
-because it involves a customer or the company.
+One startup grant skips package quality review and individual plan approvals.
+Ordinary accessible file reads/edits may cross configured roots; deletion remains
+blocked. Manual sign-in, credentials, valid executable contracts, actual OS access,
+Stop and uncertain-effect reconciliation remain active. Record identity checks in
+specialized summary tools prevent attributing one record's facts to another;
+generic reads remain available for broader discovery.
 
 Synthetic tests cover direct customer-tool dispatch, complete long results,
 customer session navigation, internal package hosts and continuing secret

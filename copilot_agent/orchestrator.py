@@ -50,6 +50,11 @@ class Orchestrator:
         self.approvals = ApprovalManager(state, approval_decider, self.feedback)
         self.approvals.fast_package_session = bool(getattr(config, '_continuous_package_session', False))
         self.approvals.supervised_session = bool(getattr(config, '_supervised_session', False))
+        from .session_mode import configure_session
+        self.approvals.on_revoke = lambda: configure_session(self.config, False)
+        from .local_navigation import SessionFileAccessPolicy
+        from .session_mode import fast_mode
+        self.policy = SessionFileAccessPolicy(self.policy, lambda: fast_mode(self.config))
         self.process_registry = ManagedProcessRegistry(state.directory)
         self.live_seen = {}
         self.navigation_domains = set()  # Fresh local browser approval only; never inherited on restart.
@@ -875,8 +880,12 @@ class Orchestrator:
         return target
 
     async def _send(self, kind: str, content, extra_attachments=()):
-        self.config._supervised_session = self.approvals.supervised_session
+        from .session_mode import configure_session, fast_mode
+        if self.approvals.supervised_session or fast_mode(self.config):
+            configure_session(self.config, self.approvals.supervised_session)
         await self._finish_next_turn_preparation()
+        from .reconciliation import close_quarantined_tabs
+        await close_quarantined_tabs(self.browser)
         prepared = self._prepared_initialization if kind == 'initialize' and not extra_attachments else None
         if prepared is not None:
             request_id, text, attachments = (prepared['request_id'], prepared['text'],
@@ -1155,7 +1164,11 @@ class Orchestrator:
             prior_failure = next((c for c in self.state.data['calls'].values()
                                   if c.get('action_hash') == action_hash and c['status'] == 'completed'
                                   and not c.get('result', {}).get('ok')), None)
-            if prior_failure:
+            from .session_mode import fast_mode
+            prior_detail = (prior_failure or {}).get('result', {}).get('result', {})
+            certain_retry = fast_mode(self.config) and (prior_detail.get('side_effects_uncertain') is False
+                                                       or prior_detail.get('status') == 'not_started')
+            if prior_failure and not certain_retry:
                 if (call['name'] == 'automation.inspect'
                         and self._prior_package_review(call.get('arguments', {}).get('expected_sha256'))):
                     # Exact read-only ZIP reviews are returned from the local
@@ -2098,15 +2111,19 @@ class Orchestrator:
         return {'content': goal, 'attachments': approved or [],
                 'message_ids': [item['message_id'] for item in message_records]}
 
-    @staticmethod
-    def _browser_preparation(call):
+    def _browser_preparation(self, call):
         args = call['arguments']
         prepared = {'shared_verified_profile': True, 'javascript_enabled': True,
                     'navigation_scope': 'This browser approval also permits continued navigation, navigation-only links, inspection and bounded same-origin new tabs within approved websites for this session. Forms, searches, writes, downloads, scripts and consequential controls still require their normal approval. The grant expires with this agent session.',
                     'managed_tab_only': True, 'dependency_domains': list(args.get('allowed_domains', [])),
                     'limitations': 'Uses an owned tab in the verified Copilot Edge profile; existing site sign-ins are shared. Bounded tabs and exact approved downloads; no unrestricted hosts.'}
+        from .session_mode import fast_mode
+        if fast_mode(self.config):
+            prepared.update(navigation_scope='Session authorization covers navigation, reads and edits across websites without origin binding or individual plan approvals.',
+                            limitations='Uses owned website tabs and the existing signed-in profile. Manual login, OS permissions, valid calls and uncertain-effect reconciliation remain active.')
         if call['name'] == 'browser.open':
-            prepared.update(website_domain=URLPolicy.website_domain(args['url']), includes_subdomains=True)
+            from .session_mode import website_policy
+            prepared.update(website_domain=website_policy(self.config).website_domain(args['url']), includes_subdomains=True)
         return prepared
 
     def _delivery_result(self, name, outcome):

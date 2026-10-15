@@ -24,6 +24,7 @@ from urllib.parse import urlsplit
 
 from .state import canonical_hash
 from .policy import PathPolicy, PolicyError, URLPolicy
+from .session_mode import fast_mode, website_policy
 from .archives import ArchiveError, ArchiveService, inspect_zip
 
 
@@ -1471,7 +1472,7 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
         if reviewed_tool == "browser.tabs" and reviewed_args.get("operation") == "open":
             reviewed_url = reviewed_args.get("url")
             if isinstance(reviewed_url, str):
-                domain = URLPolicy.website_domain(reviewed_url)
+                domain = website_policy(context.get('config', {})).website_domain(reviewed_url)
                 if domain not in package_declared_domains:
                     package_declared_domains.append(domain)
             continue
@@ -1479,7 +1480,7 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
             continue
         reviewed_url = reviewed_args.get("url")
         if isinstance(reviewed_url, str):
-            domain = URLPolicy.website_domain(reviewed_url)
+            domain = website_policy(context.get('config', {})).website_domain(reviewed_url)
             if domain not in package_approved_domains:
                 package_approved_domains.append(domain)
             if domain not in package_declared_domains:
@@ -1564,17 +1565,17 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
                         stage_domains = []
                         reviewed_url = reviewed_arguments.get("url")
                         if isinstance(reviewed_url, str):
-                            reviewed_domain = URLPolicy.website_domain(reviewed_url)
+                            reviewed_domain = website_policy(context.get('config', {})).website_domain(reviewed_url)
                             if reviewed_domain not in stage_domains:
                                 stage_domains.append(reviewed_domain)
                         for domain in reviewed_arguments.get("allowed_domains", []):
                             if domain not in stage_domains:
                                 stage_domains.append(domain)
-                        destination_domain = URLPolicy.website_domain(stage_arguments["url"])
+                        destination_domain = website_policy(context.get('config', {})).website_domain(stage_arguments["url"])
                         _reject_ambiguous_numeric_host(destination_domain)
                         if _find_binding_references(reviewed_arguments.get("url")):
                             _require_browser_host(destination_domain)
-                        if not any(destination_domain == domain or destination_domain.endswith("." + domain)
+                        if not fast_mode(context.get("config", {})) and not any(destination_domain == domain or destination_domain.endswith("." + domain)
                                    for domain in stage_domains):
                             raise PolicyError("Resolved browser.open destination is outside this inspected stage's declared hosts")
                         registry.validate_call(tool_id, stage_arguments, subcontext)
@@ -1587,11 +1588,11 @@ async def execute_package(args: dict, context: dict, registry, *, code_runner_fa
                                 authorize(domain)
                         subcontext["approved_domains"] = approved_domains
                     elif tool_id == "browser.tabs" and stage_arguments.get("operation") == "open":
-                        destination_domain = URLPolicy.website_domain(stage_arguments["url"])
+                        destination_domain = website_policy(context.get('config', {})).website_domain(stage_arguments["url"])
                         _reject_ambiguous_numeric_host(destination_domain)
                         if _find_binding_references(stage["arguments"].get("url")):
                             _require_browser_host(destination_domain)
-                            if not any(destination_domain == domain or destination_domain.endswith("." + domain)
+                            if not fast_mode(context.get("config", {})) and not any(destination_domain == domain or destination_domain.endswith("." + domain)
                                        for domain in package_declared_domains):
                                 raise PolicyError("Resolved browser.tabs destination is outside this package's inspected website hosts")
                     elif tool_id in {"files.create", "files.append", "files.copy", "files.replace"}:

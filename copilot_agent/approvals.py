@@ -20,12 +20,15 @@ class ApprovalManager:
         self._package_session_grant = False
         self.fast_package_session = False
         self.supervised_session = False
+        self.on_revoke = None
 
     def revoke_session_grants(self):
         """Drop ephemeral package authority when the owning agent session ends."""
         self._package_session_grant = False
         self.fast_package_session = False
         self.supervised_session = False
+        if callable(self.on_revoke):
+            self.on_revoke()
 
     def _show(self, preview, path):
         prepared = list((preview.get('prepared_pending_plan') or {}).values())
@@ -200,8 +203,8 @@ class ApprovalManager:
                 'package hashes, tools, effects, paths, and resource scope are shown for transparency. Protected-path and '
                 'platform handoffs remain active.')
             preview['approval_scope_type'] = 'automation_package'
-            preview['choices'] = ['deny', 'once', 'plan', 'session', 'supervised']
-        preview['approval_scope'] += ' You may instead authorize all valid local plans and revisions for this supervised session.'
+            preview['choices'] = ['deny', 'once', 'plan', 'supervised']
+        preview['approval_scope'] += ' You may instead enable one fast full-access session grant covering plans and skipping package quality review.'
         if prepared_plan is not None:
             preview['prepared_pending_plan'] = prepared_plan
         path = self.state.directory / 'approvals' / (call_hash + '.json')
@@ -221,15 +224,11 @@ class ApprovalManager:
             if hasattr(decision, '__await__'):
                 decision = await decision
         else:
-            prompt_text = ('Choose 1 = Deny, 2 = Allow this exact execution once, '
-                           '3 = Allow this exact displayed plan, 4 = Allow inspected packages, 5 = Allow all valid plans for this supervised session [1/2/3/4/5]: '
-                           if package_scope else
-                           'Choose 1 = Deny, 2 = Allow once, 3 = Allow this plan, 4 = Allow all valid plans for this supervised session [1/2/3/4]: ')
+            prompt_text = 'Choose 1 = Deny, 2 = Allow once, 3 = Allow this plan, 4 = Fast full-access session (skip package and plan review; no file deletion) [1/2/3/4]: '
             prompt = self.feedback.prompt('User', prompt_text)
             decision = await asyncio.to_thread(input, prompt)
         decision = str(decision).strip().lower()
-        decision = {'1': 'deny', '2': 'once', '3': 'plan', '4': 'session' if package_scope else 'supervised',
-                    '5': 'supervised' if package_scope else 'deny'}.get(decision, decision)
+        decision = {'1': 'deny', '2': 'once', '3': 'plan', '4': 'supervised'}.get(decision, decision)
         allowed_decisions = {'deny', 'once', 'plan', 'supervised'} | ({'session'} if package_scope else set())
         if decision not in allowed_decisions:
             decision = 'deny'

@@ -37,7 +37,7 @@ class BrowserPlanExtensionTests(unittest.TestCase):
         registry.validate_call('browser.open', {'url': 'https://example.com', 'allowed_domains': ['cdn.example.com']}, self.context)
 
     def test_browser_approval_uses_the_verified_shared_session(self):
-        prepared = Orchestrator._browser_preparation({
+        prepared = Orchestrator._browser_preparation(SimpleNamespace(config={}), {
             'name': 'browser.open', 'arguments': {'url': 'https://example.com'}})
         self.assertTrue(prepared['shared_verified_profile'])
         self.assertIn('existing site sign-ins are shared', prepared['limitations'])

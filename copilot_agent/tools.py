@@ -14,6 +14,8 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from .policy import PathPolicy, URLPolicy, PolicyError, config_value, is_s_drive_path, resolve_s_drive_output
+from .session_mode import fast_mode, website_policy
+from .local_navigation import SessionFileAccessPolicy
 from .local_navigation import (SessionPathPolicy, SessionPathExtensionPolicy, SessionNavigationGrant,
                                FilesystemAccessError, filesystem_diagnostic, prepare_session_path_extension)
 from .code_runner import CodeRunner, REQUIRED, FIELDS
@@ -220,6 +222,8 @@ def configured_path_policy(config, session_dir):
 def tool_path_policy(name, context):
     policy = context.get('policy') or configured_path_policy(context.get('config', {}), context['session_dir'])
     config = context.get('config', {})
+    if fast_mode(config):
+        return policy if isinstance(policy, SessionFileAccessPolicy) else SessionFileAccessPolicy(policy, lambda: fast_mode(config))
     proof_workspace = config_value(config, '_proof_file_workspace')
     if (config_value(config, '_automation_test_mode', False) and proof_workspace
             and (name.startswith('files.') or name == 'system.disk')):
@@ -252,6 +256,8 @@ def tool_path_policy(name, context):
 def _write_target(name, args, policy, context):
     key = 'destination' if name == 'files.copy' else 'path'
     value = args[key]
+    if fast_mode(context.get('config', {})):
+        return policy.resolve(value), False
     # Outside the one-shot isolated proof mode, agent-owned file mutations
     # remain restricted to the current S: mapping.
     profile = config_value(context.get('config', {}), 'profile_dir')
@@ -521,7 +527,7 @@ class ToolRegistry:
             if s_destination is not None:
                 return {'valid': True, 's_drive_destination': s_destination}
         if name=="browser.open":
-            URLPolicy.website_domain(args["url"])
+            website_policy(config).website_domain(args["url"])
             for domain in args.get('allowed_domains', []):
                 if not isinstance(domain,str) or len(domain)>253 or not re.fullmatch(r'(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?',domain):
                     raise ValueError('Dependency hosts must be explicit plain hostnames, not URLs or wildcards')
@@ -825,14 +831,35 @@ class ToolRegistry:
             return {key: grant[key] for key in ('path', 'scope', 'extension_scope', 'approved_operations', 'session_id')}
         if name in PERMISSION_SPECS: return await execute_permissions(name,args,context)
         customer_bound = bool(args.get('customer_key') or context.get('customer_key') or context.get('research_context',{}).get('active'))
-        if (customer_bound and config_value(context.get('config', {}), 'customer_data_work', True) is not True
+        if (customer_bound and not fast_mode(context.get('config', {})) and config_value(context.get('config', {}), 'customer_data_work', True) is not True
                 and name in {'browser.customer_summary','browser.read','browser.recon','browser.structure','browser.documents'}):
             await guard_customer_read(context)
             raise PolicyError('Use research.perform for bounded, category-controlled customer reads under the matching grant')
         if name == 'browser.reconcile':
             return await reconcile_browser_call(context['session_state'], context['browser'], **args)
         if name == 'operation.quarantine':
+            quarantined = context['session_state'].data.get('calls', {}).get(args['call_id'], {})
             context['session_state'].quarantine_call(args['call_id'])
+            if str(quarantined.get('request', {}).get('name', '')).startswith('browser.'):
+                browser = context.get('browser')
+                navigation = getattr(browser, '_navigation_state', {}) or {}
+                detail = quarantined.get('result', {}).get('result', {})
+                tab_id = detail.get('tab_id', quarantined.get('request', {}).get('arguments', {}).get('tab_id', 'tab-1'))
+                affected = navigation.get('tabs', {}).get(tab_id, {}).get('page', getattr(browser, 'tool_page', None))
+                if affected is not None:
+                    pending = getattr(browser, '_quarantined_tool_pages', [])
+                    if affected not in pending:
+                        pending.append(affected)
+                    browser._quarantined_tool_pages = pending
+                if affected is not None and affected is getattr(browser, 'tool_page', None):
+                    replacement = await browser.new_tool_page()
+                    if replacement not in getattr(browser, '_tool_pages', []) or replacement in (getattr(browser, 'page', None), getattr(browser, 'chat_page', None)):
+                        raise PolicyError('Quarantine replacement must be an owned website tab')
+                    browser.tool_page = replacement
+                    navigation.setdefault('tabs', {})['tab-1'] = {'page': replacement, 'primary': True, 'task_id': None, 'customer_key': None, 'customer_verified': False}
+                if affected is not None:
+                    from .reconciliation import close_quarantined_tabs
+                    await close_quarantined_tabs(browser)
             return {'status': 'abandoned_unverifiable', 'call_id': args['call_id'],
                     'completion_credited': False, 'outcome_determined': False}
         if name == 'operation.reconcile':
@@ -1038,12 +1065,12 @@ class ToolRegistry:
             if name == "browser.open" and (page is None or page.is_closed()):
                 # A login flow can replace or close an owned tab. The approved
                 # URL is preflighted before opening another tab in this profile.
-                URLPolicy([*config_value(config,"allowed_domains",[]), *context.get("approved_domains",[])]).resolve(args["url"])
+                website_policy(config, [*config_value(config,"allowed_domains",[]), *context.get("approved_domains",[])]).resolve(args["url"])
                 page = await browser.new_tool_page()
                 browser.tool_page = page
             if page is None or page.is_closed(): raise PolicyError("Owned tool page is unavailable")
             if page is getattr(browser,"page",None) or page is getattr(browser,"chat_page",None): raise PolicyError("Copilot control page cannot be a tool page")
-            urls=URLPolicy([*config_value(config,"allowed_domains",[]), *context.get("approved_domains",[])])
+            urls=website_policy(config, [*config_value(config,"allowed_domains",[]), *context.get("approved_domains",[])])
             # Request-time enforcement also blocks redirects, subresources and
             # fetches to unapproved destinations before network access occurs.
             async def guard(route):
@@ -1060,10 +1087,12 @@ class ToolRegistry:
                     urls.resolve('https://' + domain)
                     if domain not in browser.tool_domains:
                         browser.authorize_tool_domain(domain)
-                await clear_navigation_state(browser)
+                if not fast_mode(config):
+                    await clear_navigation_state(browser)
                 await page.goto(url,wait_until="domcontentloaded",timeout=20000)
                 urls.resolve(page.url)
-                final_origin='https://' + urlsplit(page.url).hostname.lower()
+                from .reconciliation import _origin
+                final_origin = _origin(page.url)
                 bindings=context.get('site_knowledge_bindings',{})
                 same_bound_origin=final_origin in bindings
                 for field in ('task_id', 'customer_key'):
@@ -1101,7 +1130,7 @@ class ToolRegistry:
                 scope=page.frame_locator(frame_selector)
             if name=="browser.read":
                 text = await scope.locator("body").inner_text(timeout=10000)
-                return {"text": text if config_value(config, 'customer_data_work', True) is True else text[:10000]}
+                return {"text": text if fast_mode(config) or config_value(config, 'customer_data_work', True) is True else text[:10000]}
             if name=="browser.structure":
                 return {"controls":await scope.locator("body").evaluate(STRUCTURE_SCRIPT)}
             if name=='browser.frames':

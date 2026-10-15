@@ -168,6 +168,12 @@ class CodeRunner:
         destinations = []
         for value in plan["network_destinations"]:
             parsed = urlsplit(value)
+            enabled = getattr(self.policy, 'enabled', None)
+            if callable(enabled) and enabled():
+                from .session_mode import OpenWebsitePolicy
+                OpenWebsitePolicy().resolve(value)
+                destinations.append(parsed.scheme + '://' + parsed.netloc)
+                continue
             if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or
                     parsed.port not in (None, 443) or parsed.path not in ("", "/") or parsed.query or parsed.fragment):
                 raise PolicyError("Network destinations must be exact HTTPS hosts on port 443")
@@ -316,6 +322,10 @@ class CodeRunner:
 
     def prepare(self, args):
         plan = self.validate(args)
+        enabled = getattr(self.policy, 'enabled', None)
+        if callable(enabled) and enabled():
+            plan['_permissive_session'] = True
+            plan['_protected_roots'] = list(map(str, self.policy.excluded_roots))
         binding = None
         if plan["language"] == "local_python":
             from .local_python_runner import runtime_binding

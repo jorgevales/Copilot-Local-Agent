@@ -604,21 +604,17 @@ attachments before Copilot submission. Existing file/attachment/resource limits
 still apply; exceeding a real transport budget reports an unsent result rather
 than claiming completion from a truncated preview.
 
-Navigation-only customer plans reuse the approved origin/profile session scope.
-Automation session grants cover identity-checked customer summaries and
-navigation-only plans, plus declared canonical internal/private hosts. Result-bound
-URLs are still checked against the inspected stage/package hosts at runtime;
-ambiguous numeric destinations remain invalid. A package may use `research.perform`
-under an already active matching durable grant. Changing grants remains a
-dedicated management action. Optional durable grants still enforce their own
-requested limits, expiry and revocation; ordinary authorized reads do not need one.
+In a fast full-access session, navigation and package URLs may cross websites,
+customer/task tags do not gate owned-tab access, and optional generic knowledge
+namespaces need no manual binding. Ordinary reads do not require a durable research
+grant. Explicitly selected durable grant tools keep their own contract.
 
-The existing startup choice still controls reviewed versus immediate package
-execution, for that session only. Manual sign-in, credential protection, exact
-hashes and record identity, stop controls, allowed file destinations,
-consequential-action confirmation and uncertain-effect reconciliation remain
-active. These protect the operation being performed and do not reject work
-because it involves a customer or the company.
+One startup grant skips package quality review and individual plan approvals.
+Ordinary accessible file reads/edits may cross configured roots; deletion remains
+blocked. Manual sign-in, credentials, valid executable contracts, actual OS access,
+Stop and uncertain-effect reconciliation remain active. Record identity checks in
+specialized summary tools prevent attributing one record's facts to another;
+generic reads remain available for broader discovery.
 
 Synthetic tests cover direct customer-tool dispatch, complete long results,
 customer session navigation, internal package hosts and continuing secret
@@ -1230,13 +1226,12 @@ Production storage remains S:-anchored in VDI. This proof used only the explicit
 
 # Local website discovery and session package mode
 
-Start **Start Agent UI.cmd** (or **Start Agent.cmd**). At startup choose whether
-to review packages before running them or skip the optional quality review and
-run continuously. The immediate choice authorizes package downloads and runs,
-including package Python, for **this session only**. Closing or restarting the
-agent resets it. Basic ZIP safety, file identity, runnable manifest declarations,
-file access boundaries and output checks remain required. This is deliberately
-labelled “skip review”, not a promise to execute malformed or unsafe archives.
+Start **Start Agent UI.cmd** (or **Start Agent.cmd**). Accept the single fast
+full-access session option to skip package quality review and individual plan
+approvals together. It permits ordinary file reads/edits and cross-website
+navigation for this session only. File deletion remains blocked; credentials,
+manual sign-in, OS permissions and valid executable contracts remain enforced.
+Closing or restarting the agent resets the grant.
 
 The startup guide then offers local Crawl4AI discovery:
 
@@ -1295,9 +1290,10 @@ the agent later reads is returned to **Microsoft Copilot**, so “local crawling
 not mean the entire agent workflow is local-only. Use only websites/content you
 are authorized to collect and use with the organization's Copilot environment.
 
-For supplied terminal settings, `--yes-setup` keeps the reviewed default and skips
-the guide. `--package-mode immediate` explicitly selects the session fast mode;
-`--discover-first` shows the guide even with `--yes-setup`.
+For supplied terminal settings, `--yes-setup` accepts the same fast full-access
+session grant and skips the guide. `--discover-first` shows the guide even with
+`--yes-setup`. The legacy `--package-mode` argument no longer adds a separate
+startup choice.
 <!-- END SOURCE: docs/LOCAL_WEBSITE_DISCOVERY.md -->
 
 
@@ -1477,50 +1473,45 @@ Atomic approval previews and other retained JSON records use extended Windows fi
 <!-- BEGIN VERBATIM SOURCE: docs/SUPERVISED_SESSIONS.md -->
 ## Source: `docs/SUPERVISED_SESSIONS.md` (verbatim text; line endings normalized to LF)
 
-# Supervised continuous execution
+# Fast full-access sessions
 
-Starting a normal visible agent run asks once: allow all valid local plans and
-revisions without individual approval for this supervised session. Accepting
-authorizes current and newly proposed valid plans, generated code, packages,
-downloads, file-access grants, attachment transfers and consequential plans.
-Each execution still receives its current prepared-plan hash and operational
-audit record. Individual approval dialogs, including consequential confirmations,
-are satisfied by this one session authorization.
+Normal startup asks one question: start a fast full-access session, skipping
+package quality review and individual plan approvals? Accepting grants both for
+this session. There is no second package-mode question. `--yes-setup` accepts
+this same startup grant; the legacy `--package-mode` argument no longer adds a
+separate startup decision. Isolated proof mode retains its own approvals.
 
-The grant exists only in the live ApprovalManager. It is absent from serialized
-configuration and session grants, is revoked on close, and is not restored by a
-new process or inherited by a new conversation's fresh manager. Isolated proof
-mode retains its separate explicit approvals. The startup package quality-review
-choice remains independent; choose immediate package mode to skip optional review.
+The grant covers valid current plans, revisions, packages, generated local Python,
+attachment transfers, downloads and consequential plans. Ordinary accessible file
+reads and edits can cross configured directory roots without another grant.
+Website navigation, internal HTTP/non-default ports and owned popups are allowed
+without an origin allowlist or task/customer tag restriction. Knowledge namespaces
+can be inferred automatically. Shared runtime and durable discovery storage still
+use Discoveries knowledge and its S:/UNC fallbacks.
 
-Supervised runs may implement a newly proposed workflow through registered
-`code_runner` using `local_python` and its complete declared scope. Task-routing
-recommendations do not force a delivered ZIP before a valid local code/file plan
-can run. Unknown tool names still receive a correction with the available
-catalogue; executable proposals use registered tools rather than arbitrary
-evaluation of unvalidated chat text. Keep `approval_required` aligned with each
-tool's catalogue classification; the session supplies approval automatically.
+File deletion is blocked in the registered file tools and managed Python worker.
+Credential stores, browser profiles, manual sign-in, OS permissions, valid tool
+schemas, Stop and uncertain-effect reconciliation remain active. Archive structure,
+file identity and executable contracts still have to be usable; skipping quality
+review does not make a corrupt ZIP executable. Managed Python is not an OS sandbox
+for arbitrary hostile native code. The grant is in memory, absent from serialized
+configuration and revoked on close; fresh conversations do not inherit it.
 
-Unnamed elements support observed CSS, explicit `xpath`, `role` without `name`,
-and an explicit zero-based `nth`. Without an explicit position, ambiguous
-matches remain an error so the agent can inspect and correct its locator.
+New workflows may use registered `code_runner` with `local_python`. Unknown tool
+names receive the available catalogue so the agent can correct its call. Observed
+CSS, explicit XPath, role without name and zero-based `nth` handle unnamed controls.
 
-Recovery favors a small justified repair to the same approach: fix a selector,
-argument, path, timeout or script typo, preserve successful steps, and explain
-why the change addresses the observed failure. The runtime already distinguishes
-changed arguments from identical failed actions. Changing only a call ID does
-not permit repeating the unchanged failure. Uncertain effects require fresh
-reconciliation before replay; submitted messages retain duplicate-send protection.
+Recovery favors small repairs to selectors, arguments, paths, timeouts or scripts,
+preserving successful steps. A failure proven not_started or explicitly without
+uncertain side effects can be retried without requiring a new technique. Uncertain
+effects must be reconciled before replay; submitted messages retain duplicate-send
+protection. Recovering an unknowable browser effect verifies a fresh checkpoint,
+then closes the quarantined owned tab without crediting the failed action as
+completed. Failed closes stay queued for the next exchange. Chat, current recovery
+and unrelated tabs stay open.
 
-Manual sign-in, credentials, actual OS permissions, tool schemas, declared
-execution scope/resource checks, observed customer identity and Stop remain
-active. An unavailable dependency, malformed call or missing access returns an
-actual tool error for a corrected proposal; supervision is not proof of success.
-
-Validation covers changing plans without prompts, fresh-confirmation packages,
-ephemeral revocation, mismatched prepared-code rejection, focused repaired calls,
-and actual browser execution against unnamed synthetic controls. Production
-Copilot/VDI acceptance remains a separate live check.
+Tests use synthetic files, a real managed Python worker and local browser fixtures.
+Production Copilot/VDI acceptance remains a separate live check.
 <!-- END SOURCE: docs/SUPERVISED_SESSIONS.md -->
 
 
@@ -1876,23 +1867,20 @@ Browser downloads and semantic locator handling follow the existing pinned Playw
 
 # Copilot Local Agent
 
-Startup can authorize **all valid plans and revisions for one supervised session**,
-without individual approval prompts. Small repairs may keep the same approach;
-unnamed controls support role, CSS, XPath and explicit positions. See
-[supervised continuous execution](docs/SUPERVISED_SESSIONS.md).
+Startup offers **one fast full-access option for this session**: skip package quality
+review and individual plan approvals, read and edit ordinary accessible files,
+and navigate across websites without domain or customer-category bindings.
+File deletion stays blocked. Small corrections may retry the same approach;
+unnamed controls support role, CSS, XPath and explicit positions. Quarantined
+owned tabs close after a usable replacement is established. See
+[session behavior](docs/SUPERVISED_SESSIONS.md).
 
-Customer and company data work is enabled by default. Authorized customer reads,
-discovery and requested artifacts use the normal local tools, with no separate
-customer-category gate. Customer navigation and declared internal package hosts
-reuse applicable session approvals. See [business data work](docs/BUSINESS_DATA_WORK.md).
-
-Startup now offers **review packages** or **skip quality review and run
-continuously for this session**, followed by a plain-language local Crawl4AI
-website guide. Sign in manually, title each website's knowledge, explore once
-or keep refreshing, then pass saved shared-storage paths to the agent. See the
-[local discovery guide](docs/LOCAL_WEBSITE_DISCOVERY.md). Crawl4AI is also directly
-callable through `crawl4ai.crawl` and `crawl4ai.read`, using the connected Edge
-session for public or internal websites without fixed page/depth ceilings.
+The local Crawl4AI guide lets you sign in manually, title each website's knowledge,
+explore once or keep refreshing, then pass saved shared-storage paths to the
+agent. See [local discovery](docs/LOCAL_WEBSITE_DISCOVERY.md) and
+[business data work](docs/BUSINESS_DATA_WORK.md). Crawl4AI is directly callable
+through `crawl4ai.crawl` and `crawl4ai.read`, using connected Edge for public or
+internal websites without fixed page/depth ceilings.
 
 Edge startup now isolates native ownership queries and retries failed new-session
 launches through direct installed Edge and verified S:/UNC profile spellings.
@@ -1951,7 +1939,7 @@ Tool/code approvals offer **1: deny, 2: once, 3: plan** for the exact displayed 
 
 ## Configuration
 
-Run the project from its S: checkout. Settings, sessions, profiles, downloads and knowledge use the `Discoveries knowledge` folder beside (one level above) the project root; S: is resolved to its live UNC filesystem identity before use. A configured C: or OneDrive `storage_dir` is redirected to that canonical S: location. File tools cannot write to C:; one run confirmation grants local reads and new-file/folder creation within Discoveries knowledge, while deletion or overwrite still requires separate confirmation. Copilot's own UI is controlled separately. Root expansion is a user configuration decision; Copilot cannot expand it.
+Run the project from its S: checkout. Settings, sessions, profiles, downloads and knowledge use the `Discoveries knowledge` folder beside (one level above) the project root; S: is resolved to its live UNC filesystem identity before use. A configured C: or OneDrive `storage_dir` is redirected to that canonical S: location. The fast session option permits ordinary file reads and edits outside the configured roots, including other OS-accessible drives. Shared runtime and durable knowledge storage remain authoritative. File deletion, credential stores and browser control/profile protection remain enforced.
 
 Public operation reuse is an opt-in preview. Set `operation_reuse` to `true` only with `persistent_graph` enabled. An explicitly approved `operation.learn` call can derive one public JSON GET operation from two already-observed URLs and validate it with a third unseen input. Later `operation.call` requests use the existing pinned public-HTTPS transport without opening the browser or returning to Copilot UI. This path never accepts authentication material, cookies, headers, non-GET methods, private destinations or automatic writes. See [API Anything integration](docs/API_ANYTHING_INTEGRATION.md).
 

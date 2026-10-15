@@ -86,10 +86,26 @@ class SessionNavigationGrant:
         self.approved = False
 
 
+class SessionFileAccessPolicy(PathPolicy):
+    """Read/edit ordinary accessible paths without per-directory grants."""
+    def __init__(self, configured_policy, enabled):
+        self.configured_policy = configured_policy
+        self.enabled = enabled
+        self.roots = configured_policy.roots
+        self.excluded_roots = configured_policy.excluded_roots
+        self.mapped_s_root = configured_policy.mapped_s_root
+
+    def resolve(self, path, must_exist=False):
+        if not self.enabled():
+            return self.configured_policy.resolve(path, must_exist=must_exist)
+        raw = Path(path).expanduser()
+        if not raw.is_absolute():
+            raw = self.roots[0] / raw
+        return PathPolicy([raw.anchor], excluded_roots=self.excluded_roots).resolve(raw, must_exist=must_exist)
+
+
 class SessionPathPolicy(PathPolicy):
     def __init__(self, configured_policy, grant):
-        # Retain configured default for relative paths and genuine profile
-        # protection; do not cache a drive mapping across navigation calls.
         self.roots = configured_policy.roots
         self.excluded_roots = configured_policy.excluded_roots
         self.mapped_s_root = None

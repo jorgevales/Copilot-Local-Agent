@@ -14,6 +14,7 @@ class Page:
     def __init__(self, url, title):
         self.url, self.current_title = url, title
         self.closed = False
+        self.context = None
 
     async def title(self):
         return self.current_title
@@ -25,6 +26,9 @@ class Page:
     def is_closed(self):
         return self.closed
 
+    async def close(self):
+        self.closed = True
+
 
 class Browser:
     def __init__(self, page):
@@ -33,6 +37,7 @@ class Browser:
         self._tool_pages = [page]
         self._reconciliation_pages = {}
         self.context = None
+        self.tool_context = None
         self.endpoint = 'local-test'
         self._navigation_state = {'tabs': {'tab-1': {'page': page}}}
 
@@ -188,6 +193,7 @@ class ReconciliationTests(unittest.IsolatedAsyncioTestCase):
             self.state.begin_call(request)
             self.state.finish_call(call_id, {'ok': False, 'error': {'code': 'timeout'},
                                              'result': {'side_effects_uncertain': True}})
+            old_page = self.browser.tool_page
             result = await abandon_uncertain_browser_call(
                 self.state, self.browser, call_id, 'https://example.com/recovered')
             call = self.state.data['calls'][call_id]
@@ -195,11 +201,34 @@ class ReconciliationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual('abandoned_unverifiable', call['status'])
             self.assertFalse(call['completion_credited'])
             self.assertFalse(call['outcome_determined'])
+            self.assertTrue(old_page.is_closed())
+            self.assertFalse(self.browser.tool_page.is_closed())
+            self.assertFalse(self.browser.page.is_closed())
+            self.assertEqual(1, result['quarantined_tabs_closed'])
+            self.assertEqual(0, result['quarantined_tabs_pending_close'])
 
     async def test_only_recovery_tool_can_bypass_uncertainty_gate(self):
         with self.assertRaises(RuntimeError):
             self.state.begin_call({'call_id': 'bypass', 'name': 'browser.click', 'version': '1.0',
                                    'arguments': {'selector': '#x'}}, uncertainty_recovery=True)
+
+    async def test_recovery_closes_the_failed_plan_tab_and_obsolete_primary(self):
+        await reconcile_browser_call(self.state, self.browser, 'nav-1', 'not_executed', self.page.url)
+        secondary = await self.browser.new_tool_page()
+        secondary.url = 'https://example.com/form'
+        self.browser._navigation_state['tabs']['tab-2'] = {'page': secondary}
+        request = {'call_id': 'form-plan', 'name': 'browser.plan', 'version': '1.0',
+                   'arguments': {'task_id': 'work', 'steps': []}}
+        self.state.begin_call(request)
+        self.state.finish_call('form-plan', {'ok': False, 'result': {
+            'tab_id': 'tab-2', 'side_effects_uncertain': True}})
+        result = await abandon_uncertain_browser_call(self.state, self.browser, 'form-plan',
+                                                      'https://example.com/recovered')
+        self.assertTrue(secondary.is_closed())
+        self.assertTrue(self.page.is_closed())
+        self.assertFalse(self.browser.page.is_closed())
+        self.assertFalse(self.browser.tool_page.is_closed())
+        self.assertEqual(2, result['quarantined_tabs_closed'])
 
 
 class RecoveryOrchestrationTests(unittest.IsolatedAsyncioTestCase):

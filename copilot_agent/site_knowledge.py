@@ -7,6 +7,7 @@ Bindings live only in the current session's shared ``site_knowledge_bindings``
 dictionary. A resumed/new session must obtain a fresh local namespace grant.
 """
 from __future__ import annotations
+import getpass
 
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -251,6 +252,13 @@ def _scope(name, args, context):
     if name == "site_knowledge.bind":
         return {"origin": origin, "tenant": args["tenant"], "user_scope": args["user_scope"],
                 "environment": args["environment"], "schema_version": SCHEMA_VERSION}
+    from .session_mode import fast_mode
+    if fast_mode(context.get('config', {})):
+        # Namespace organization is automatic, not a separate access grant.
+        scope = {'origin': origin, 'tenant': 'signed-in-account',
+                 'user_scope': 'local-' + _hash(getpass.getuser())[:24],
+                 'environment': 'session', 'schema_version': SCHEMA_VERSION}
+        return scope
     bindings = context.get("site_knowledge_bindings")
     binding = bindings.get(origin) if type(bindings) is dict else None
     if (type(binding) is not dict or binding.get("session") != _session(context)

@@ -12,6 +12,7 @@ import uuid
 
 from .logging_utils import now
 from .policy import PolicyError, URLPolicy
+from .session_mode import fast_mode, website_policy
 
 
 class ReconciliationRequired(RuntimeError):
@@ -27,9 +28,12 @@ def _hash(value: str) -> str:
 
 def _origin(url: str) -> str:
     parsed = urlsplit(url)
-    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.port not in (None, 443):
-        raise PolicyError('Reconciliation requires an HTTPS page in the approved browser scope')
-    return 'https://' + parsed.hostname.lower().rstrip('.')
+    if parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username or parsed.password:
+        raise PolicyError('Reconciliation requires an HTTP(S) website page')
+    host = parsed.hostname.lower().rstrip('.')
+    host = '[' + host + ']' if ':' in host else host
+    port = parsed.port
+    return parsed.scheme + '://' + host + (':' + str(port) if port and port != (443 if parsed.scheme == 'https' else 80) else '')
 
 
 def _binding(browser):
@@ -93,7 +97,7 @@ async def capture_baseline(browser, request):
     browser._reconciliation_pages = getattr(browser, '_reconciliation_pages', {})
     browser._reconciliation_pages[token] = page
     return {'kind': 'navigation_only', 'page_token': token,
-            'allow_origin_change': request.get('name') == 'browser.open',
+            'allow_origin_change': request.get('name') == 'browser.open' or fast_mode(getattr(browser, 'config', {})),
             'browser_binding_sha256': _binding(browser),
             'transition_count': sum(step.get('op') in {'navigate', 'click'} for step in request.get('arguments', {}).get('steps', [])) if request.get('name') == 'browser.plan' else 1,
             'url_sha256': _hash(url), 'title_sha256': _hash(title),
@@ -205,7 +209,7 @@ async def reconcile_browser_call(state, browser, call_id: str, outcome: str,
         raise ValueError('Provide the exact observed final page URL')
     observed_url = observed_url.strip()
     if observed_url != 'about:blank':
-        URLPolicy(state.data.get('approved_domains', [])).resolve(observed_url)
+        website_policy(getattr(browser, 'config', {}), state.data.get('approved_domains', [])).resolve(observed_url)
     if not isinstance(observed_title, str) or len(observed_title) > 300:
         raise ValueError('The optional observed page title is invalid')
     # Only the exact in-memory page controlled when the operation began can
@@ -225,7 +229,7 @@ async def reconcile_browser_call(state, browser, call_id: str, outcome: str,
         raise ReconciliationRequired('Proposed final page state conflicts with a fresh browser inspection; the operation remains blocked')
     if current_url != 'about:blank':
         current_origin = _origin(current_url)
-        URLPolicy(state.data.get('approved_domains', [])).resolve(current_url)
+        website_policy(getattr(browser, 'config', {}), state.data.get('approved_domains', [])).resolve(current_url)
         if baseline['origin_sha256'] and not baseline.get('allow_origin_change') and _hash(current_origin) != baseline['origin_sha256']:
             raise ReconciliationRequired('The browser is on a different website origin; the operation remains blocked')
     current_url_hash = _hash(current_url)
@@ -261,9 +265,14 @@ async def abandon_uncertain_browser_call(state, browser, call_id: str, checkpoin
     if (not str(request.get('name', '')).startswith('browser.')
             or (call.get('reconciliation_baseline') or {}).get('kind') == 'navigation_only'):
         raise ReconciliationRequired('Use evidence-based reconciliation for navigation-only operations')
-    checkpoint_url = URLPolicy(state.data.get('approved_domains', [])).resolve(checkpoint_url)
+    urls = website_policy(getattr(browser, 'config', {}), state.data.get('approved_domains', []))
+    checkpoint_url = urls.resolve(checkpoint_url)
     previous_page = getattr(browser, 'tool_page', None)
-    if previous_page is None or _origin(previous_page.url) != _origin(checkpoint_url):
+    old_navigation = getattr(browser, '_navigation_state', {}) or {}
+    detail = call.get('result', {}).get('result', {})
+    tab_id = detail.get('tab_id', request.get('arguments', {}).get('tab_id', 'tab-1'))
+    affected_page = old_navigation.get('tabs', {}).get(tab_id, {}).get('page', previous_page)
+    if previous_page is None or not fast_mode(getattr(browser, 'config', {})) and _origin(previous_page.url) != _origin(checkpoint_url):
         raise PolicyError('Recovery checkpoint must remain on the uncertain action website')
     page = await browser.new_tool_page()
     if (page is None or page is getattr(browser, 'page', None)
@@ -274,7 +283,7 @@ async def abandon_uncertain_browser_call(state, browser, call_id: str, checkpoin
     if page.is_closed() or _origin(page.url) != _origin(checkpoint_url):
         raise ReconciliationRequired('Fresh checkpoint navigation was not verified on the approved origin',
                                      side_effects_uncertain=True)
-    URLPolicy(state.data.get('approved_domains', [])).resolve(page.url)
+    urls.resolve(page.url)
     title = await asyncio.wait_for(page.title(), timeout=3)
     browser.tool_page = page
     navigation = getattr(browser, '_navigation_state', None)
@@ -293,7 +302,49 @@ async def abandon_uncertain_browser_call(state, browser, call_id: str, checkpoin
              'checkpoint_title_sha256': _hash(title),
              'browser_binding_sha256': _binding(browser)}
     state.abandon_browser_uncertainty(call_id, proof)
+    pending = getattr(browser, '_quarantined_tool_pages', [])
+    for obsolete in (affected_page, previous_page):
+        if obsolete is not None and obsolete is not page and obsolete not in pending:
+            pending.append(obsolete)
+    browser._quarantined_tool_pages = pending
+    closed = await close_quarantined_tabs(browser)
     return {'status': 'checkpoint_verified', 'abandoned_call_id': call_id,
             'completion_credited': False, 'outcome_determined': False,
+            'quarantined_tabs_closed': closed,
+            'quarantined_tabs_pending_close': len(browser._quarantined_tool_pages),
             'checkpoint': {'origin': _origin(page.url), 'url_sha256': _hash(page.url),
                            'title_sha256': _hash(title)}}
+
+
+async def close_quarantined_tabs(browser):
+    """Close only marked owned tabs; preserve control, current and unrelated pages."""
+    pending = list(getattr(browser, '_quarantined_tool_pages', []))
+    remaining, closed = [], 0
+    protected = (getattr(browser, 'page', None), getattr(browser, 'chat_page', None),
+                 getattr(browser, 'tool_page', None))
+    for page in pending:
+        if (page in protected or page not in getattr(browser, '_tool_pages', [])
+                or getattr(page, 'context', None) is not getattr(browser, 'tool_context', None)):
+            remaining.append(page)
+            continue
+        try:
+            if not page.is_closed():
+                await asyncio.wait_for(page.close(), timeout=5)
+            if not page.is_closed():
+                remaining.append(page)
+                continue
+        except Exception:
+            remaining.append(page)
+            continue
+        closed += 1
+        browser._tool_pages.remove(page)
+        navigation = getattr(browser, '_navigation_state', {}) or {}
+        navigation.get('guards', {}).pop(page, None)
+        for tab_id, record in list(navigation.get('tabs', {}).items()):
+            if record.get('page') is page:
+                navigation['tabs'].pop(tab_id)
+        for token, recorded in list(getattr(browser, '_reconciliation_pages', {}).items()):
+            if recorded is page:
+                browser._reconciliation_pages.pop(token)
+    browser._quarantined_tool_pages = remaining
+    return closed

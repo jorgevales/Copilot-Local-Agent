@@ -255,6 +255,8 @@ async def execute_local_python(plan: dict, prepared: dict, session_dir: Path,
     worker_plan = {key: plan[key] for key in ("working_directory", "read_paths", "create_paths", "modify_paths",
                                                "network_destinations", "permissions", "subprocesses", "arguments", "imports")}
     worker_plan["create_roots"] = list(plan.get("create_roots", []))
+    worker_plan['_permissive_session'] = plan.get('_permissive_session') is True
+    worker_plan['_protected_roots'] = plan.get('_protected_roots', [])
     worker_plan["script_sha256"] = prepared["script_sha256"]
     worker_plan["application_root"] = prepared["runtime_binding"]["application_root"]
     plan_path.write_text(json.dumps(worker_plan, ensure_ascii=False, indent=2), encoding="utf-8")

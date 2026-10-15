@@ -689,6 +689,8 @@ class BrowserAdapter:
         if page is None or (callable(getattr(page, 'is_closed', None)) and page.is_closed()):
             raise BrowserUIError('A live owned page is required to configure website tools.')
         from .policy import URLPolicy, PolicyError
+        from .session_mode import website_policy
+        from .session_mode import fast_mode
 
         owned_contexts = tuple(context for context in (self.context, self.tool_context) if context is not None)
         if page is self.page or page.context not in owned_contexts:
@@ -699,7 +701,7 @@ class BrowserAdapter:
 
         async def guard(route):
             try:
-                URLPolicy(self.tool_domains).resolve(route.request.url)
+                website_policy(self.config, self.tool_domains).resolve(route.request.url)
             except (PolicyError, ValueError):
                 self.tool_errors.append({'type': 'blocked_request', 'url': self._safe_url(route.request.url)})
                 await route.abort('blockedbyclient')
@@ -709,12 +711,27 @@ class BrowserAdapter:
         await page.route('**/*', guard)
         if hasattr(page, 'route_web_socket'):
             async def websocket_guard(route):
+                if fast_mode(self.config):
+                    website_policy(self.config).resolve(route.url.replace('wss:', 'https:', 1).replace('ws:', 'http:', 1))
+                    route.connect_to_server()
+                    return
                 self.tool_errors.append({'type': 'blocked_websocket', 'url': self._safe_url(route.url)})
                 await route.close()
             await page.route_web_socket('**/*', websocket_guard)
         # Popup creation is not a reviewed tool operation. Explicit browser
         # tabs are opened by the orchestrator after its URL/approval checks.
-        await page.add_init_script('window.open = () => null;')
+        if not fast_mode(self.config):
+            await page.add_init_script('window.__agentOriginalWindowOpen = window.open; window.open = () => null;')
+        async def owned_popup(popup):
+            if not fast_mode(self.config):
+                await popup.close()
+                return
+            await self._configure_tool_context(popup)
+            pending = getattr(self, '_pending_popup_pages', [])
+            if popup not in pending:
+                pending.append(popup)
+            self._pending_popup_pages = pending
+        page.on('popup', owned_popup)
 
         def register():
             def error(exc):
@@ -724,7 +741,7 @@ class BrowserAdapter:
                                          'failure': str(request.failure or '')[:100]})
             async def download(item):
                 grants = getattr(self, '_approved_web_downloads', {}).get(page, set())
-                allowed = item.url in grants
+                allowed = fast_mode(self.config) or item.url in grants
                 if allowed:
                     grants.discard(item.url)
                 self.tool_downloads.append({'url': self._safe_url(item.url), 'suggested_filename': Path(item.suggested_filename).name,
@@ -735,7 +752,7 @@ class BrowserAdapter:
                 if frame != page.main_frame or frame.url == 'about:blank':
                     return
                 try:
-                    URLPolicy(self.tool_domains).resolve(frame.url)
+                    website_policy(self.config, self.tool_domains).resolve(frame.url)
                 except (PolicyError, ValueError):
                     self.tool_errors.append({'type': 'blocked_navigation', 'url': self._safe_url(frame.url)})
                     # Close this owned popup/page, preserving all files and original tabs.
@@ -749,7 +766,8 @@ class BrowserAdapter:
     async def new_tool_page(self):
         if self.context is None:
             raise BrowserUIError('The verified Edge context is unavailable.')
-        if sum(not p.is_closed() for p in self._tool_pages) >= 6:
+        from .session_mode import fast_mode
+        if not fast_mode(self.config) and sum(not p.is_closed() for p in self._tool_pages) >= 6:
             raise BrowserUIError('Owned tool-tab limit reached.')
         page = await asyncio.wait_for(self.context.new_page(), 10)
         try:

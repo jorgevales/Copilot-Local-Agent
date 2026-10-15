@@ -136,6 +136,31 @@ class NavigationBrowserTests(unittest.IsolatedAsyncioTestCase):
     async def execute(self, name, args):
         return await execute_navigation(name, args, self.context)
 
+    async def test_fast_session_navigates_to_another_host_over_http_and_nondefault_port(self):
+        self.context['config']['_permissive_session'] = True
+        self.fixture_hosts.add('outside.test')
+        self.pages['/foreign'] = '<h1>Other company system</h1>'
+        target = 'http://outside.test:8080/foreign'
+        result = await self.execute('browser.plan', {'task_id': 'cross-system', 'steps': [
+            {'id': 'go', 'op': 'navigate', 'url': target,
+             'expect': [{'kind': 'url', 'value': target}]}],
+            'success': [{'kind': 'url', 'value': target}]})
+        self.assertEqual(target, self.page.url)
+        self.assertEqual('verified', result['status'])
+
+    async def test_fast_browser_open_retains_the_actual_http_origin(self):
+        from copilot_agent.tools import ToolRegistry
+        from copilot_agent.policy import PathPolicy
+        self.context['policy'] = PathPolicy([self.context['session_dir']])
+        self.context['config']['_permissive_session'] = True
+        self.fixture_hosts.add('outside.test')
+        origin = 'http://outside.test:8080'
+        self.context['site_knowledge_bindings'] = {origin: {'namespace': 'existing'}}
+        self.adapter.tool_domains = set()
+        result = await ToolRegistry().execute('browser.open', {'url': origin + '/documents'}, self.context)
+        self.assertTrue(result['ok'], result)
+        self.assertIn(origin, self.context['site_knowledge_bindings'])
+
     async def test_lost_navigation_tab_recovers_with_fresh_open_without_credit(self):
         from copilot_agent.reconciliation import capture_baseline, recover_missing_navigation
         from copilot_agent.state import SessionState

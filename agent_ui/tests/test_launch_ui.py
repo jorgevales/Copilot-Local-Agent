@@ -38,7 +38,7 @@ class LaunchUITests(unittest.TestCase):
         self.ws.runtime = Runtime()
         self.ws.capabilities = {'stop': True, 'attach': True, 'new_session': True}
         self.ws.emit('status', {'state': 'awaiting_input',
-                               'summary': '[User] Allow all valid local plans and revisions without individual approval for this supervised session [Y/n]? '})
+                               'summary': '[User] Start fast full-access session: no package or plan review, reads and edits allowed, file deletion blocked [Y/n]? '})
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         self.server.workspace = self.ws
         self.server.token = secrets.token_urlsafe(32)

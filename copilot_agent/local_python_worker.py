@@ -72,6 +72,18 @@ def main() -> int:
     create_roots = [Path(item).resolve() for item in plan.get("create_roots", [])]
     package_scratch_active = bool(create_roots)
     modify_scopes = [Path(item).resolve() for item in plan["modify_paths"]]
+    permissive = plan.get('_permissive_session') is True
+    protected_roots = [Path(item).resolve() for item in plan.get('_protected_roots', [])]
+    def ordinary_file(candidate):
+        parts = {part.casefold() for part in candidate.parts}
+        name = candidate.name.casefold().replace(' ', '').replace('_', '')
+        credentials = {'.aws', '.ssh', '.azure', '.gnupg', '.kube', 'edge_profile', 'edge-profile'}
+        names = {'credentials', 'credentials.json', 'auth.json', 'tokens.json', 'id_rsa', 'id_ed25519', '.env'}
+        if (parts & credentials or candidate.name.casefold() in names or candidate.name.casefold().startswith('.env.')
+                or name in {'cookies', 'logindata', 'localstate', 'webdata'}
+                or any(candidate == root or root in candidate.parents for root in protected_roots)
+                or 'microsoft' in parts and parts & {'credentials', 'vault', 'protect', 'oneauth', 'identitycache', 'tokenbroker'}):
+            raise PermissionError('Credential stores and the active browser profile remain protected')
     runtime_roots = [Path(sys.prefix).resolve(), Path(sys.base_prefix).resolve(), Path(__file__).resolve().parent]
     permissions = set(plan["permissions"])
     declared_imports = set(plan["imports"])
@@ -109,6 +121,9 @@ def main() -> int:
                 mode = args[1] if len(args) > 1 else "r"
                 flags = args[2] if len(args) > 2 and isinstance(args[2], int) else 0
                 writing = (isinstance(mode, str) and any(mark in mode for mark in "wax+")) or bool(flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND))
+                if permissive:
+                    ordinary_file(candidate)
+                    return
                 if writing:
                     if _within(candidate, modify_scopes):
                         return
@@ -137,6 +152,9 @@ def main() -> int:
             if event == "os.mkdir":
                 candidate = Path(os.fsdecode(args[0]))
                 candidate = (working / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
+                if permissive:
+                    ordinary_file(candidate)
+                    return
                 # Package stages may create nested directories only beneath
                 # their private, precreated attempt scratch root.
                 if candidate.is_dir() and any(candidate in scope.parents for scope in create_scopes):
@@ -154,6 +172,9 @@ def main() -> int:
             if event in {"os.listdir", "os.scandir"}:
                 candidate = Path(args[0] if args and args[0] is not None else working)
                 candidate = (working / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
+                if permissive:
+                    ordinary_file(candidate)
+                    return
                 # Import discovery needs to inspect the single bound parent that
                 # contains copilot_agent. This does not authorize reading files or
                 # enumerating any other project directory.
@@ -168,7 +189,7 @@ def main() -> int:
             if event == "socket.getaddrinfo":
                 host = str(args[0]).casefold()
                 port = int(args[1])
-                if "network" not in permissions or (host, port) not in destinations:
+                if not permissive and ("network" not in permissions or (host, port) not in destinations):
                     raise PermissionError("Network destination is outside the approved scope")
             if event == "socket.connect":
                 address = args[1]
@@ -176,7 +197,7 @@ def main() -> int:
                     raise PermissionError("Only approved TCP destinations are supported")
                 host, port = str(address[0]).casefold(), int(address[1])
                 approved_hosts = {host for host, approved_port in destinations if approved_port == port}
-                if "network" not in permissions or host not in approved_hosts:
+                if not permissive and ("network" not in permissions or host not in approved_hosts):
                     # A resolved IP is accepted only when it belongs to an approved hostname.
                     resolved = {item[4][0].casefold() for name, approved_port in destinations if approved_port == port
                                 for item in socket.getaddrinfo(name, port, type=socket.SOCK_STREAM)}

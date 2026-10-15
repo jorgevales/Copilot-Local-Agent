@@ -1,12 +1,11 @@
 # Local website discovery and session package mode
 
-Start **Start Agent UI.cmd** (or **Start Agent.cmd**). At startup choose whether
-to review packages before running them or skip the optional quality review and
-run continuously. The immediate choice authorizes package downloads and runs,
-including package Python, for **this session only**. Closing or restarting the
-agent resets it. Basic ZIP safety, file identity, runnable manifest declarations,
-file access boundaries and output checks remain required. This is deliberately
-labelled “skip review”, not a promise to execute malformed or unsafe archives.
+Start **Start Agent UI.cmd** (or **Start Agent.cmd**). Accept the single fast
+full-access session option to skip package quality review and individual plan
+approvals together. It permits ordinary file reads/edits and cross-website
+navigation for this session only. File deletion remains blocked; credentials,
+manual sign-in, OS permissions and valid executable contracts remain enforced.
+Closing or restarting the agent resets the grant.
 
 The startup guide then offers local Crawl4AI discovery:
 
@@ -65,6 +64,7 @@ the agent later reads is returned to **Microsoft Copilot**, so “local crawling
 not mean the entire agent workflow is local-only. Use only websites/content you
 are authorized to collect and use with the organization's Copilot environment.
 
-For supplied terminal settings, `--yes-setup` keeps the reviewed default and skips
-the guide. `--package-mode immediate` explicitly selects the session fast mode;
-`--discover-first` shows the guide even with `--yes-setup`.
+For supplied terminal settings, `--yes-setup` accepts the same fast full-access
+session grant and skips the guide. `--discover-first` shows the guide even with
+`--yes-setup`. The legacy `--package-mode` argument no longer adds a separate
+startup choice.
