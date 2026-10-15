@@ -12,7 +12,7 @@ spec.loader.exec_module(launcher)
 
 
 class VersionTests(unittest.TestCase):
-    def test_selected_version_runtime_is_repaired_before_app_launch(self):
+    def test_selected_version_never_installs_runtime_before_app_launch(self):
         live, _ = self.fixture()
         (live / 'bootstrap').mkdir()
         helper = live / 'bootstrap' / 'setup_rea.py'
@@ -22,21 +22,20 @@ class VersionTests(unittest.TestCase):
              patch.object(launcher.subprocess, 'call', side_effect=lambda args, **kwargs: calls.append((args, kwargs)) or 0), \
              patch.object(sys, 'argv', ['version_launcher.py', '1']):
             self.assertEqual(0, launcher.main())
-        self.assertEqual(2, len(calls))
-        self.assertIn(str(helper), calls[0][0])
-        self.assertEqual(['--project', str(live)], calls[0][0][-2:])
-        self.assertEqual(str(live / 'app.py'), calls[1][0][-1])
+        self.assertEqual(1, len(calls))
+        self.assertNotIn(str(helper), calls[0][0])
+        self.assertEqual(str(live / 'app.py'), calls[0][0][-1])
         self.assertEqual(live, calls[0][1]['cwd'])
 
-    def test_optional_repair_failure_keeps_other_tools_launchable(self):
+    def test_startup_launches_without_setup_call_even_with_helper_present(self):
         live, _ = self.fixture()
         (live / 'bootstrap').mkdir()
         (live / 'bootstrap' / 'setup_rea.py').write_text('# fixture')
         with patch.object(launcher, 'choose_source', return_value=live), \
-             patch.object(launcher.subprocess, 'call', side_effect=[1, 0]) as run, \
+             patch.object(launcher.subprocess, 'call', return_value=0) as run, \
              patch.object(sys, 'argv', ['version_launcher.py', '1']):
             self.assertEqual(0, launcher.main())
-        self.assertEqual(2, run.call_count)
+        self.assertEqual(1, run.call_count)
 
     def test_runtime_and_setup_cache_are_not_testing_source(self):
         live, _ = self.fixture()

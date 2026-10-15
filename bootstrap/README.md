@@ -1,3 +1,7 @@
+# Current REA backend policy
+
+Python REA is bundled and ready in the project environment. Ordinary startup never installs software. `rea_backend=auto` uses verified Python after Node repair fails; `python_native` skips all Node/npm work. See [backend operation](../docs/REA_PYTHON_BACKEND.md).
+
 # Portable Python environment bootstrap
 
 `virtualenv.pyz` is the official self-contained virtualenv zipapp downloaded from

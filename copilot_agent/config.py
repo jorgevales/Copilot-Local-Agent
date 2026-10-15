@@ -62,6 +62,7 @@ class Config:
     targeted_repair: bool = False
     operation_reuse: bool = False
     rea_enabled: bool = True
+    rea_backend: str = 'auto'
     rea_repository: str = ''
     rea_node_executable: str = ''
     rea_timeout_seconds: int = 45
@@ -152,6 +153,8 @@ class Config:
         return cfg
 
     def validate(self) -> None:
+        if self.rea_backend not in {'auto', 'node_cli', 'python_native'}:
+            raise ValueError('rea_backend must be auto, node_cli or python_native')
         if self.discovery_extractor not in {'crawl4ai', 'structure'}:
             raise ValueError('discovery_extractor must be crawl4ai or the explicit structure fallback')
         if type(self.debug_port) is not int or not 1024 <= self.debug_port <= 65535:

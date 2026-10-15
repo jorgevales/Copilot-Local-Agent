@@ -1,5 +1,7 @@
 # REA research and fast scoped discovery
 
+Current architecture: [mandatory Python/Node backends](REA_PYTHON_BACKEND.md). The bundled Python backend keeps all three tools available without Node. Ordinary startup never installs software.
+
 Copilot Chat plans; the existing local orchestrator validates and authorizes
 ToolRegistry calls. REA is a one-shot CLI adapter, never another reasoning agent,
 raw MCP catalogue, or execution authority. No model API is introduced.
@@ -8,9 +10,8 @@ raw MCP catalogue, or execution authority. No model API is introduced.
 
 The adapter targets `rea-agents` 6.5.0 (MIT), inspected source revision
 `d7651b6a0dde6cfe658144cc52794ae6aaf23306`. Runtime binaries are installed,
-not committed. Normal **Setup.cmd** and the selected live/testing version's
-**Start Agent.cmd / Start Agent UI.cmd** now run the repair helper before the
-session catalogue is built. An external developer checkout is not required.
+not committed. Normal **Setup.cmd** may run the Node repair helper. Ordinary live/testing
+startup checks available backends without installing anything. An external developer checkout is not required.
 Tool requests and availability checks never install software.
 
 Node must support `^22.19.0`, `^24.11.0`, or `>=26`, with npm available for a new

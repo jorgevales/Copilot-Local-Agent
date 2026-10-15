@@ -46,6 +46,8 @@ def validate_route(args, context, policy):
             raise PolicyError('The prior call must belong to a registered research capability')
         prior_result = prior.get('result', {}).get('result', {})
         recorded = prior_result.get('target')
+        if recorded == '<approved-input>':
+            recorded = prior['request'].get('arguments', {}).get('path')
         if not recorded:
             prior_args = prior['request'].get('arguments', {})
             recorded = prior_args.get('url') or prior_args.get('path')
@@ -78,7 +80,7 @@ def _fresh_evidence(target, selected, context, args, policy):
         result = outcome.get('result', {})
         if (request.get('name') != selected or record.get('status') != 'completed'
                 or outcome.get('ok') is not True or result.get('status') != 'completed'
-                or result.get('target') != target or not result.get('evidence_path')
+                or (result.get('target') != target and result.get('target_identity_sha256') != hashlib.sha256(target.encode('utf-8')).hexdigest()) or not result.get('evidence_path')
                 or not result.get('evidence_sha256')):
             continue
         try:
@@ -86,11 +88,15 @@ def _fresh_evidence(target, selected, context, args, policy):
                 from .rea import validate_rea
                 identity_args = {'path': target, 'format' if args['target_type'] in {'har', 'saz'} else 'kind': args['target_type']}
                 current = validate_rea(selected, identity_args, context, policy)['input']
-                if current != result.get('provenance', {}).get('input'):
+                saved = result.get('provenance', {}).get('input')
+                if saved and saved.get('path') == '<approved-input>':
+                    current = {**current, 'path': '<approved-input>'}
+                if current != saved:
                     continue
             age = (now - datetime.fromisoformat(record['finished_at'].replace('Z', '+00:00'))).total_seconds()
-            path = Path(result['evidence_path']).resolve()
             root = Path(context['session_dir']).resolve()
+            reference = Path(result['evidence_path'])
+            path = (reference if reference.is_absolute() else root / reference).resolve()
             from .policy import reject_path_redirection
             reject_path_redirection(path)
             if root not in path.parents or not 0 <= age <= 120 or path.stat().st_size > 8388608:

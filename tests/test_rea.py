@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, patch
 
 from copilot_agent.policy import PathPolicy, PolicyError
 from copilot_agent.rea import (REA_SPECS, _normalize, _run, _safe, execute_rea,
-                               _stage_input, rea_health, validate_rea)
+                               _stage_input, _node_health, rea_health, validate_rea)
 
 
 def evidence(**changes):
@@ -49,8 +49,11 @@ class REATests(unittest.TestCase):
         self.node_probe = patch('copilot_agent.rea.subprocess.run', return_value=__import__('subprocess').CompletedProcess([], 0, 'v24.13.0\n', ''))
         self.node_probe.start()
         self.addCleanup(self.node_probe.stop)
+        cli_probe = patch('copilot_agent.rea._node_cli_probe', return_value=None)
+        cli_probe.start()
+        self.addCleanup(cli_probe.stop)
         self.config = {'root': str(self.root), 'rea_repository': str(self.package),
-                       'rea_node_executable': sys.executable, 'allowed_roots': [str(self.root)],
+                       'rea_node_executable': sys.executable, 'rea_backend': 'node_cli', 'allowed_roots': [str(self.root)],
                        'allowed_domains': ['example.com'], 'rea_timeout_seconds': 5}
         self.context = {'session_dir': str(self.root / 'session'), 'config': self.config}
         self.policy = PathPolicy([self.root])
@@ -58,12 +61,12 @@ class REATests(unittest.TestCase):
         self.input.write_bytes(b'fixture bytes; never executed')
 
     def test_health_disabled_missing_incompatible_and_ready(self):
-        self.assertTrue(rea_health(self.config)['available'])
+        self.assertTrue(_node_health(self.config)['available'])
         self.assertEqual('disabled', rea_health({**self.config, 'rea_enabled': False})['status'])
         (self.package / 'dist/cli-runtime/cli.js').unlink()
-        self.assertIn('compiled runtime missing', rea_health(self.config)['reason'])
+        self.assertIn('compiled runtime missing', _node_health(self.config)['reason'])
         (self.package / 'package.json').write_text('{"name":"another-package","version":"6.5.0"}')
-        self.assertFalse(rea_health(self.config)['available'])
+        self.assertFalse(_node_health(self.config)['available'])
 
     def test_source_checkout_discovery_uses_sibling_convention(self):
         project = self.root / 'Agent'
@@ -71,7 +74,7 @@ class REATests(unittest.TestCase):
         expected.parent.mkdir()
         shutil.copytree(self.package, expected)
         config = {**self.config, 'root': str(project), 'rea_repository': ''}
-        self.assertEqual(str(expected.resolve()), rea_health(config)['repository'])
+        self.assertEqual(str(expected.resolve()), _node_health(config)['repository'])
 
     def test_strict_schemas_reject_command_raw_mcp_executable_and_unknown_kind(self):
         args = {'path': str(self.input), 'kind': 'go'}
@@ -165,8 +168,8 @@ class REATests(unittest.TestCase):
         self.assertEqual(self.input.name, Path(command[4]).name)
         self.assertFalse(Path(command[4]).exists(), 'The owned snapshot must be cleaned after confirmed completion')
         self.assertEqual(['--json', '--full-output'], command[-2:])
-        self.assertTrue(Path(result['evidence_path']).is_file())
-        self.assertEqual(result['evidence_sha256'], hashlib.sha256(Path(result['evidence_path']).read_bytes()).hexdigest())
+        self.assertTrue((Path(self.context['session_dir']) / result['evidence_path']).is_file())
+        self.assertEqual(result['evidence_sha256'], hashlib.sha256((Path(self.context['session_dir']) / result['evidence_path']).read_bytes()).hexdigest())
 
     def test_missing_dependency_does_not_launch_and_returns_unavailable(self):
         self.config['rea_enabled'] = False
@@ -212,7 +215,8 @@ class REATests(unittest.TestCase):
         fake = AsyncMock(return_value={'status': 'uncertain', 'side_effects_uncertain': True, 'returncode': None})
         with patch('copilot_agent.rea._run', fake):
             result = asyncio.run(execute_rea('rea.analyze_artifact', {'path': str(self.input), 'kind': 'go'}, self.context, self.policy))
-        self.assertTrue(Path(result['retained_scratch']).is_dir())
+        self.assertTrue(Path(self.context['rea_retained_scratch']).is_dir())
+        self.assertEqual('<runtime-path>', result['retained_scratch'])
         self.assertTrue(result['side_effects_uncertain'])
 
     def test_owned_page_rejects_wrong_endpoint_and_unapproved_target(self):
@@ -280,14 +284,14 @@ class REALocalIntegrationTests(unittest.TestCase):
                     await browser.tool_page.route('https://fixture.test/**', serve)
                     await browser.tool_page.goto('https://fixture.test/')
                     config = {'root': str(Path(__file__).resolve().parents[1]), 'allowed_domains': ['fixture.test'],
-                              'allowed_roots': [str(root)], 'rea_timeout_seconds': 30}
+                              'allowed_roots': [str(root)], 'rea_timeout_seconds': 30, 'rea_backend': 'node_cli'}
                     context = {'browser': browser, 'config': config, 'session_dir': str(root / 'session')}
                     result = await execute_rea('rea.inspect_page', {'observation_ms': 0}, context, PathPolicy([root]))
                     self.assertEqual('completed', result['status'], {key: result.get(key) for key in ('status', 'error')})
                     self.assertTrue(native.is_connected())
                     self.assertFalse(browser.tool_page.is_closed())
                     self.assertEqual('https://fixture.test/', browser.tool_page.url)
-                    self.assertIn('evidence_id', Path(result['evidence_path']).read_text())
+                    self.assertIn('evidence_id', (Path(context['session_dir']) / result['evidence_path']).read_text())
                 finally:
                     await native.close()
         asyncio.run(run())
@@ -295,7 +299,7 @@ class REALocalIntegrationTests(unittest.TestCase):
     def test_real_cli_capture_and_static_javascript(self):
         root = Path(tempfile.mkdtemp(prefix='copilot_rea_actual_'))
         config = {'root': str(Path(__file__).resolve().parents[1]), 'rea_timeout_seconds': 45,
-                  'allowed_roots': [str(root)]}
+                  'allowed_roots': [str(root)], 'rea_backend': 'node_cli'}
         health = rea_health(config)
         self.assertTrue(health['available'], health)
         capture = root / 'synthetic.har'
@@ -324,7 +328,7 @@ class REALocalIntegrationTests(unittest.TestCase):
                 self.assertIn(result['status'], expected, {key: result.get(key) for key in ('status', 'error', 'limitations')})
                 self.assertEqual(0, result['exit_status'])
                 self.assertIsInstance(result['findings'], dict)
-                saved = Path(result['evidence_path']).read_text()
+                saved = (Path(context['session_dir']) / result['evidence_path']).read_text()
                 self.assertNotIn('fixture-secret', saved)
                 self.assertNotIn('fixture-private', saved)
                 self.assertIn('evidence_id', saved)

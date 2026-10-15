@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from copilot_agent.rea import rea_health
+from copilot_agent.rea import _node_health
 
 
 class REAAvailabilityTests(unittest.TestCase):
@@ -23,6 +23,7 @@ class REAAvailabilityTests(unittest.TestCase):
         self.node.write_bytes(b'fixture; never executed')
         self.config = {'root': str(self.project), 'rea_node_executable': str(self.node)}
         self.addCleanup(patch.stopall)
+        patch('copilot_agent.rea._node_cli_probe', return_value=None).start()
         patch.dict(os.environ, {'LOCALAPPDATA': str(self.local)}).start()
         self.run = patch('copilot_agent.rea.subprocess.run', return_value=subprocess.CompletedProcess([], 0, 'v24.13.0\n', '')).start()
 
@@ -45,7 +46,7 @@ class REAAvailabilityTests(unittest.TestCase):
 
     def test_managed_repo_is_discovered_without_external_sibling(self):
         managed = self.install(self.project / '.runtime/rea')
-        health = rea_health(self.config)
+        health = _node_health(self.config)
         self.assertTrue(health['available'], health)
         self.assertEqual(str(managed.resolve()), health['repository'])
         self.assertEqual('24.13.0', health['node_version'])
@@ -55,14 +56,14 @@ class REAAvailabilityTests(unittest.TestCase):
         broken.mkdir(parents=True)
         (broken / 'package.json').write_text('{broken')
         expected = self.install(self.local / 'Copilot Local Agent/runtimes/rea/6.5.0')
-        health = rea_health(self.config)
+        health = _node_health(self.config)
         self.assertTrue(health['available'], health)
         self.assertEqual(str(expected.resolve()), health['repository'])
         self.assertEqual('manifest_invalid_json', health['diagnostics']['repository_candidates'][0]['code'])
 
     def test_invalid_explicit_override_never_uses_default_fallback(self):
         self.install(self.project / '.runtime/rea')
-        health = rea_health({**self.config, 'rea_repository': str(self.root / 'explicit-missing')})
+        health = _node_health({**self.config, 'rea_repository': str(self.root / 'explicit-missing')})
         self.assertFalse(health['available'])
         attempts = health['diagnostics']['repository_candidates']
         self.assertEqual(1, len(attempts))
@@ -70,7 +71,7 @@ class REAAvailabilityTests(unittest.TestCase):
         self.assertEqual(str(self.root / 'explicit-missing/package.json'), attempts[0]['manifest'])
 
     def test_missing_manifest_reports_expected_paths_and_node_status(self):
-        health = rea_health(self.config)
+        health = _node_health(self.config)
         self.assertFalse(health['available'])
         self.assertEqual('package.json', health['diagnostics']['manifest_filename'])
         self.assertGreaterEqual(len(health['diagnostics']['repository_candidates']), 3)
@@ -80,7 +81,7 @@ class REAAvailabilityTests(unittest.TestCase):
     def test_missing_compile_file_is_identified(self):
         package = self.install(self.project / '.runtime/rea')
         (package / 'dist/cli-runtime/cli.js').unlink()
-        health = rea_health({**self.config, 'rea_repository': str(package)})
+        health = _node_health({**self.config, 'rea_repository': str(package)})
         self.assertEqual('compiled_runtime_missing', health['diagnostics']['repository_candidates'][0]['code'])
         self.assertIn(str(Path('dist/cli-runtime/cli.js')), health['reason'])
 
@@ -89,14 +90,14 @@ class REAAvailabilityTests(unittest.TestCase):
         for version, available in [('22.18.0', False), ('22.19.0', True), ('23.0.0', False), ('24.10.9', False), ('24.11.0', True), ('25.9.0', False), ('26.0.0', True)]:
             with self.subTest(version=version):
                 self.run.return_value = subprocess.CompletedProcess([], 0, 'v' + version + '\n', '')
-                health = rea_health(self.config)
+                health = _node_health(self.config)
                 self.assertEqual(available, health['available'], health)
                 self.assertEqual(1, len(health['diagnostics']['node_candidates']))
 
     def test_node_timeout_is_bounded_and_diagnostic(self):
         self.install(self.project / '.runtime/rea')
         self.run.side_effect = subprocess.TimeoutExpired([str(self.node), '--version'], 3)
-        health = rea_health(self.config)
+        health = _node_health(self.config)
         self.assertEqual('node_probe_timeout', health['diagnostics']['node_candidates'][0]['code'])
         self.assertEqual('node', health['failure_stage'])
         self.assertLessEqual(self.run.call_args.kwargs['timeout'], 3)
@@ -108,7 +109,7 @@ class REAAvailabilityTests(unittest.TestCase):
         alternate.parent.mkdir(parents=True)
         alternate.write_bytes(b'fixture')
         with patch.dict(os.environ, {'ProgramFiles': str(program)}), patch('copilot_agent.rea.shutil.which', return_value=str(self.root / 'missing-node.exe')):
-            health = rea_health({'root': str(self.project)})
+            health = _node_health({'root': str(self.project)})
         self.assertTrue(health['available'], health)
         self.assertEqual(str(alternate.resolve()), health['node'])
         self.assertEqual('node_missing', health['diagnostics']['node_candidates'][0]['code'])
@@ -121,14 +122,14 @@ class REAAvailabilityTests(unittest.TestCase):
                 raise PermissionError('Access denied by fixture')
             return original(path, *args, **kwargs)
         with patch.object(Path, 'read_text', read):
-            health = rea_health({**self.config, 'rea_repository': str(package)})
+            health = _node_health({**self.config, 'rea_repository': str(package)})
         self.assertEqual('repository_unreadable', health['diagnostics']['repository_candidates'][0]['code'])
         self.assertIn('Access denied', health['reason'])
 
     def test_runtime_dependencies_absent_are_reported(self):
         package = self.install(self.project / '.runtime/rea')
         (package / 'node_modules/zod/package.json').unlink()
-        health = rea_health({**self.config, 'rea_repository': str(package)})
+        health = _node_health({**self.config, 'rea_repository': str(package)})
         self.assertEqual('runtime_dependency_missing', health['diagnostics']['repository_candidates'][0]['code'])
 
     def test_manifest_stat_permission_denied_is_not_missing(self):
@@ -139,12 +140,12 @@ class REAAvailabilityTests(unittest.TestCase):
                 raise PermissionError('Permission denied by fixture')
             return original(path, *args, **kwargs)
         with patch.object(Path, 'stat', stat):
-            health = rea_health({**self.config, 'rea_repository': str(expected.parent)})
+            health = _node_health({**self.config, 'rea_repository': str(expected.parent)})
         self.assertEqual('repository_unreadable', health['diagnostics']['repository_candidates'][0]['code'])
 
     def test_node_explicit_relative_override_does_not_use_path(self):
         self.install(self.project / '.runtime/rea')
-        health = rea_health({**self.config, 'rea_node_executable': 'node.exe'})
+        health = _node_health({**self.config, 'rea_node_executable': 'node.exe'})
         self.assertFalse(health['available'])
         self.assertEqual(1, len(health['diagnostics']['node_candidates']))
         self.assertEqual('node_missing', health['diagnostics']['node_candidates'][0]['code'])

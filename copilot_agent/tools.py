@@ -417,7 +417,7 @@ class ToolRegistry:
         session so the signed startup catalogue and prompt cannot disagree.
         """
         key = (id(self.config), *(str(config_value(self.config, field, '')) for field in
-               ('root', 'rea_enabled', 'rea_repository', 'rea_node_executable')))
+               ('root', 'rea_enabled', 'rea_backend', 'rea_repository', 'rea_node_executable')))
         if refresh or self._rea_snapshot is None or key != self._rea_snapshot_key:
             self._rea_snapshot = copy.deepcopy(rea_health(self.config))
             self._rea_snapshot_key = key

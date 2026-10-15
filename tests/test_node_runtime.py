@@ -42,7 +42,7 @@ class NodeRuntimeTests(unittest.TestCase):
                  patch.object(rea, '_check_repository', return_value={'version': '6.5.0'}), \
                  patch.object(rea.subprocess, 'run', return_value=SimpleNamespace(
                      returncode=0, stdout='v24.13.0\n', stderr='')):
-                health = rea.rea_health({'root': root})
+                health = rea._node_health({'root': root})
             self.assertTrue(health['available'])
             self.assertEqual(str(executable.resolve()), health['node'])
             attempts = health['diagnostics']['node_candidates']

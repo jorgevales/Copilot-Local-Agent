@@ -60,8 +60,8 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `bootstrap/setup_rea.py`
 
 - Role: Provision the pinned optional REA runtime without administrator rights.
-- Direct imports: `__future__`, `argparse`, `base64`, `copilot_agent.node_runtime`, `copilot_agent.persistence`, `hashlib`, `json`, `os`, `pathlib`, `re`, `shutil`, `subprocess`, `sys`, `tarfile`, `tempfile`, `time`, `urllib.request`, `uuid`
-- Public symbols: `_operator_node(value, project, env) [private helper]`; `_select_node(project, env, *, node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None) [private helper]`; `archive_bytes(env)`; `extract_archive(archive, destination)`; `find_node(env)`; `find_npm(node, env)`; `main()`; `provision(project, *, environ=None, deadline_seconds=90, offline=False, config_path=None, node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None)`; `runtime_candidates(project, env)`; `validate_runtime(root, node, env, *, smoke=True)`
+- Direct imports: `__future__`, `argparse`, `base64`, `contextvars`, `copilot_agent.node_runtime`, `copilot_agent.persistence`, `hashlib`, `json`, `os`, `pathlib`, `re`, `shutil`, `subprocess`, `sys`, `tarfile`, `tempfile`, `time`, `types`, `urllib.request`, `uuid`
+- Public symbols: `_operator_node(value, project, env) [private helper]`; `_provision_node(project, *, environ=None, deadline_seconds=90, offline=False, config_path=None, node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None) [private helper]`; `_run_command(command, *, cwd=None, env=None, timeout=8, stage='cli_smoke', identity='rea --help') [private helper]`; `_select_node(project, env, *, node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None) [private helper]`; `_stage(stage, function, *args, **kwargs) [private helper]`; `_terminate_owned(process) [private helper]`; `_validate_runtime_files(root) [private helper]`; `_verify_scratch(path) [private helper]`; `archive_bytes(env)`; `class SetupDiagnostics; 4 public methods`; `extract_archive(archive, destination)`; `find_node(env)`; `find_npm(node, env)`; `main()`; `provision(project, *, environ=None, deadline_seconds=90, offline=False, config_path=None, node_path=None, prompt_for_node=False, ask_on_missing=False, input_fn=None)`; `runtime_candidates(project, env)`; `validate_runtime(root, node, env, *, smoke=True)`
 
 ### `copilot_agent/__init__.py`
 
@@ -345,8 +345,38 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `copilot_agent/rea.py`
 
 - Role: Bounded, passive REA CLI capabilities owned by the existing ToolRegistry.
-- Direct imports: `.logging_utils`, `.persistence`, `.policy`, `__future__`, `asyncio`, `hashlib`, `ipaddress`, `json`, `os`, `pathlib`, `re`, `shutil`, `stat`, `subprocess`, `tempfile`, `time`, `urllib.parse`, `uuid`
-- Public symbols: `_artifact_identity(path, kind, policy, limit) [private helper]`; `_bounded(config, name, default, minimum, maximum) [private helper]`; `_capture_metadata(value) [private helper]`; `_check_node(executable) [private helper]`; `_check_repository(root) [private helper]`; `_clean_scratch(path) [private helper]`; `_copy_bounded(source, target, limit) [private helper]`; `_endpoint(browser) [private helper]`; `_file_identity(path, policy, limit) [private helper]`; `_fixed_local(path) [private helper]`; `_incomplete(value) [private helper]`; `_json_object(data) [private helper]`; `_node_candidates(config) [private helper]`; `_normalize(data, returncode) [private helper]`; `_page_scope(args, context) [private helper]`; `_repository(config) [private helper]`; `_restore_source_paths(value, staging) [private helper]`; `_run(command, *, cwd, timeout, output_limit, context) [private helper]`; `_safe(value, depth=0) [private helper]`; `_save(result, context) [private helper]`; `_schema(properties, required=()) [private helper]`; `_stage_input(prepared, kind, context, policy) [private helper]`; `class _AvailabilityError(ValueError); 1 public methods`; `execute_rea(name, args, context, policy)`; `rea_health(config)`; `rea_repository_candidates(config)`; `validate_rea(name, args, context, policy)`
+- Direct imports: `.logging_utils`, `.persistence`, `.policy`, `__future__`, `asyncio`, `copy`, `hashlib`, `ipaddress`, `json`, `os`, `pathlib`, `re`, `shutil`, `stat`, `subprocess`, `sys`, `tempfile`, `time`, `urllib.parse`, `uuid`
+- Public symbols: `_artifact_identity(path, kind, policy, limit) [private helper]`; `_bounded(config, name, default, minimum, maximum) [private helper]`; `_capture_metadata(value) [private helper]`; `_check_node(executable) [private helper]`; `_check_repository(root) [private helper]`; `_clean_scratch(path) [private helper]`; `_copy_bounded(source, target, limit) [private helper]`; `_endpoint(browser) [private helper]`; `_execute_node(name, args, context, policy) [private helper]`; `_execute_python(name, args, context, policy) [private helper]`; `_file_identity(path, policy, limit) [private helper]`; `_fixed_local(path) [private helper]`; `_incomplete(value) [private helper]`; `_json_object(data) [private helper]`; `_node_candidates(config) [private helper]`; `_node_cli_probe(root, executable) [private helper]`; `_node_health(config) [private helper]`; `_normalize(data, returncode) [private helper]`; `_page_scope(args, context) [private helper]`; `_public_diagnostic(value) [private helper]`; `_repository(config) [private helper]`; `_restore_source_paths(value, staging) [private helper]`; `_run(command, *, cwd, timeout, output_limit, context) [private helper]`; `_safe(value, depth=0) [private helper]`; `_save(result, context) [private helper]`; `_schema(properties, required=()) [private helper]`; `_stage_input(prepared, kind, context, policy, *, require_fixed=True) [private helper]`; `class _AvailabilityError(ValueError); 1 public methods`; `execute_rea(name, args, context, policy)`; `rea_health(config)`; `rea_repository_candidates(config)`; `validate_rea(name, args, context, policy)`
+
+### `copilot_agent/rea_backends.py`
+
+- Role: Analysis adapters. Authority, admission and lifecycle stay in rea.py.
+- Direct imports: `__future__`, `pathlib`
+- Public symbols: `class NodeCliREABackend; 3 public methods`; `class PythonNativeREABackend; 4 public methods`
+
+### `copilot_agent/rea_python_artifacts.py`
+
+- Role: Bounded standard-library static artifact analysis; targets are never executed.
+- Direct imports: `__future__`, `collections`, `hashlib`, `json`, `pathlib`, `re`, `struct`, `urllib.parse`
+- Public symbols: `_binary_metadata(data) [private helper]`; `_check(budget) [private helper]`; `_digest(value) [private helper]`; `_javascript(files, budget) [private helper]`; `_managed(data, budget) [private helper]`; `_native(data, kind, budget) [private helper]`; `_route(value) [private helper]`; `_strings(data, budget) [private helper]`; `_symbol(value) [private helper]`; `analyze_artifact(path: Path, kind: str, budget=None) -> dict`
+
+### `copilot_agent/rea_python_capture.py`
+
+- Role: Passive, bounded capture analysis. No traffic is replayed and no values retained.
+- Direct imports: `__future__`, `collections`, `json`, `math`, `pathlib`, `re`, `urllib.parse`, `zipfile`
+- Public symbols: `_header(headers, name) [private helper]`; `_headers(value) [private helper]`; `_http(data, request=False) [private helper]`; `_mime(value) [private helper]`; `_saz(path, budget) [private helper]`; `_tick(budget) [private helper]`; `analyze_capture(path: Path, format: str, budget=None) -> dict`; `safe_url(value)`
+
+### `copilot_agent/rea_python_page.py`
+
+- Role: Passive owned-page structure and network metadata without page content values.
+- Direct imports: `.rea_python_capture`, `__future__`, `asyncio`, `collections`, `urllib.parse`
+- Public symbols: `inspect_page(page, observation_ms: int=500, budget=None) -> dict`
+
+### `copilot_agent/rea_python_worker.py`
+
+- Role: Fixed, owned read-only analysis worker; never executes the supplied artifact.
+- Direct imports: `__future__`, `asyncio`, `json`, `pathlib`, `sys`, `time`
+- Public symbols: `main()`
 
 ### `copilot_agent/reconciliation.py`
 
@@ -846,6 +876,36 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `copilot_agent.findings`, `copilot_agent.policy`, `copilot_agent.prompts`, `copilot_agent.session_mode`, `copilot_agent.state`, `copilot_agent.tools`, `hashlib`, `json`, `pathlib`, `subprocess`, `sys`, `tests.test_protocol_state`, `unittest`, `unittest.mock`
 - Public symbols: `class REAAvailabilitySessionTests(unittest.IsolatedAsyncioTestCase); 6 public methods`
 
+### `tests/test_rea_backends.py`
+
+- Role: Mandatory bundled backend selection without platform installations.
+- Direct imports: `asyncio`, `copilot_agent.policy`, `copilot_agent.rea`, `json`, `pathlib`, `tempfile`, `unittest`, `unittest.mock`
+- Public symbols: `class BackendExecutionTests(unittest.IsolatedAsyncioTestCase); 2 public methods`; `class BackendSelectionTests(unittest.TestCase); 5 public methods`
+
+### `tests/test_rea_python_artifacts.py`
+
+- Role: Synthetic passive artifact coverage for the Python REA backend.
+- Direct imports: `copilot_agent.rea_python_artifacts`, `json`, `pathlib`, `struct`, `tempfile`, `unittest`, `unittest.mock`
+- Public symbols: `class PythonArtifactTests(unittest.TestCase); 12 public methods`; `managed_fixture()`
+
+### `tests/test_rea_python_capture.py`
+
+- Role: Implementation module; responsibilities are identified by its public symbols and imports.
+- Direct imports: `copilot_agent.rea_python_capture`, `json`, `pathlib`, `tempfile`, `unittest`, `zipfile`
+- Public symbols: `class PythonCaptureTests(unittest.TestCase); 15 public methods`
+
+### `tests/test_rea_python_page.py`
+
+- Role: Implementation module; responsibilities are identified by its public symbols and imports.
+- Direct imports: `asyncio`, `copilot_agent.rea_python_page`, `json`, `pathlib`, `socket`, `tempfile`, `types`, `unittest`, `unittest.mock`
+- Public symbols: `class Page; 4 public methods`; `class PythonPageBrowserTests(unittest.IsolatedAsyncioTestCase); 2 public methods`; `class PythonPageTests(unittest.IsolatedAsyncioTestCase); 4 public methods`
+
+### `tests/test_rea_python_registry.py`
+
+- Role: Public ToolRegistry execution of the no-Node REA backend.
+- Direct imports: `__future__`, `copilot_agent.policy`, `copilot_agent.tools`, `hashlib`, `json`, `jsonschema`, `pathlib`, `tempfile`, `tests.test_rea_python_artifacts`, `unittest`, `unittest.mock`, `zipfile`
+- Public symbols: `class PythonREARegistryTests(unittest.IsolatedAsyncioTestCase); 10 public methods`
+
 ### `tests/test_rea_registry.py`
 
 - Role: Public registry/routing/ledger integration contracts for the REA adapter.
@@ -881,6 +941,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Role: Portable REA provisioning: integrity, archive safety and recovery contracts.
 - Direct imports: `base64`, `hashlib`, `importlib.util`, `io`, `json`, `os`, `pathlib`, `subprocess`, `tarfile`, `tempfile`, `types`, `unittest`, `unittest.mock`
 - Public symbols: `class ReaSetupTests(unittest.TestCase); 12 public methods`
+
+### `tests/test_setup_rea_diagnostics.py`
+
+- Role: Sanitized setup stages and mandatory Python fallback regression coverage.
+- Direct imports: `contextlib`, `errno`, `importlib.util`, `io`, `json`, `pathlib`, `subprocess`, `sys`, `tempfile`, `types`, `unittest`, `unittest.mock`
+- Public symbols: `class SetupBackendDiagnosticsTests(unittest.TestCase); 7 public methods`
 
 ### `tests/test_setup_resources.py`
 
@@ -996,30 +1062,30 @@ This is a static AST inventory of the current source, not a verbatim code packag
 Generated from the local Graphify code-only AST graph. The raw graph, cache, and Graphify report are not attachments; the statistics and selected relationships below preserve their useful navigation evidence.
 
 - Graphify version: `0.9.79`
-- Source revision analyzed: `005da73e84c225446ef3e3d3c2edf4f459e26a45`
-- Nodes / edges / hyperedges: 3781 / 11703 / 0
-- Relationship counts: calls=4701, contains=1180, imports=1903, imports_from=876, indirect_call=451, inherits=42, method=1722, rationale_for=402, references=106, uses=320
+- Source revision analyzed: `66c98a2695411cec794a3a04ef5c017fc0f29f9a`
+- Nodes / edges / hyperedges: 3953 / 12136 / 0
+- Relationship counts: calls=4869, contains=1230, imports=1975, imports_from=911, indirect_call=470, inherits=42, method=1794, rationale_for=422, references=108, uses=315
 - Graph origin: Graphify AST extraction; inferred edges are hypotheses, not verified behavior.
 
 ### Highest-connectivity source symbols
 
-- `PolicyError` — 254 graph links; `copilot_agent/policy.py` at `L9`.
-- `ToolRegistry` — 158 graph links; `copilot_agent/tools.py` at `L406`.
-- `tools.py` — 158 graph links; `copilot_agent/tools.py` at `L1`.
+- `PolicyError` — 253 graph links; `copilot_agent/policy.py` at `L9`.
+- `ToolRegistry` — 162 graph links; `copilot_agent/tools.py` at `L406`.
+- `tools.py` — 159 graph links; `copilot_agent/tools.py` at `L1`.
 - `Orchestrator` — 155 graph links; `copilot_agent/orchestrator.py` at `L29`.
-- `PathPolicy` — 150 graph links; `copilot_agent/policy.py` at `L42`.
-- `SessionState` — 117 graph links; `copilot_agent/state.py` at `L67`.
+- `PathPolicy` — 155 graph links; `copilot_agent/policy.py` at `L42`.
+- `SessionState` — 116 graph links; `copilot_agent/state.py` at `L67`.
 - `DiscoveryError` — 113 graph links; `copilot_agent/discovery_contracts.py` at `L64`.
+- `BrowserAdapter` — 108 graph links; `copilot_agent/browser.py` at `L324`.
 - `orchestrator.py` — 107 graph links; `copilot_agent/orchestrator.py` at `L1`.
-- `BrowserAdapter` — 106 graph links; `copilot_agent/browser.py` at `L324`.
 - `final_response()` — 98 graph links; `tests/test_orchestrator.py` at `L86`.
 - `Store` — 94 graph links; `copilot_agent/discovery_store.py` at `L44`.
 - `copilot_agent/app.py` — 89 graph links; `copilot_agent/app.py` at `L1`.
 - `site_knowledge.py` — 89 graph links; `copilot_agent/site_knowledge.py` at `L1`.
 - `Config` — 86 graph links; `copilot_agent/config.py` at `L26`.
-- `policy.py` — 80 graph links; `copilot_agent/policy.py` at `L1`.
+- `policy.py` — 82 graph links; `copilot_agent/policy.py` at `L1`.
+- `rea.py` — 77 graph links; `copilot_agent/rea.py` at `L1`.
 - `automation_packages.py` — 76 graph links; `copilot_agent/automation_packages.py` at `L1`.
-- `rea.py` — 67 graph links; `copilot_agent/rea.py` at `L1`.
 - `._turn()` — 63 graph links; `copilot_agent/orchestrator.py` at `L1338`.
 
 ### Direct, source-derived relationships
@@ -1169,6 +1235,7 @@ Sources: `config.example.json`, `copilot_agent/config.py`, `schemas/response-v1.
 - `max_download_bytes`: example value `20971520`.
 - `operation_reuse`: example value `false`.
 - `persistent_graph`: example value `true`.
+- `rea_backend`: example value `"auto"`.
 - `rea_enabled`: example value `true`.
 - `rea_max_input_bytes`: example value `20971520`.
 - `rea_max_output_bytes`: example value `1048576`.
@@ -1304,6 +1371,7 @@ These compact files define how users launch the project and the top-level respon
   "operation_reuse": false,
   "discovery_extractor": "crawl4ai",
   "rea_enabled": true,
+  "rea_backend": "auto",
   "rea_repository": "",
   "rea_node_executable": "",
   "rea_timeout_seconds": 45,

@@ -82,6 +82,10 @@ The launch presentation tests use the existing Playwright dependency and install
 <!-- BEGIN VERBATIM SOURCE: bootstrap/README.md -->
 ## Source: `bootstrap/README.md` (verbatim text; line endings normalized to LF)
 
+# Current REA backend policy
+
+Python REA is bundled and ready in the project environment. Ordinary startup never installs software. `rea_backend=auto` uses verified Python after Node repair fails; `python_native` skips all Node/npm work. See [backend operation](../docs/REA_PYTHON_BACKEND.md).
+
 # Portable Python environment bootstrap
 
 `virtualenv.pyz` is the official self-contained virtualenv zipapp downloaded from
@@ -1549,6 +1553,10 @@ passed Windows fixture tests; live VDI/share behavior remains unverified.
 <!-- BEGIN VERBATIM SOURCE: docs/REA_IMPLEMENTATION_REPORT.md -->
 ## Source: `docs/REA_IMPLEMENTATION_REPORT.md` (verbatim text; line endings normalized to LF)
 
+# Current backend follow-up
+
+The [mandatory Python/Node backend change](REA_PYTHON_BACKEND.md) supersedes Node-only availability and startup installation behavior in the historical reports below.
+
 # REA implementation report
 
 Update: the later [availability deployment repair](REA_AVAILABILITY_RECOVERY.md) supersedes this report's original manual-only dependency setup and startup availability behavior.
@@ -1740,6 +1748,8 @@ actual agent session; offline tests do not prove production Copilot/VDI/S: state
 
 # REA research and fast scoped discovery
 
+Current architecture: [mandatory Python/Node backends](REA_PYTHON_BACKEND.md). The bundled Python backend keeps all three tools available without Node. Ordinary startup never installs software.
+
 Copilot Chat plans; the existing local orchestrator validates and authorizes
 ToolRegistry calls. REA is a one-shot CLI adapter, never another reasoning agent,
 raw MCP catalogue, or execution authority. No model API is introduced.
@@ -1748,9 +1758,8 @@ raw MCP catalogue, or execution authority. No model API is introduced.
 
 The adapter targets `rea-agents` 6.5.0 (MIT), inspected source revision
 `d7651b6a0dde6cfe658144cc52794ae6aaf23306`. Runtime binaries are installed,
-not committed. Normal **Setup.cmd** and the selected live/testing version's
-**Start Agent.cmd / Start Agent UI.cmd** now run the repair helper before the
-session catalogue is built. An external developer checkout is not required.
+not committed. Normal **Setup.cmd** may run the Node repair helper. Ordinary live/testing
+startup checks available backends without installing anything. An external developer checkout is not required.
 Tool requests and availability checks never install software.
 
 Node must support `^22.19.0`, `^24.11.0`, or `>=26`, with npm available for a new
@@ -2086,6 +2095,378 @@ schema/catalogue checks, redaction/injection/timeout/cancellation tests, final
 tree review, and handoff refresh precede publication. Live VDI/S: installation
 cannot be proved here and will be reported explicitly, as agreed.
 <!-- END SOURCE: docs/REA_INTEGRATION_ASSESSMENT.md -->
+
+
+---
+
+<!-- BEGIN VERBATIM SOURCE: docs/REA_PYTHON_BACKEND.md -->
+## Source: `docs/REA_PYTHON_BACKEND.md` (verbatim text; line endings normalized to LF)
+
+# Mandatory REA with two analysis backends
+
+`rea_backend` accepts `auto` (default), `node_cli`, or `python_native`.
+Auto prefers the verified rea-agents CLI and selects the bundled Python backend
+when Node, the package, native controls, dependencies or CLI smoke check fail.
+Python-only selection performs no Node/npm discovery or installation. All three
+public ToolRegistry schemas are unchanged. Backend provenance is explicit.
+
+Ordinary live/testing startup never installs software. Pull the code and start
+a new session using the existing project Python environment. REA remains usable
+without running Node setup. Setup.cmd may repair Node; an auto-mode Node failure
+reports the verified Python fallback instead of disabling REA. Use
+`"rea_backend": "python_native"` in local configuration to bypass Node entirely.
+
+## Evidence supplied by Python
+
+- Owned page: bounded DOM/control/frame/form/script/resource/framework metadata
+  and passive response metadata. No navigation, DOM mutation, labels/page text,
+  credentials, cookie/storage access, payloads or authentication headers.
+- HAR/SAZ: request counts, methods/status classes, templated routes, redirect
+  edges, MIME/timing summaries, API/request shapes, omissions and source indices.
+  SAZ uses a bounded reviewed archive reader; ambiguous/unsafe input is rejected.
+- JavaScript: bounded file inventory, conservative tokenization, imports/exports,
+  sanitized route shapes, build/framework indicators and safe source-map summaries.
+- Managed: PE/CLI and ECMA335 assembly/type/method/reference metadata when readable.
+- Go/Rust: file/executable metadata, recognized build/compiler/package/crate/panic
+  evidence. Unsupported deep recovery remains explicitly partial.
+
+The Python analyzer is a bundled independent implementation of these contracts,
+not a claim that upstream Node algorithms were run. Findings include confidence,
+unknowns, limits and source locations. Malformed input never creates invented
+semantic evidence. No artifact is executed.
+
+## Authority, lifecycle and privacy
+
+rea.py retains target/path/owned-browser admission, immutable snapshot hashing,
+shared concurrency, deadlines, cancellation, bounded output, redaction and evidence
+writes. Static Python analysis runs in a fixed owned Python worker; page inspection
+uses the existing owned page. Python snapshots may use writable S:/UNC scratch;
+they do not require Node's fixed-local-NTFS admission. Durable evidence retains
+existing storage policy. Cleanup uncertainty blocks replay and fallback.
+
+Known-clean Node analysis failures can fall back within the remaining overall
+time budget; Node gets a reserved share in auto mode. Cancelled or uncertain work
+is never silently retried. Public diagnostics use storage labels; retained
+artifact references are session-relative and input identity retains hashes.
+The private execution context retains actual paths for admission and cleanup.
+One session snapshot supplies metadata, catalogue entries and routing; a new
+session refreshes it. Actual execution revalidates the runtime.
+
+## Node repair diagnostics
+
+Setup records node_probe, npm_probe, archive_acquire, archive_verify,
+archive_extract, dependency_install, native_verify, cli_smoke and publish stages.
+Records retain safe command identity, duration, timeout, return code, bounded
+sanitized stdout/stderr, termination state and filesystem error codes. A verified
+writable scratch npm cache avoids default-cache ENOSPC; valid explicit caches are
+preserved. Unknown cleanup stops retries and retains owned staging for inspection.
+Diagnostics are retained in the ignored setup cache, with company paths replaced
+by labels. Portable Node path/ZIP selection remains available during Setup.
+
+## Validation and remaining live checks
+
+58 focused backend, parser, real-browser, registry, routing and setup-diagnostic
+tests passed. A separate40-test setup/interactive/startup group passed. Existing
+38 Node/availability/session tests were covered successfully, including actual
+Node HAR/JavaScript and owned Edge integrations; the disabled-result field
+regression passed after its fix. Counts overlap. Python tests prove real HAR/SAZ
+and all four static kinds, schema compatibility, redaction, retained evidence,
+passive real-browser observation and distinct termination states. Additional
+selection/concurrency/clean-timeout-fallback regressions accompany the change.
+
+Live corporate VDI, redirected S Drive and production authenticated Copilot were
+not exercised here. On the VDI, start a new session after pulling: availability
+must select python_native whenever Node validation fails; a supported investigation
+must route to rea.inspect_page and results must report their actual backend.
+<!-- END SOURCE: docs/REA_PYTHON_BACKEND.md -->
+
+
+---
+
+<!-- BEGIN VERBATIM SOURCE: docs/REA_REQUIRED_IMPLEMENTATION_BRIEF.md -->
+## Source: `docs/REA_REQUIRED_IMPLEMENTATION_BRIEF.md` (verbatim text; line endings normalized to LF)
+
+# Codex Brief: REA Is Mandatory, Implement a Reliable Non-Node Backend
+
+## Non-negotiable outcome
+
+REA capability must remain available. Node failure must not disable REA.
+
+Implement two interchangeable execution backends behind the existing three REA ToolRegistry contracts:
+
+```text
+1. node_cli: existing rea-agents 6.5.0 adapter
+2. python_native: local Python implementation requiring no Node/npm
+```
+
+Backend selection:
+
+```text
+Use a verified Node backend when healthy.
+Otherwise use the verified Python backend automatically.
+Report REA unavailable only if both backends fail validation.
+```
+
+Do not weaken existing path, target, browser ownership, approval, redaction, timeout, evidence, uncertainty, or no-deletion controls.
+
+## Live failure evidence
+
+- Windows corporate VDI without administrator rights.
+- Project and portable Node are on the S Drive.
+- Node `v24.22.0` and npm `11.19.1` execute successfully.
+- npm registry connectivity works.
+- The original C: npm cache failed with `ENOSPC`.
+- Cache, temp, Local AppData, AppData, and npm prefix were redirected to writable S Drive folders.
+- REA provisioning still timed out across project and redirected runtime candidates with 90-second and 180-second limits.
+- `bootstrap/setup_rea.py` reports only generic `write, download or execution failure`, hiding the actual failing stage.
+
+Do not expose company paths. Use only `S Drive`, `<project-root>`, `<setup-temp>`, and similar labels.
+
+## Required architecture
+
+Keep these public tools and schemas stable:
+
+```text
+rea.inspect_page
+rea.analyze_capture
+rea.analyze_artifact
+```
+
+Add a backend interface, for example:
+
+```python
+class REABackend:
+    def health(self) -> dict: ...
+    async def inspect_page(self, prepared, context) -> dict: ...
+    async def analyze_capture(self, prepared, context) -> dict: ...
+    async def analyze_artifact(self, prepared, context) -> dict: ...
+```
+
+Implement:
+
+```text
+NodeCliREABackend
+PythonNativeREABackend
+```
+
+`copilot_agent/rea.py` must continue to own validation, staging, bounds, redaction, evidence persistence, normalization, cancellation, and uncertainty. Backends perform analysis only.
+
+## Python backend scope
+
+Implement equivalent supported outputs, not a generic placeholder.
+
+### `rea.inspect_page`
+
+Use the existing owned Playwright/CDP page supplied by the orchestrator. Collect bounded passive evidence already available through the project:
+
+```text
+URL/origin classification without sensitive query values
+frame and document structure
+DOM and accessibility controls
+scripts and resource metadata
+request method/status/resource-type metadata
+application/framework indicators
+forms and navigation surfaces
+explicit gaps and limits
+```
+
+Do not extract cookies, browser storage, credentials, password values, request payloads, or authentication headers. Do not navigate or mutate the page.
+
+Reuse existing browser inspection and discovery collectors where possible. Do not create a second browser authority.
+
+### `rea.analyze_capture`
+
+Implement offline HAR analysis in Python using standard JSON parsing and the current bounded file policy.
+
+Required evidence:
+
+```text
+entry/request counts
+hosts and route templates
+methods and status classes
+redirect chains
+content-type and timing summaries
+API candidates
+repeated request shapes
+security/redaction findings
+source locations
+unknowns and truncation
+```
+
+Remove query values, headers, cookies, payload values, tokens, and customer identifiers before persistence or return.
+
+For SAZ, parse only through a reviewed bounded archive reader. Reject encrypted, unsafe, malformed, oversized, or ambiguous archives. Never replay traffic.
+
+### `rea.analyze_artifact`
+
+Implement Python-native static analysis for the currently declared kinds:
+
+```text
+javascript
+managed
+go
+rust
+```
+
+Minimum reliable implementation:
+
+```text
+JavaScript:
+  bounded source-tree/file inventory
+  imports/exports
+  routes/endpoints with values sanitized
+  framework/build indicators
+  source maps when present and safe
+  AST analysis using an already approved Python parser if available, otherwise a conservative tokenizer
+
+Managed:
+  PE/CLI metadata, assembly references, namespaces/types/method metadata when readable
+
+Go:
+  executable/file metadata, build information, module/package/string evidence when safely readable
+
+Rust:
+  executable/file metadata, crate/panic/path/string evidence when safely readable
+```
+
+Never execute the target. Provider-dependent deep decompilation may remain explicitly partial, but the tool must return useful structured evidence with confidence, unknowns, and limitations.
+
+Prefer Python standard library and already pinned project dependencies. Do not add another model API, cloud service, autonomous agent, shell execution, or unreviewed binary dependency.
+
+## Output compatibility
+
+Both backends must normalize into the existing REA result contract:
+
+```text
+backend
+execution_id
+status
+started_at / finished_at
+input identity and hashes
+source locations
+findings
+confidence
+unknowns
+limitations
+artifact references
+retained evidence hash
+```
+
+Statuses must remain distinct:
+
+```text
+completed
+partial
+failed
+unavailable
+cancelled
+timeout
+output_limit
+uncertain
+```
+
+A Python result must not claim evidence it did not collect. Backend provenance must always be visible.
+
+## Health and selection
+
+Health must test both backends independently.
+
+Selection rule:
+
+```python
+if node_backend.complete_and_verified:
+    selected = node_backend
+elif python_backend.complete_and_verified:
+    selected = python_backend
+else:
+    unavailable_with_both_diagnostics()
+```
+
+Configuration:
+
+```json
+{
+  "rea_backend": "auto"
+}
+```
+
+Allowed values:
+
+```text
+auto
+node_cli
+python_native
+```
+
+`auto` must guarantee automatic Python fallback when Node provisioning or verification fails. `python_native` must perform no Node/npm discovery or installation.
+
+Ordinary startup must never install software. `Setup.cmd` may repair the Node backend, but the Python backend must be ready from the project environment.
+
+## Fix Node diagnostics too
+
+Add exact stages to `bootstrap/setup_rea.py`:
+
+```text
+node_probe
+npm_probe
+archive_acquire
+archive_verify
+archive_extract
+dependency_install
+native_verify
+cli_smoke
+publish
+```
+
+Retain sanitized stage, safe command identity, duration, timeout, return code, bounded stdout/stderr, termination status, and filesystem error codes. Never collapse all failures into one generic message.
+
+## Tests
+
+Add tests proving:
+
+- `python_native` performs no Node/npm calls.
+- All three REA tools execute through `python_native` with synthetic inputs.
+- `auto` selects Python when Node setup, native validation, or CLI smoke testing fails.
+- Node and Python outputs satisfy the same public schema.
+- HAR/SAZ secrets and payload values never appear in results or retained evidence.
+- Artifact analysis never executes the target.
+- Page inspection uses only the owned approved page and performs no mutation.
+- Time, input, output, entry, and concurrency limits are enforced.
+- Cancellation and uncertain cleanup remain distinct.
+- No company paths appear in public diagnostics or fixtures.
+- Existing REA registry, routing, availability-session, and research-routing tests pass with both backends.
+
+## Files to inspect first
+
+```text
+bootstrap/setup_rea.py
+copilot_agent/rea.py
+copilot_agent/browser_inspection.py
+copilot_agent/discovery_contracts.py
+copilot_agent/policy.py
+copilot_agent/tools.py
+copilot_agent/research_routing.py
+copilot_agent/config.py
+tests/test_rea.py
+tests/test_rea_registry.py
+tests/test_rea_availability.py
+tests/test_rea_availability_session.py
+tests/test_setup_rea.py
+```
+
+## Acceptance criteria
+
+1. REA remains available when Node is missing or unusable.
+2. The Python backend implements all three existing REA tool contracts.
+3. `rea_backend=python_native` never invokes Node/npm.
+4. `rea_backend=auto` falls back automatically and records backend provenance.
+5. Existing controls and schemas remain enforced.
+6. Node setup failures identify the exact stage.
+7. No company paths are exposed.
+8. Ordinary startup performs no installation.
+9. Synthetic end-to-end tests prove useful outputs for page, HAR/SAZ, and artifact analysis.
+10. Unsupported deep analysis is reported as partial, never fabricated or silently treated as complete.
+<!-- END SOURCE: docs/REA_REQUIRED_IMPLEMENTATION_BRIEF.md -->
 
 
 ---
@@ -2784,7 +3165,7 @@ when the session ends. See [session behavior](docs/SUPERVISED_SESSIONS.md).
 inspection capability through three typed ToolRegistry tools. Deterministic
 `research.route` retains the API Anything-inspired public operation adapter,
 Crawl4AI and specialized browser/file tools. Independent bounded reads run in
-parallel. Startup and Setup automatically provision the pinned runtime with multiple writable-location and offline-cache fallbacks; see [REA repair options](docs/REA_INTEGRATION.md#recovery-options). [Centralized knowledge](docs/KNOWLEDGE_PERSISTENCE.md) reuses concise
+parallel. The bundled Python backend keeps REA available without Node; ordinary startup never installs software. Setup can repair optional Node with multiple writable-location and offline-cache fallbacks; see [REA repair options](docs/REA_INTEGRATION.md#recovery-options). [Centralized knowledge](docs/KNOWLEDGE_PERSISTENCE.md) reuses concise
 per-site views while the S:-backed ledger retains evidence and revisions.
 
 The optional `--discover-first` Crawl4AI guide lets you sign in, title each website campaign,

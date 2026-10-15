@@ -85,10 +85,12 @@ class REAAvailabilitySessionTests(unittest.IsolatedAsyncioTestCase):
         (native / 'manifest.json').write_text(json.dumps({
             'packageVersion': '6.5.0', 'platform': 'win32', 'architecture': 'x64',
             'artifactSha256': hashlib.sha256(addon.read_bytes()).hexdigest()}))
+        config.rea_backend = 'node_cli'
         config.rea_repository = str(package)
         config.rea_node_executable = sys.executable
         node_version = subprocess.CompletedProcess([], 0, 'v24.13.0\n', '')
-        with patch('copilot_agent.rea.subprocess.run', return_value=node_version):
+        with patch('copilot_agent.rea.subprocess.run', return_value=node_version), \
+             patch('copilot_agent.rea._node_cli_probe', return_value=None):
             initialized, task, catalogue = self.messages(config, state, registry)
             context = {'config': config, 'session_state': state, 'session_dir': state.directory,
                        'approved_domains': ['example.com'], 'path_policy': PathPolicy([root])}
@@ -97,7 +99,9 @@ class REAAvailabilitySessionTests(unittest.IsolatedAsyncioTestCase):
                 'objective': 'investigate'}, context)
         health = self.assert_authoritative(initialized, task, catalogue)
         self.assertTrue(health['available'], health)
-        self.assertEqual(str(package.resolve()), health['repository'])
+        self.assertEqual('node_cli', health['selected_backend'])
+        self.assertEqual('<runtime-path>', health['backends']['node_cli']['repository'])
+        self.assertNotIn(str(package.resolve()), json.dumps(health))
         self.assertTrue(outcome['ok'], outcome)
         self.assertEqual('rea.inspect_page', outcome['result']['preferred'])
         self.assertEqual(health, outcome['result']['rea'])

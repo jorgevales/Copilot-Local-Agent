@@ -32,7 +32,7 @@ class NodeSetupInteractiveTests(unittest.TestCase):
         validate = stack.enter_context(patch.object(helper, 'validate_runtime', return_value=True))
         npm = stack.enter_context(patch.object(helper, 'find_npm'))
         archive = stack.enter_context(patch.object(helper, 'archive_bytes'))
-        stack.enter_context(patch.object(helper.subprocess, 'run', return_value=SimpleNamespace(
+        stack.enter_context(patch.object(helper, '_run_command', return_value=SimpleNamespace(
             returncode=0, stdout='v24.13.0\n', stderr='')))
         stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
         return validate, npm, archive
@@ -65,12 +65,13 @@ class NodeSetupInteractiveTests(unittest.TestCase):
 
     def test_blank_prompt_stops_with_clear_failure_and_no_partial_configuration(self):
         _, npm, archive = self.ready_runtime()
+        (self.root / 'config.local.json').write_text(json.dumps({'rea_backend': 'node_cli'}))
         answer = Mock(return_value='')
         with patch.object(helper, 'find_node', side_effect=RuntimeError('No detected Node')):
             with self.assertRaisesRegex(RuntimeError, '(?i)node|skip|cancel'):
                 helper.provision(self.root, environ={}, prompt_for_node=True, input_fn=answer)
         self.assertEqual(1, answer.call_count)
-        self.assertFalse((self.root / 'config.local.json').exists())
+        self.assertEqual({'rea_backend': 'node_cli'}, json.loads((self.root / 'config.local.json').read_text()))
         npm.assert_not_called()
         archive.assert_not_called()
 
@@ -100,6 +101,7 @@ class NodeSetupInteractiveTests(unittest.TestCase):
 
     def test_noninteractive_missing_node_does_not_wait_for_input(self):
         self.ready_runtime()
+        (self.root / 'config.local.json').write_text(json.dumps({'rea_backend': 'node_cli'}))
         answer = Mock(side_effect=AssertionError('Noninteractive setup must not wait for input'))
         with patch.object(helper, 'find_node', side_effect=RuntimeError('Compatible native Node not found')):
             with self.assertRaisesRegex(RuntimeError, '(?i)node'):

@@ -1,3 +1,7 @@
+# Current backend follow-up
+
+The [mandatory Python/Node backend change](REA_PYTHON_BACKEND.md) supersedes Node-only availability and startup installation behavior in the historical reports below.
+
 # REA implementation report
 
 Update: the later [availability deployment repair](REA_AVAILABILITY_RECOVERY.md) supersedes this report's original manual-only dependency setup and startup availability behavior.

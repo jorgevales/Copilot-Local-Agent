@@ -133,7 +133,7 @@ class ReaSetupTests(unittest.TestCase):
                  patch.object(helper, 'validate_runtime', side_effect=lambda path, node, env: True if path.name == 'package' else (_ for _ in ()).throw(ValueError('missing'))), \
                  patch.object(helper, 'archive_bytes', return_value=b'archive'), \
                  patch.object(helper, 'extract_archive', side_effect=extract), \
-                 patch.object(helper.subprocess, 'run', side_effect=run):
+                 patch.object(helper, '_run_command', side_effect=run):
                 result = helper.provision(root, environ={})
             self.assertEqual(str(chosen), result['repository'])
             self.assertTrue((chosen / 'package.json').is_file())
@@ -144,12 +144,14 @@ class ReaSetupTests(unittest.TestCase):
                 self.assertIn('--ignore-scripts', command)
                 self.assertIn('--omit=optional', command)
                 self.assertNotIn('shell', kwargs)
+                self.assertTrue(kwargs['env']['npm_config_cache'])
                 self.assertLessEqual(kwargs['timeout'], 60)
             self.assertFalse(list(chosen.parent.glob('.rea-install-*')))
 
     def test_no_offline_archive_is_actionable_without_network(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            (root / 'config.local.json').write_text(json.dumps({'rea_backend': 'node_cli'}))
             with patch.object(helper, 'find_node', return_value=root / 'node.exe'), \
                  patch.object(helper, 'find_npm', return_value=root / 'npm-cli.js'), \
                  patch.object(helper, 'validate_runtime', side_effect=ValueError('missing')), \
@@ -165,7 +167,7 @@ class ReaSetupTests(unittest.TestCase):
             node.touch()
             for version, valid in [('v24.13.0\n', True), ('v22.19.0', True), ('v26.0.0', True),
                                    ('v24.10.0', False), ('v25.0.0', False), ('nonsense', False)]:
-                with self.subTest(version=version), patch.object(helper.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout=version)):
+                with self.subTest(version=version), patch.object(helper, '_run_command', return_value=SimpleNamespace(returncode=0, stdout=version)):
                     if valid:
                         self.assertEqual(node, helper.find_node({'COPILOT_REA_NODE': str(node)}))
                     else:

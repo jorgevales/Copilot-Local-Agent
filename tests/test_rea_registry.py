@@ -171,8 +171,10 @@ class REARegistryTests(unittest.IsolatedAsyncioTestCase):
         # Real local package health plus an injected invocation boundary. No
         # process or model is required for the distinct-context gate contract.
         health = {'available': True, 'version': '6.5.0', 'node': 'unused-native-runtime',
-                  'repository': str(self.root)}
-        with patch('copilot_agent.rea.rea_health', return_value=health), patch('copilot_agent.rea._run', run):
+                  'repository': str(self.root), 'selected_backend': 'node_cli'}
+        with patch('copilot_agent.rea.rea_health', return_value=health), \
+             patch('copilot_agent.rea._node_health', return_value=health), \
+             patch('copilot_agent.rea._run', run):
             outcomes = await asyncio.gather(*(self.registry.execute('rea.analyze_artifact', self.args,
                                                  dict(self.context)) for _ in range(3)))
         self.assertTrue(all(outcome['ok'] for outcome in outcomes), outcomes)

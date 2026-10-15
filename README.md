@@ -19,7 +19,7 @@ when the session ends. See [session behavior](docs/SUPERVISED_SESSIONS.md).
 inspection capability through three typed ToolRegistry tools. Deterministic
 `research.route` retains the API Anything-inspired public operation adapter,
 Crawl4AI and specialized browser/file tools. Independent bounded reads run in
-parallel. Startup and Setup automatically provision the pinned runtime with multiple writable-location and offline-cache fallbacks; see [REA repair options](docs/REA_INTEGRATION.md#recovery-options). [Centralized knowledge](docs/KNOWLEDGE_PERSISTENCE.md) reuses concise
+parallel. The bundled Python backend keeps REA available without Node; ordinary startup never installs software. Setup can repair optional Node with multiple writable-location and offline-cache fallbacks; see [REA repair options](docs/REA_INTEGRATION.md#recovery-options). [Centralized knowledge](docs/KNOWLEDGE_PERSISTENCE.md) reuses concise
 per-site views while the S:-backed ledger retains evidence and revisions.
 
 The optional `--discover-first` Crawl4AI guide lets you sign in, title each website campaign,
