@@ -97,6 +97,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `.`, `.protocol`, `__future__`, `asyncio`, `collections`, `hashlib`, `inspect`, `json`, `os`, `pathlib`, `re`, `time`, `urllib.parse`, `uuid`
 - Public symbols: `class BrowserAdapter; method names: __init__, set_feedback, _feedback, endpoint, _acquire_controller, _navigate_copilot, _claim_chat_page, _claim_committed_request_page, _connect_running_edge_fallback, _connect_direct_edge_fallback, _authentication_required, start, _evaluate, _configure_tool_context, new_tool_page, focus_chat, authorize_tool_domain, _safe_url, _visible, _editor, _open_picker, _providers, _open_provider, discover_models, discover_models_on_auxiliary_page, select_model, _stop_present, _generation_state, attach_files, _attachment_signature, _attachment_signatures, _attachment_identities, _remove_preloaded_attachments, _reconcile_preloaded_attachments, preload_attachments, composer_character_limit, _composer_limit_from_editor, _editor_text, _expand_response_code, _response_code_groups, _copy_response_code, _safe_dom_code_response, _prepare_submission, preload_exchange, _consume_preloaded_exchange, verify_interaction_ready, read_reconciled_draft, _verified_unsent_retry_control, capture_committed_response, exchange, diagnostics, close`; `class BrowserUIError(RuntimeError)`; `class CaptureTimeoutError(BrowserUIError)`; `class ExistingEdgeUnavailable(BrowserUIError)`; `class ModelAccessError(BrowserUIError)`; `class ModelUnavailableError(BrowserUIError)`; `class SubmissionAmbiguousError(BrowserUIError)`; `class SubmissionNotSentError(BrowserUIError)`; `composer_comparison(expected: str, actual: str) -> dict`; `copied_code_response(text: str, request_id: str) -> str`; `fresh_assistant(messages: list[dict], baseline: dict, user_key, request_id: str) -> str`; `model_access_exhausted(text)`; `model_rank(models: list[dict]) -> list[dict]`; `public_progress(messages: list[dict], user_key, request_id: str) -> list[dict]`; `response_envelope_closed(text: str) -> bool`; `upload_alert_is_error(text: str) -> bool`; `uploads_verified(snapshot: dict, names: list[str], send_enabled: bool) -> bool`
 
+### `copilot_agent/browser_inspection.py`
+
+- Role: Paired structural/visual evidence and explicit JavaScript on owned website tabs.
+- Direct imports: `.persistence`, `.policy`, `.web_navigation`, `__future__`, `asyncio`, `hashlib`, `pathlib`, `time`, `uuid`
+- Public symbols: `_schema(properties, required=()) [private helper]`; `execute_inspection(name, args, context)`
+
 ### `copilot_agent/bundle.py`
 
 - Role: Lossless, readable Markdown reference bundling; no ZIP, summary or deletion.
@@ -381,7 +387,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `copilot_agent/tools.py`
 
 - Role: Versioned local capabilities. Browser tools use guarded owned Edge tabs.
-- Direct imports: `.archives`, `.code_runner`, `.discovery_contracts`, `.discovery_engine`, `.discovery_knowledge`, `.downloads`, `.local_navigation`, `.logging_utils`, `.policy`, `.reconciliation`, `.research_permissions`, `.session_mode`, `.site_knowledge`, `.sync`, `.web_documents`, `.web_navigation`, `.web_operations`, `asyncio`, `ctypes`, `hashlib`, `importlib.metadata`, `json`, `os`, `pathlib`, `platform`, `re`, `shutil`, `sys`, `urllib.parse`, `uuid`
+- Direct imports: `.archives`, `.browser_inspection`, `.code_runner`, `.discovery_contracts`, `.discovery_engine`, `.discovery_knowledge`, `.downloads`, `.local_navigation`, `.logging_utils`, `.policy`, `.reconciliation`, `.research_permissions`, `.session_mode`, `.site_knowledge`, `.sync`, `.web_documents`, `.web_navigation`, `.web_operations`, `asyncio`, `ctypes`, `hashlib`, `importlib.metadata`, `json`, `os`, `pathlib`, `platform`, `re`, `shutil`, `sys`, `urllib.parse`, `uuid`
 - Public symbols: `_approved_write_target(name, args, policy, context) [private helper]`; `_atomic_replace(path, payload, expected_sha256, context, policy, *, operation_name='files.replace') [private helper]`; `_require_extended_read(path, policy) [private helper]`; `_swap_replacement_file(path, temp) [private helper]`; `_write_target(name, args, policy, context) [private helper]`; `class ToolRegistry; method names: definitions, definition, validate_input, validate_call, _limit, execute, _execute`; `configured_path_policy(config, session_dir)`; `definitions()`; `execute(name, args, context)`; `obj(properties, required=None)`; `schema_example(schema)`; `tool_path_policy(name, context)`; `validate(value, schema)`
 
 ### `copilot_agent/web_documents.py`
@@ -533,6 +539,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Role: Offline contract tests; no browser, file deletion, network, or Copilot send.
 - Direct imports: `asyncio`, `copilot_agent`, `copilot_agent.browser`, `copilot_agent.protocol`, `copilot_agent.reused_browser`, `hashlib`, `json`, `pathlib`, `sys`, `tempfile`, `types`, `unittest`, `unittest.mock`
 - Public symbols: `class CodeExpansionTests(unittest.IsolatedAsyncioTestCase); 2 public methods`; `class CorrelationTests(unittest.TestCase); 3 public methods`; `class ExchangeTests(unittest.IsolatedAsyncioTestCase); 16 public methods`; `class FakeButton; 3 public methods`; `class FakeEditor; 3 public methods`; `class InteractionReadinessTests(unittest.IsolatedAsyncioTestCase); 3 public methods`; `class OfflineAdapter(BrowserAdapter); 12 public methods`; `class PreloadedOfflineAdapter(OfflineAdapter); 3 public methods`; `class ReadinessAdapter(BrowserAdapter); 7 public methods`; `class ReadinessControl; 1 public methods`; `class RemainingCorrelationTests(unittest.TestCase); 14 public methods`; `class StartupRecoveryTests(unittest.IsolatedAsyncioTestCase); 9 public methods`; `class ToolContextTests(unittest.IsolatedAsyncioTestCase); 10 public methods`
+
+### `tests/test_browser_inspection.py`
+
+- Role: Implementation module; responsibilities are identified by its public symbols and imports.
+- Direct imports: `asyncio`, `copilot_agent.browser_inspection`, `copilot_agent.policy`, `copilot_agent.tools`, `hashlib`, `json`, `pathlib`, `tempfile`, `tests`, `types`, `unittest`, `unittest.mock`
+- Public symbols: `class InspectionBrowserTests(unittest.IsolatedAsyncioTestCase); 3 public methods`; `class InspectionConcurrencyTests(unittest.IsolatedAsyncioTestCase); 1 public methods`
 
 ### `tests/test_browser_plan_extensions.py`
 

@@ -25,6 +25,7 @@ from .archives import ArchiveService, inspect_zip, ArchiveError
 from .downloads import DownloadError
 from .web_navigation import (NAVIGATION_SPECS, validate_navigation, execute_navigation,
                              clear_navigation_state, get_primary_navigation_tab_id)
+from .browser_inspection import INSPECTION_SPECS, execute_inspection
 from .web_documents import DOCUMENT_SPECS, DOCUMENT_EXAMPLES, validate_documents, execute_documents
 from .site_knowledge import KNOWLEDGE_SPECS, KNOWLEDGE_EXAMPLES, validate_knowledge, execute_knowledge, safe_proposal, KnowledgeValidationError, KnowledgeWriteError, reconcile_knowledge_call
 from .discovery_engine import DISCOVERY_SPECS, validate_discovery, execute_discovery
@@ -176,6 +177,7 @@ SPECS = {
 
 
 SPECS.update(NAVIGATION_SPECS)
+SPECS.update(INSPECTION_SPECS)
 SPECS.update(DOCUMENT_SPECS)
 SPECS.update(KNOWLEDGE_SPECS)
 SPECS['knowledge.note'] = (obj({'title': {'type': 'string', 'minLength': 1, 'maxLength': 200},
@@ -394,6 +396,8 @@ class ToolRegistry:
         if name == "code_runner":
             examples = [{"arguments":{"script":"print('reviewed computation')","purpose":"Compute a bounded result","language":"python_subset","working_directory":".","read_paths":[],"create_paths":[],"expected_outputs":[],"commands":[],"network_destinations":[],"permissions":[],"risk_summary":"No external side effects","recovery_notes":"Review failure output before retry"}}]
         if name == "browser.open": examples = [{"arguments":{"url":"https://example.com/"}}]
+        if name == 'browser.inspect': examples = [{'arguments': {'tab_id': 'tab-1', 'max_nodes': 300}}]
+        if name == 'browser.javascript': examples = [{'arguments': {'tab_id': 'tab-1', 'expression': '() => ({title: document.title, path: location.pathname})'}}]
         if name == "browser.reconcile": examples = [{"arguments":{"call_id":"prior-navigation-call-id","outcome":"completed","observed_url":"https://example.com/actual-page"}}]
         if name == "browser.recover_uncertain": examples = [{"arguments":{"call_id":"prior-form-call-id","checkpoint_url":"https://example.com/start"}}]
         if name == "operation.quarantine": examples = [{"arguments":{"call_id":"prior-uncertain-call-id"}}]
@@ -702,6 +706,7 @@ class ToolRegistry:
             roots=config_value(config,"allowed_roots",[context["session_dir"]])
             policy=tool_path_policy(name, context)
             timeout=min(30,config_value(config,"tool_timeout",30))
+            if name == 'browser.javascript': timeout = args.get('timeout_ms', 10000) / 1000 + 2
             if name=="created.wait": timeout=min(300,config_value(config,"sync_timeout",120))+1
             if name=="copilot.download": timeout=min(295,config_value(config,"download_timeout",90))+1
             if name in {'browser.plan', 'browser.download_batch'}:
@@ -720,7 +725,7 @@ class ToolRegistry:
                 if result.get('outcome') in {'failed', 'incomplete', 'cancelled'}:
                     return self._limit({'ok': False, 'tool': name, 'result': result,
                                         'error': {'code': 'operation_failed', 'message': 'Discovery did not meet the objective; inspect retained evidence and material gaps.'}}, context)
-            if name in NAVIGATION_SPECS or name in DOCUMENT_SPECS:
+            if name in NAVIGATION_SPECS or name in DOCUMENT_SPECS or name in INSPECTION_SPECS:
                 if result.get('status') in {'failed', 'partial', 'blocked', 'interrupted', 'cancelled', 'needs_user_input', 'uncertain'}:
                     return self._limit({'ok': False, 'tool': name, 'result': result,
                                         'error': {'code': result.get('error', {}).get('code', 'operation_failed')
@@ -932,6 +937,7 @@ class ToolRegistry:
         if name == 'browser.diagnostics':
             return browser_diagnostics(context['session_state'], context['browser'])
         if name in NAVIGATION_SPECS: return await execute_navigation(name, args, context, policy)
+        if name in INSPECTION_SPECS: return await execute_inspection(name, args, context)
         if name in DOCUMENT_SPECS: return await execute_documents(name, args, context, policy)
         if name in KNOWLEDGE_SPECS: return execute_knowledge(name, args, context, policy)
         if name in DISCOVERY_SPECS: return await execute_discovery(name, args, context)

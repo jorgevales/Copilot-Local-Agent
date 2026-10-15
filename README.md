@@ -1,5 +1,9 @@
 # Copilot Local Agent
 
+`browser.inspect` now captures DOM/app structure and a screenshot concurrently,
+automatically attaching the image for Copilot. `browser.javascript` supports
+targeted DOM queries and SPA navigation. See [DOM and visual navigation](docs/DOM_AND_VISUAL_NAVIGATION.md).
+
 Startup offers **one fast full-access option for this session**: skip package quality
 review and individual plan approvals, read and edit ordinary accessible files,
 and navigate across websites without domain or customer-category bindings.
