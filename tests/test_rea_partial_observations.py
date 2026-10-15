@@ -72,7 +72,8 @@ class PartialObservationTests(unittest.IsolatedAsyncioTestCase):
             definitions = ToolRegistry(dict(self.config, rea_backend='auto')).definition('rea.analyze_artifact')
         self.assertEqual(180, definitions['limits']['readiness_timeout_seconds'])
         self.assertEqual(45, definitions['limits']['analysis_timeout_seconds'])
-        self.assertEqual(237, definitions['limits']['timeout_seconds'])
+        self.assertEqual(15, definitions['limits']['fallback_timeout_seconds'])
+        self.assertEqual(252, definitions['limits']['timeout_seconds'])
 
     def test_complete_path_restoration_cannot_exceed_output_budget_as_success(self):
         result = _save({'execution_id': 'a' * 32, 'backend': 'python_native', 'tool': 'rea.analyze_artifact',

@@ -87,7 +87,9 @@ class PromptBuilder:
                                           'browser_authenticated_network_observers': False}
             if not definition['availability']['available']:
                 definition['description'] = 'UNAVAILABLE: flags/runtime gate disabled. ' + definition['description']
+        from .rea_guidance import rea_usage_guidance
         write_json(self.catalogue, {'schema_version': '1.0', 'tools': definitions,
+                                   'rea_usage_guidance': rea_usage_guidance(config),
                                    'discovery_navigation_flags': feature_flags})
         paths = [*self.guidance, self.schema, self.catalogue,
                  self.package_schema_compat, self.package_schema]
@@ -227,6 +229,7 @@ class PromptBuilder:
             'instruction': 'Both paths identify the same Discoveries knowledge root. Save through the registered knowledge tools; keep each website in its canonical folder, use concise active views, and never invent a local fallback.'}
         message['research_routing'] = {
             'selector': 'research.route', 'rea': copy.deepcopy(self.rea_availability),
+            'usage_reference': 'Read tool-catalogue.json:rea_usage_guidance and each REA usage_guidance before constructing requests. Use only declared parameters and observed existing inputs. Degraded Python fallback does not prove upstream Node success.',
             'priority': ['REA for supported general investigation',
                          'API Anything-inspired operation.list/operation.call for known approved public APIs',
                          'Crawl4AI for structured crawling and extraction',
@@ -338,7 +341,7 @@ class PromptBuilder:
                 message.pop(key, None)
             message['research_routing'] = {
                 'selector': 'research.route', 'rea': copy.deepcopy(self.rea_availability),
-                'instruction': 'The same availability snapshot is in all three REA catalogue entries. Full research strategy follows with the task.'}
+                'instruction': 'Before constructing REA requests read tool-catalogue.json:rea_usage_guidance and method usage_guidance, included in this startup catalogue. Use exact schemas and existing observed inputs; never guess parameters or paths. Python fallback is explicitly degraded. The same availability snapshot is in all three REA entries.'}
             message['instruction'] = (
                 'Read every complete reference component in the eight physical attachments listed in startup_references, including every named section of the grouped guidance/schema/catalogue files. '
                 'Return initialization_response_template as JSON between <<<COPILOT_AGENT_V1_BEGIN>>> and <<<COPILOT_AGENT_V1_END>>>. '

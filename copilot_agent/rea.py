@@ -586,6 +586,8 @@ def validate_rea(name, args, context, policy):
     validate(args, REA_SPECS[name][0])
     config = context.get('config', {})
     _bounded(config, 'rea_timeout_seconds', 45, 1, 180)
+    _bounded(config, 'rea_fallback_timeout_seconds', 15, 1, 180)
+    _bounded(config, 'rea_max_transport_bytes', 33554432, 16384, 67108864)
     _bounded(config, 'rea_max_output_bytes', 1048576, 16384, 8388608)
     _bounded(config, 'rea_max_parallel', 3, 1, 8)
     limit = _bounded(config, 'rea_max_input_bytes', 20971520, 1024, 104857600)
@@ -730,8 +732,70 @@ def _observation_flags(result):
     return result
 
 
+async def _read_bounded(stream, limit, metrics):
+    """Bound retained bytes, never pipe consumption: the child must reach EOF."""
+    collected = bytearray()
+    digest = hashlib.sha256()
+    metrics.update(bytes=0, retained_bytes=0, truncated=False, sha256=digest.hexdigest())
+    while True:
+        block = await stream.read(65536)
+        if not block:
+            return bytes(collected)
+        metrics['bytes'] += len(block)
+        digest.update(block)
+        metrics['sha256'] = digest.hexdigest()
+        available = max(0, limit - len(collected))
+        collected.extend(block[:available])
+        metrics['retained_bytes'] = len(collected)
+        metrics['truncated'] = metrics['bytes'] > limit
+
+
+def _process_command_diagnostic(command):
+    """Record exact argument order with consistently mirrored environment paths."""
+    command = [str(item) for item in command]
+    launcher = next((item for item in command[1:] if item.replace('\\', '/').endswith('/scripts/rea.mjs')), None)
+    node_root = str(Path(command[0]).parent)
+    runtime_root = str(Path(launcher).parent.parent) if launcher else None
+    mirrors = [(command[0], '<NODE_ROOT>/node.exe' if launcher else '<EXECUTABLE>')]
+    if runtime_root:
+        mirrors.append((runtime_root, '<REA_RUNTIME_ROOT>'))
+    mirrors.append((node_root, '<NODE_ROOT>'))
+    def mirror(item):
+        for original, replacement in mirrors:
+            item = item.replace(original, replacement)
+            item = item.replace(original.replace('\\', '/'), replacement)
+        if re.match(r'^https?://', item):
+            return '<BROWSER_CDP_ENDPOINT>'
+        if re.match(r'^(?:[A-Za-z]:[\\/]|\\\\|/)', item):
+            return '<INPUT_PATH>'
+        return redact(item)
+    arguments = []
+    previous = ''
+    for item in command[1:]:
+        if not launcher:
+            arguments.append(item if item in {'-I', '-B', '-m', '-c', 'copilot_agent.rea_python_worker'} else '<WORKER_ARGUMENT>')
+        else:
+            arguments.append('<BROWSER_TARGET_ID>' if previous in {'--target-id', '--target'} else mirror(item))
+        previous = item
+    return {'executable': mirror(command[0]),
+            'runtime_root': '<REA_RUNTIME_ROOT>' if runtime_root else None,
+            'arguments': arguments}
+
+
+def _stderr_diagnostic(data):
+    """Useful fixed error labels, without copying page data or credential text."""
+    lower = data.decode('utf-8', errors='replace').lower()
+    labels = [label for label in ('invalid argument', 'unknown option', 'unknown command',
+              'missing required', 'cannot find module', 'module_not_found', 'syntaxerror',
+              'out of memory', 'heap limit', 'econnrefused', 'etimedout', 'timeout',
+              'access denied', 'permission denied', 'enoent', 'cleanup_incomplete') if label in lower]
+    return '; '.join(labels) or ('stderr present; content omitted' if data else '')
+
+
 async def _run(command, *, cwd, timeout, output_limit, context):
-    from .local_python_runner import _read_bounded, _terminate_pid
+    from .local_python_runner import _terminate_pid
+    started = time.monotonic()
+    stdout_metrics, stderr_metrics = {}, {}
     allowed = {'SYSTEMROOT', 'WINDIR', 'PATH', 'PATHEXT', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'USERPROFILE', 'HOME', 'LOCALAPPDATA', 'APPDATA'}
     env = {key: value for key, value in os.environ.items() if key.upper() in allowed}
     env['REA_LOG_LEVEL'] = 'silent'
@@ -743,12 +807,36 @@ async def _run(command, *, cwd, timeout, output_limit, context):
             stderr=asyncio.subprocess.PIPE, **options)
     except OSError:
         context['rea_cleanup_confirmed'] = True
+        context['rea_process_diagnostics'] = {
+            'stage': 'startup', 'failure_class': 'spawn_failed',
+            'duration_ms': round((time.monotonic() - started) * 1000, 3),
+            'command': _process_command_diagnostic(command), 'returncode': None,
+            'stdout_bytes': 0, 'stderr_bytes': 0, 'stdout_retained_bytes': 0,
+            'stderr_retained_bytes': 0, 'stdout_truncated': False, 'stderr_truncated': False}
         raise
     context['rea_execution_started'] = True
-    readers = [asyncio.create_task(_read_bounded(process.stdout, output_limit)),
-               asyncio.create_task(_read_bounded(process.stderr, min(output_limit, 65536)))]
+    spawned = time.monotonic()
+    readers = [asyncio.create_task(_read_bounded(process.stdout, output_limit, stdout_metrics)),
+               asyncio.create_task(_read_bounded(process.stderr, min(output_limit, 65536), stderr_metrics))]
     waiter = asyncio.create_task(process.wait())
-    deadline = time.monotonic() + timeout
+    deadline = started + timeout
+    def finish(status=None, *, stopped=True, failure_class=None):
+        stdout = readers[0].result() if readers[0].done() and not readers[0].cancelled() and readers[0].exception() is None else b''
+        stderr = readers[1].result() if readers[1].done() and not readers[1].cancelled() and readers[1].exception() is None else b''
+        diagnostics = {'stage': 'analysis', 'duration_ms': round((time.monotonic() - started) * 1000, 3),
+                       'spawn_ms': round((spawned - started) * 1000, 3),
+                       'returncode': process.returncode, 'command': _process_command_diagnostic(command),
+                       'stdout_limit_bytes': output_limit, 'stderr_limit_bytes': min(output_limit, 65536),
+                       'stderr_preview': _stderr_diagnostic(stderr), 'failure_class': failure_class}
+        for name, metrics in (('stdout', stdout_metrics), ('stderr', stderr_metrics)):
+            for key in ('bytes', 'retained_bytes', 'truncated', 'sha256'):
+                diagnostics[f'{name}_{key}'] = metrics.get(key, False if key == 'truncated' else 0 if key != 'sha256' else None)
+        result = {'stdout': stdout, 'stderr': stderr, 'returncode': process.returncode,
+                  'process_diagnostics': diagnostics, 'output_complete': not stdout_metrics.get('truncated', False)}
+        if status:
+            result.update(status=status if stopped else 'uncertain', side_effects_uncertain=not stopped)
+        context['rea_process_diagnostics'] = diagnostics
+        return result
     try:
         while not all(task.done() for task in [*readers, waiter]):
             for task in readers:
@@ -762,7 +850,9 @@ async def _run(command, *, cwd, timeout, output_limit, context):
             await asyncio.wait([task for task in [*readers, waiter] if not task.done()], timeout=.1,
                                return_when=asyncio.FIRST_COMPLETED)
         context['rea_cleanup_confirmed'] = True
-        return {'stdout': readers[0].result(), 'stderr': readers[1].result(), 'returncode': process.returncode}
+        if stdout_metrics.get('truncated'):
+            return finish('output_limit', failure_class='stdout_output_limit')
+        return finish(failure_class='cli_failure' if process.returncode else None)
     except (asyncio.CancelledError, Exception) as error:
         # Reuse the project's owned-process termination primitive. Never kill a
         # PID once this child's exit has been observed, when it could be reused.
@@ -772,12 +862,18 @@ async def _run(command, *, cwd, timeout, output_limit, context):
             await asyncio.wait_for(asyncio.shield(waiter), 3)
         except asyncio.TimeoutError:
             stopped = False
-        status = ('cancelled' if isinstance(error, asyncio.CancelledError) else 'timeout'
+        status = ('cancelled' if isinstance(error, asyncio.CancelledError) else 'output_limit'
+                  if stdout_metrics.get('truncated') else 'timeout'
                   if isinstance(error, asyncio.TimeoutError) else 'output_limit'
                   if isinstance(error, PolicyError) else 'failed')
         context['rea_cleanup_confirmed'] = stopped
-        return {'stdout': b'', 'stderr': b'', 'returncode': process.returncode,
-                'status': status if stopped else 'uncertain', 'side_effects_uncertain': not stopped}
+        failure_class = {'timeout': 'startup_timeout' if spawned - started >= timeout else 'analysis_timeout', 'output_limit': 'stdout_output_limit',
+                         'cancelled': 'cancelled', 'failed': 'pipe_read_failure'}[status]
+        result = finish(status, stopped=stopped, failure_class=failure_class)
+        if failure_class == 'startup_timeout':
+            result['process_diagnostics']['stage'] = 'startup'
+        result['process_diagnostics']['deadline_exceeded'] = isinstance(error, asyncio.TimeoutError)
+        return result
     finally:
         for task in [*readers, waiter]:
             if not task.done():
@@ -798,11 +894,30 @@ def _save(result, context):
     limit = config_value(context.get('config', {}), 'rea_max_output_bytes', 1048576)
     complete_size = len(json.dumps(dict(result, evidence_path=str(path), evidence_sha256='0' * 64),
                                    ensure_ascii=True).encode('utf-8'))
+    if complete_size > limit and result.get('backend') == 'node_cli' and observation_usable(result):
+        # The model response budget is not the upstream evidence transport budget.
+        # Retain the full sanitized observation and return a clearly labelled view.
+        from .rea_projection import compact_node_result
+        from .persistence import write_preserving
+        full_text = json.dumps(result, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
+        full_bytes = full_text.encode('utf-8')
+        artifact_limit = config_value(context.get('config', {}), 'rea_max_transport_bytes', 33554432)
+        if len(full_bytes) <= artifact_limit:
+            digest = hashlib.sha256(full_bytes).hexdigest()
+            projection = compact_node_result(result, full_evidence_path=str(path),
+                full_evidence_sha256=digest, full_evidence_bytes=len(full_bytes), limit=limit)
+            if projection is not None:
+                write_preserving(path, full_text)
+                if hashlib.sha256(io_path(path).read_bytes()).hexdigest() != digest:
+                    raise OSError('Retained full REA evidence failed readback verification')
+                return projection
     if complete_size > limit:
         status = result.get('status', 'failed')
         result = {key: item for key, item in result.items() if key in {
             'execution_id', 'backend', 'tool', 'target', 'target_type', 'target_identity_sha256',
-            'started_at', 'finished_at', 'execution_started', 'side_effects_uncertain', 'provenance', 'retained_scratch'}}
+            'started_at', 'finished_at', 'execution_started', 'side_effects_uncertain', 'provenance', 'retained_scratch',
+            'process_diagnostics', 'failure_stage', 'error', 'prior_backend_attempt', 'degraded',
+            'fallback_used', 'intended_backend', 'intended_backend_succeeded', 'exit_status', 'stdout_bytes', 'stderr_bytes'}}
         result.update(status='output_limit' if status in {'completed', 'partial'} else status,
                       observation_verified=False, coverage_complete=False,
                       limitations=['Complete evidence with original source coordinates exceeded the configured output budget; no complete observation is claimed.'])
@@ -931,12 +1046,18 @@ async def execute_rea(name, args, context, policy):
                 'started_at': now(), 'finished_at': now(), 'side_effects_uncertain': True,
                 'execution_started': False, 'diagnostic': health}
     if health['selected_backend'] == 'python_native':
-        return await _execute_python(name, args, context, policy)
-    began = time.monotonic()  # Readiness has a separate allowance from analysis.
+        fallback = await _execute_python(name, args, context, policy)
+        if config_value(config, 'rea_backend', 'auto') == 'auto':
+            fallback.update(degraded=True, fallback_used=True, intended_backend='node_cli',
+                            intended_backend_succeeded=False,
+                            prior_backend_attempt={'backend': 'node_cli', 'status': 'unavailable',
+                                'execution_started': False, 'failure_stage': 'readiness',
+                                'diagnostic': health.get('backends', {}).get('node_cli', {})})
+            return _save(fallback, context)
+        return fallback
     prepared = {'_name': name, '_arguments': args}
     method = name.split('.')[1]
     automatic = config_value(config, 'rea_backend', 'auto') == 'auto'
-    total_timeout = config_value(config, 'rea_timeout_seconds', 45)
     def limited(seconds):
         selected = copy.copy(config)
         if isinstance(selected, dict):
@@ -944,23 +1065,27 @@ async def execute_rea(name, args, context, policy):
         else:
             selected.rea_timeout_seconds = max(1, int(seconds))
         return {**context, 'config': selected, '_rea_runtime': context.setdefault('_rea_runtime', {})}
-    node_context = limited(total_timeout // 2) if automatic else context
+    # Give the intended upstream backend its full configured allowance.
+    node_context = context
     result = await getattr(NodeCliREABackend(config, policy), method)(prepared, node_context)
     for key in ('rea_execution_started', 'rea_cleanup_confirmed', 'rea_retained_scratch'):
         if key in node_context:
             context[key] = node_context[key]
     if (automatic and result.get('status') in {'unavailable', 'failed', 'timeout', 'output_limit'}
             and not result.get('side_effects_uncertain')):
-        remaining = total_timeout - (time.monotonic() - began)
-        if remaining < 1:
-            return result
-        fallback_context = limited(remaining)
+        fallback_context = limited(config_value(config, 'rea_fallback_timeout_seconds', 15))
         fallback = await _execute_python(name, args, fallback_context, policy)
         for key in ('rea_execution_started', 'rea_cleanup_confirmed', 'rea_retained_scratch'):
             if key in fallback_context:
                 context[key] = fallback_context[key]
-        fallback['prior_backend_attempt'] = {'backend': 'node_cli', 'status': result['status'],
-                                             'execution_id': result['execution_id']}
+        fallback.update(degraded=True, fallback_used=True, intended_backend='node_cli',
+                        intended_backend_succeeded=False)
+        fallback['prior_backend_attempt'] = {key: copy.deepcopy(result[key]) for key in (
+            'backend', 'status', 'execution_id', 'execution_started', 'failure_stage',
+            'error', 'diagnostic', 'process_diagnostics', 'exit_status', 'stdout_bytes',
+            'stderr_bytes', 'evidence_path', 'evidence_sha256', 'started_at', 'finished_at') if key in result}
+        fallback.setdefault('limitations', []).append(
+            'Degraded fallback: intended upstream node_cli failed; Python evidence does not establish Node success.')
         # Retain fallback provenance in its hashed evidence as well as the result.
         return _save(fallback, context)
     if 'diagnostic' in result:
@@ -969,20 +1094,24 @@ async def execute_rea(name, args, context, policy):
 
 
 async def _execute_node(name, args, context, policy):
+    context.pop('rea_process_diagnostics', None)
     context['rea_execution_started'] = False
     context['rea_cleanup_confirmed'] = True
     context.pop('rea_retained_scratch', None)
     prepared = validate_rea(name, args, context, policy)
     config = context.get('config', {})
+    readiness_began = time.monotonic()
     health = _node_health(config)
+    readiness_ms = round((time.monotonic() - readiness_began) * 1000, 3)
     base = {'execution_id': uuid.uuid4().hex, 'backend': 'node_cli', 'tool': name, 'target': prepared['target'],
             'target_type': prepared['target_type'], 'started_at': now(),
             'side_effects_uncertain': False, 'execution_started': False,
+            'readiness_ms': readiness_ms,
             'provenance': {'interface': 'REA fixed CLI', 'version': health.get('version'),
                            'input': prepared.get('input'), 'request_id': context.get('source_request_id')},
             'recovery': ['Use operation.list/operation.call for a known API operation, Crawl4AI for content, or a specialized registered inspection tool.']}
     if not health['available']:
-        return {**base, 'status': 'unavailable', 'finished_at': now(), 'diagnostic': health}
+        return {**base, 'status': 'unavailable', 'failure_stage': 'readiness', 'finished_at': now(), 'diagnostic': health}
     slots = _bounded(config, 'rea_max_parallel', 3, 1, 8)
     # Context is session-owned; reset when a later test/runtime uses a new loop.
     loop = asyncio.get_running_loop()
@@ -1036,34 +1165,45 @@ async def _execute_node(name, args, context, policy):
         try:
             run = await _run(command, cwd=health['repository'],
                 timeout=config_value(config, 'rea_timeout_seconds', 45),
-                output_limit=config_value(config, 'rea_max_output_bytes', 1048576), context=context)
+                output_limit=config_value(config, 'rea_max_transport_bytes', 33554432), context=context)
             base['execution_started'] = context.get('rea_execution_started', False)
-            if run.get('status'):
-                result = {**base, 'status': run['status'], 'side_effects_uncertain': run['side_effects_uncertain'],
+            if run.get('status') or run.get('output_complete') is False:
+                result = {**base, 'status': run.get('status', 'output_limit'), 'failure_stage': 'transport' if run.get('status') == 'output_limit' or run.get('output_complete') is False else 'analysis', 'side_effects_uncertain': run.get('side_effects_uncertain', False),
                           'limitations': ['REA output was not accepted; no complete observation is claimed.']}
             else:
                 result = {**base, **_normalize(run['stdout'], run['returncode']), 'exit_status': run['returncode'],
                           'stdout_bytes': len(run['stdout']), 'stderr_bytes': len(run['stderr'])}
+                if result.get('status') not in {'completed', 'partial'}:
+                    result['failure_stage'] = 'invocation' if result.get('error', {}).get('code') in {'invalid_arguments', 'invalid_argument', 'usage_error', 'invalid_option', 'UNKNOWN_OPTION', 'UNKNOWN_COMMAND'} else 'cli'
                 if result.get('side_effects_uncertain'):
                     context['rea_cleanup_confirmed'] = False
+            result.update(process_diagnostics=run.get('process_diagnostics', {}), exit_status=run.get('returncode'),
+                          stdout_bytes=run.get('process_diagnostics', {}).get('stdout_bytes', len(run.get('stdout', b''))),
+                          stderr_bytes=run.get('process_diagnostics', {}).get('stderr_bytes', len(run.get('stderr', b''))))
             if page is not None and page.url != prepared['url']:
-                result.update(status='partial', observation_verified=False, limitations=['Owned page navigated during passive inspection; inspect its new state before reuse.'])
+                result['observation_verified'] = False
+                if result.get('status') in {'completed', 'partial'}:
+                    result['status'] = 'partial'
+                result.setdefault('limitations', []).append('Owned page navigated during passive inspection; inspect its new state before reuse.')
             if page is None:
                 after = validate_rea(name, args, context, policy)
                 if after['input'] != prepared['input'] and not result.get('side_effects_uncertain'):
-                    result.update(status='partial', observation_verified=False, limitations=['Input changed during analysis; findings are not a verified observation of current bytes.'])
+                    result['observation_verified'] = False
+                    if result.get('status') in {'completed', 'partial'}:
+                        result['status'] = 'partial'
+                    result.setdefault('limitations', []).append('Input changed during analysis; findings are not a verified observation of current bytes.')
         except asyncio.CancelledError:
             base['execution_started'] = context.get('rea_execution_started', False)
             result = {**base, 'status': 'uncertain', 'side_effects_uncertain': True,
                       'error': {'code': 'cancelled', 'message': 'Cancellation interrupted REA process startup; inspect owned resources before retry.'}}
         except (ValueError, UnicodeError, RecursionError) as error:
-            result = {**base, 'status': 'failed', 'error': {'code': 'invalid_output', 'message': str(error)},
+            result = {**base, 'status': 'failed', 'failure_stage': 'output_processing', 'process_diagnostics': context.get('rea_process_diagnostics', {}), 'error': {'code': 'invalid_output', 'message': str(error)},
                       'limitations': ['No valid complete REA Evidence object was accepted.']}
             if 'run' in locals():
                 result.update(exit_status=run.get('returncode'), stdout_bytes=len(run.get('stdout', b'')),
                               stderr_bytes=len(run.get('stderr', b'')))
         except OSError as error:
-            result = {**base, 'status': 'failed', 'error': {'code': 'unavailable', 'message': type(error).__name__},
+            result = {**base, 'status': 'failed', 'failure_stage': 'startup', 'process_diagnostics': context.get('rea_process_diagnostics', {}), 'error': {'code': 'unavailable', 'message': type(error).__name__},
                       'limitations': ['REA process or input became unavailable.']}
         if staging is not None:
             result = _restore_source_paths(result, staging)

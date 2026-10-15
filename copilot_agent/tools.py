@@ -485,7 +485,9 @@ class ToolRegistry:
         if name in REA_SPECS:
             readiness = (0 if config_value(self.config, 'rea_backend', 'auto') == 'python_native'
                          else config_value(self.config, 'rea_node_readiness_timeout_seconds', 180))
-            timeout = config_value(self.config, 'rea_timeout_seconds', 45) + readiness + 12
+            fallback = (config_value(self.config, 'rea_fallback_timeout_seconds', 15)
+                        if config_value(self.config, 'rea_backend', 'auto') == 'auto' else 0)
+            timeout = config_value(self.config, 'rea_timeout_seconds', 45) + readiness + fallback + 12
             result_schema = {'anyOf': [{'type': 'object', 'properties': {
                 'status': {'enum': ['completed', 'partial', 'failed', 'unavailable', 'cancelled', 'timeout', 'output_limit', 'uncertain']},
                 'target': {'type': 'string'}, 'target_type': {'type': 'string'},
@@ -509,10 +511,15 @@ class ToolRegistry:
                 "examples":examples,
                 **({'approval_policy_by_operation': {'list': 'read_only', 'open': 'user_approval', 'close': 'user_approval', 'reset': 'user_approval'}} if name == 'browser.tabs' else {})}
         if name in REA_SPECS:
+            from .rea_guidance import rea_usage_guidance
+            definition['usage_guidance'] = rea_usage_guidance(self.config)['methods'][name]
+            definition['shared_usage_reference'] = 'tool-catalogue.json:rea_usage_guidance'
             definition['availability'] = self.rea_availability()
             definition['output_size_limit'] = config_value(self.config, 'rea_max_output_bytes', 1048576)
             definition['limits'].update(output_bytes=definition['output_size_limit'],
                 analysis_timeout_seconds=config_value(self.config, 'rea_timeout_seconds', 45),
+                fallback_timeout_seconds=fallback,
+                transport_bytes=config_value(self.config, 'rea_max_transport_bytes', 33554432),
                 readiness_timeout_seconds=readiness,
                 input_bytes=config_value(self.config, 'rea_max_input_bytes', 20971520),
                 concurrency=config_value(self.config, 'rea_max_parallel', 3))
