@@ -13,7 +13,7 @@ from .logging_utils import SENSITIVE
 from .policy import PathPolicy, PolicyError, config_value, reject_path_redirection
 
 MAX_USER_FILES=20
-MAX_FILE_BYTES=20*1024*1024
+MAX_FILE_BYTES=100*1024*1024
 TEXT_EXTENSIONS=frozenset({'.txt','.md','.json','.csv','.py','.js','.ts','.jsx','.tsx','.css','.html','.htm','.xml','.svg','.yaml','.yml','.toml','.ini','.cfg','.sql','.ps1','.bat','.cmd','.sh'})
 OFFICE_EXTENSIONS=frozenset({'.docx','.xlsx','.pptx'})
 SUPPORTED_EXTENSIONS=TEXT_EXTENSIONS|OFFICE_EXTENSIONS|{'.pdf','.png','.jpg','.jpeg','.webp','.bmp'}

@@ -17,7 +17,7 @@ class AttachmentTests(unittest.TestCase):
         self.root=Path(tempfile.mkdtemp(prefix='copilot_attachment_test_')).resolve()
         self.account=self.root/'account';self.account.mkdir()
         self.storage=self.account/'agent';self.storage.mkdir()
-        self.config=SimpleNamespace(storage_dir=self.storage,profile_dir=self.storage/'runtime/profile',max_attachment_bytes=20*1024*1024,allowed_roots=[str(self.storage/'workspace')])
+        self.config=SimpleNamespace(storage_dir=self.storage,profile_dir=self.storage/'runtime/profile',max_attachment_bytes=100*1024*1024,allowed_roots=[str(self.storage/'workspace')])
         self.queue=AttachmentQueue(self.config,account_root=self.account)
 
     def file(self,name,content='synthetic safe attachment',root=None):
@@ -66,6 +66,17 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(self.queue.paths(),[initial])
         self.queue.add(paths[:MAX_USER_FILES-1]);self.assertEqual(len(self.queue.records()),MAX_USER_FILES)
         self.queue.add([initial]);self.assertEqual(len(self.queue.records()),MAX_USER_FILES)
+
+    def test_default_attachment_cap_accepts_files_over_twenty_megabytes(self):
+        from copilot_agent.attachments import MAX_FILE_BYTES
+        self.assertEqual(100 * 1024 * 1024, MAX_FILE_BYTES)
+        path = self.account / 'large.pdf'
+        with path.open('wb') as handle:
+            handle.write(b'%PDF-1.7\n')
+            handle.truncate(25 * 1024 * 1024)
+        record = self.queue.add([path])[0]
+        self.assertEqual(25 * 1024 * 1024, record['size'])
+        self.assertTrue(path.exists())
 
     def test_zip_packages_disguises_and_native_office_container(self):
         memory=io.BytesIO()

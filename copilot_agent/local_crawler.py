@@ -309,15 +309,21 @@ async def crawl_websites(args, context, *, factory=None):
             'evidence_kind': 'raw_task_evidence_not_reusable_knowledge'}
 
 
-def read_knowledge(args, context):
+def read_knowledge(args, context, *, policy=None):
     """Read arbitrary-sized saved knowledge in windows without UI result truncation."""
-    legacy = knowledge_root(context['config']).resolve()
-    root = website_storage_root(legacy).resolve()
-    requested = Path(args['path']).resolve()
-    roots = (legacy, root / 'sites', root / 'campaigns')
-    if not any(requested.is_relative_to(candidate) for candidate in roots):
-        raise PolicyError('Choose a file inside the shared website knowledge directory.')
-    reject_path_redirection(requested)
+    if policy is not None:
+        requested = policy.resolve(args['path'], must_exist=True)
+    else:
+        legacy = knowledge_root(context['config']).resolve()
+        root = website_storage_root(legacy).resolve()
+        requested = Path(args['path']).resolve()
+        roots = (legacy, root / 'sites', root / 'campaigns')
+        if not any(requested.is_relative_to(candidate) for candidate in roots):
+            raise PolicyError('Choose a file inside the shared website knowledge directory.')
+        reject_path_redirection(requested)
+    cap = config_value(context.get('config', {}), 'max_attachment_bytes', 100 * 1024 * 1024)
+    if not requested.is_file() or requested.stat().st_size > cap:
+        raise PolicyError('Crawl4AI read accepts files up to the configured attachment size limit.')
     text = io_path(requested).read_text(encoding='utf-8')
     offset, limit = args.get('offset', 0), args.get('limit', 8000)
     content = text[offset:offset + limit]

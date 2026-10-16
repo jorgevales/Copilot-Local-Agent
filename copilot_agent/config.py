@@ -38,6 +38,7 @@ class Config:
     startup_timeout: float = 120
     response_timeout: float = 180
     response_max_duration: float = 900
+    attachment_timeout: float = 600
     poll_interval: float = .5
     capture_stable_samples: int = 3
     performance_enabled: bool = True
@@ -76,7 +77,7 @@ class Config:
     rea_max_output_bytes: int = 1048576
     rea_max_input_bytes: int = 20971520
     rea_max_parallel: int = 3
-    max_attachment_bytes: int = 20 * 1024 * 1024
+    max_attachment_bytes: int = 100 * 1024 * 1024
     download_timeout: float = 90
     max_download_bytes: int = 20 * 1024 * 1024
     max_delivery_retries: int = 3
@@ -213,7 +214,7 @@ class Config:
                 raise ValueError(f'{key} must be an integer from {minimum} to {maximum}')
         if (self.persistent_graph or self.bounded_parallelism or self.local_recovery) and not self.manifest_path:
             raise ValueError('persistent_graph/bounded_parallelism/local_recovery require manifest_path')
-        for key in ('startup_timeout', 'response_timeout', 'response_max_duration', 'poll_interval', 'tool_timeout', 'sync_timeout', 'sync_poll_interval', 'download_timeout'):
+        for key in ('startup_timeout', 'response_timeout', 'response_max_duration', 'attachment_timeout', 'poll_interval', 'tool_timeout', 'sync_timeout', 'sync_poll_interval', 'download_timeout'):
             if type(getattr(self, key)) not in (int, float) or not 0 < getattr(self, key) <= 3600:
                 raise ValueError(key + ' must be positive and at most 3600')
         if self.response_max_duration < self.response_timeout:

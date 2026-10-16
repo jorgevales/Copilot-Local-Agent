@@ -534,6 +534,11 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(result["result"]["url"],"https://example.com/")
         self.assertEqual(self.registry.definition("created.wait")["timeout"],300)
 
+    def test_attachment_tool_timeout_tracks_upload_timeout(self):
+        registry = ToolRegistry(config=Config(attachment_timeout=720))
+        self.assertEqual(registry.definition('files.attach')['timeout'], 750)
+        self.assertEqual(registry.definition('files.attach')['limits']['file_bytes'], 100 * 1024 * 1024)
+
     def test_alias_append_and_device_paths_denied(self):
         import os
         original=self.root/"original.txt"

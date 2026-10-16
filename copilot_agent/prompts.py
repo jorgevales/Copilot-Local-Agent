@@ -100,7 +100,10 @@ class PromptBuilder:
                  self.package_schema_compat, self.package_schema]
         self.manifest = [{'name': p.name, 'version': '1.0', 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()} for p in paths]
         self.component_paths = paths
-        self.bundle = build_startup_attachments(paths, self.manifest, state.directory / 'startup-guidance', config.max_attachment_bytes)
+        # Startup source bundles retain their independent 20 MiB construction
+        # ceiling; user attachment capacity is larger and applies at delivery.
+        self.bundle = build_startup_attachments(paths, self.manifest, state.directory / 'startup-guidance',
+                                                min(config.max_attachment_bytes, 20 * 1024 * 1024))
         state.data['guidance_manifest'] = self.manifest
         state.data['guidance_bundle'] = self.bundle
         storage_constraint = ('Keep agent-owned files for this isolated proof inside its dedicated test workspace: ' + self.storage_paths['unc_path'] +

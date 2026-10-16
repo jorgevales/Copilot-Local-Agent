@@ -998,6 +998,7 @@ class BrowserAdapter:
             return
         if any(not path.is_file() for path in resolved):
             raise BrowserUIError('Every attachment must be a regular existing file.')
+        upload_timeout_ms = int(self.config.attachment_timeout * 1000)
         names = [path.name for path in resolved]
         if len(set(names)) != len(names):
             raise BrowserUIError('Duplicate attachment basenames cannot be verified unambiguously.')
@@ -1021,18 +1022,18 @@ class BrowserAdapter:
                         suitable.append(item)
                 if len(suitable) != 1:
                     raise BrowserUIError('Native upload input is missing or ambiguous for bulk assignment.')
-                await suitable[0].set_input_files([str(path) for path in resolved], timeout=10000)
+                await suitable[0].set_input_files([str(path) for path in resolved], timeout=upload_timeout_ms)
             else:
                 upload = self.page.get_by_role('menuitem', name=re.compile(r'^(Upload from|Upload file|Attach file|Upload).*', re.I))
                 if await upload.count() != 1:
                     raise BrowserUIError('A unique local-file upload action was not found.')
-                async with self.page.expect_file_chooser(timeout=5000) as chooser_info:
+                async with self.page.expect_file_chooser(timeout=upload_timeout_ms) as chooser_info:
                     await upload.click(timeout=3000)
                 chooser = await chooser_info.value
                 if len(resolved) > 1 and not chooser.is_multiple():
                     raise BrowserUIError('The native chooser does not support this bulk attachment plan.')
-                await chooser.set_files([str(path) for path in resolved], timeout=10000)
-            deadline = time.monotonic() + min(self.config.response_timeout, 120)
+                await chooser.set_files([str(path) for path in resolved], timeout=upload_timeout_ms)
+            deadline = time.monotonic() + self.config.attachment_timeout
             stable = 0
             while time.monotonic() < deadline:
                 snapshot = await self._evaluate(_ATTACHMENTS)

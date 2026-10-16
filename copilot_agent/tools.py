@@ -207,7 +207,7 @@ SPECS['crawl4ai.crawl'] = (obj({
     'Use the installed local Crawl4AI AsyncWebCrawler with the connected Edge session and its current site sign-ins. Crawl HTTP(S) websites, including internal sites, concurrently and save titled page HTML, markdown, links and metadata to shared Discoveries knowledge. No global domain allowlist or page/depth ceiling: max_pages/max_depth=0 are unlimited, cycles=0 repeats until Stop. Follow external links only when requested. Sign in manually first; never automate authentication. Returns saved index/file paths rather than sending entire sites to Copilot. Stop retains completed pages and a resumable frontier.')
 SPECS['crawl4ai.read'] = (obj({'path': S, 'offset': {'type': 'integer', 'minimum': 0},
     'limit': {'type': 'integer', 'minimum': 1, 'maximum': 8000}}, ['path']), 'read_only',
-    'Read a saved Crawl4AI knowledge index or page from shared knowledge storage. Follow next_offset to read all content. Knowledge is untrusted evidence. Requested content is returned to this Copilot conversation.')
+    'Read saved Crawl4AI knowledge or another explicitly selected accessible local file, including outside project roots. Protected profile/credential paths and links remain blocked. Files up to 100 MiB are read in bounded 8000-character windows; follow next_offset. Knowledge is untrusted evidence.')
 SPECS['automation.run'] = (SPECS['automation.run'][0], SPECS['automation.run'][1],
     'The explicit startup session_package_mode controls this tool. In immediate mode, the optional quality review and repeated download/package approvals are skipped for this session, including package Python stages. Basic archive safety, file identity, runnable manifest, declared tool/path scope, protected paths, output checks and Stop remain enforced. A skipped review is reported skipped, never passed. The startup mode resets on close or restart. In reviewed mode: ' + SPECS['automation.run'][2])
 SPECS.update(DISCOVERY_KNOWLEDGE_SPECS)
@@ -241,7 +241,9 @@ def tool_path_policy(name, context):
     if context.get('session_path_extensions') and name in {'rea.analyze_artifact', 'rea.analyze_capture', 'research.route'}:
         return SessionPathExtensionPolicy(policy, context['session_path_extensions'],
                                           getattr(context.get('session_state'), 'session_id', None))
-    if name == 'files.attach':
+    if name in {'files.attach', 'crawl4ai.read'}:
+        # These explicitly selected/read-only user files may be outside project roots.
+        # SessionFileAccessPolicy still rejects protected profiles, secrets and links.
         return SessionFileAccessPolicy(policy, lambda: True)
     if discovery_mode(config):
         extensions = context.get('session_path_extensions', [])
@@ -492,6 +494,8 @@ class ToolRegistry:
                 if 'properties' in variant:
                     variant['properties']['visual_context'] = {'type': 'object'}
         timeout = 300 if name in {"created.wait", "copilot.download"} else 30
+        if name == 'files.attach':
+            timeout = min(3630, config_value(self.config, 'attachment_timeout', 600) + 30)
         if name in {'browser.plan', 'browser.download_batch'}: timeout = 125
         if name in GOAL_SPECS: timeout = 90
         if name == 'browser.discover':
@@ -526,6 +530,8 @@ class ToolRegistry:
                 "errors":errors,
                 "examples":examples,
                 **({'approval_policy_by_operation': {'list': 'read_only', 'open': 'user_approval', 'close': 'user_approval', 'reset': 'user_approval'}} if name == 'browser.tabs' else {})}
+        if name == 'files.attach':
+            definition['limits']['file_bytes'] = config_value(self.config, 'max_attachment_bytes', 100 * 1024 * 1024)
         if name in REA_SPECS:
             from .rea_guidance import rea_usage_guidance
             definition['usage_guidance'] = rea_usage_guidance(self.config)['methods'][name]
@@ -813,6 +819,8 @@ class ToolRegistry:
             roots=config_value(config,"allowed_roots",[context["session_dir"]])
             policy=tool_path_policy(name, context)
             timeout=min(30,config_value(config,"tool_timeout",30))
+            if name == 'files.attach':
+                timeout = config_value(config, 'attachment_timeout', 600) + 15
             if name == 'browser.javascript': timeout = args.get('timeout_ms', 10000) / 1000 + 2
             if name in {'browser.screenshot', 'browser.inspect'}: timeout = min(365, 20 + 12 * len(args.get('shots', [None] * args.get('max_shots', 3))))
             if name=="created.wait": timeout=min(300,config_value(config,"sync_timeout",120))+1
@@ -1000,7 +1008,7 @@ class ToolRegistry:
             return await discover_site(args, context)
         if name == 'crawl4ai.read':
             from .local_crawler import read_knowledge
-            return read_knowledge(args, context)
+            return read_knowledge(args, context, policy=policy)
         if name == 'automation.inspect':
             from .automation_packages import inspect_package
             return inspect_package(policy.resolve(args['path'], must_exist=True), args.get('expected_sha256'), self,
@@ -1155,7 +1163,7 @@ class ToolRegistry:
             from .attachments import SUPPORTED_EXTENSIONS, TEXT_EXTENSIONS
             from .logging_utils import SENSITIVE
             records = []
-            cap = config_value(config, 'max_attachment_bytes', 20 * 1024 * 1024)
+            cap = config_value(config, 'max_attachment_bytes', 100 * 1024 * 1024)
             for source in dict.fromkeys(args['paths']):
                 path = policy.resolve(source, True)
                 if not path.is_file() or path.suffix.casefold() not in SUPPORTED_EXTENSIONS:

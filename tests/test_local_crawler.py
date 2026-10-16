@@ -203,6 +203,17 @@ class LocalCrawlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(Path(result[0]['index_path']).exists())
         self.assertTrue(all(page.closed for page in self.browser.context.pages))
 
+    async def test_registry_crawl4ai_read_can_inspect_accessible_files_outside_roots(self):
+        external = self.root / 'outside-project' / 'large-source.md'
+        external.parent.mkdir()
+        external.write_text('outside-root evidence ' * 3000, encoding='utf-8')
+        result = await ToolRegistry().execute('crawl4ai.read',
+            {'path': str(external), 'limit': 8000}, self.context)
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(str(external.resolve()), result['result']['path'])
+        self.assertEqual(8000, len(result['result']['content']))
+        self.assertIsNotNone(result['result']['next_offset'])
+
     async def test_escaped_content_windows_have_no_gaps_after_registry_projection(self):
         folder = self.root / 'knowledge'
         folder.mkdir()

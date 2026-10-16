@@ -58,10 +58,12 @@ bypassed through another tool.
 Use `files.attach` with `paths` (up to 1000 explicit supported file paths) to
 attach files through the orchestrator, including files outside project roots.
 Existing OS access, credential/profile protection and tool approval still apply.
-Each file is bounded by the configured attachment size (20 MiB by default),
+Each file is bounded by the configured attachment size (100 MiB by default),
 checked for exact SHA-256 and staged for upload. Duplicate basenames receive
 unique send-only aliases recorded in the upload manifest. Originals are never
 renamed or edited. Unsupported files and ZIP uploads retain their existing checks.
+Browser upload and exact attachment verification use a configurable 600-second
+timeout by default, independent of the Copilot response timeout.
 
 Overflow is sent automatically as context-only batches of 18 files before the
 final task message, reserving slots for transport/evidence within Copilot's

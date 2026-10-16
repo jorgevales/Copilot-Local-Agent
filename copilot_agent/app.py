@@ -535,7 +535,7 @@ async def run(args):
     settings = read_runtime_settings(config)
     if args.config is None and isinstance(settings.get('config'), dict):
         personal = settings['config']
-        allowed_keys = {'allowed_domains', 'allowed_roots', 'model', 'response_timeout', 'response_max_duration', 'max_corrections', 'sync_timeout', 'max_delivery_retries', 'download_timeout', 'copilot_download_hosts'}
+        allowed_keys = {'allowed_domains', 'allowed_roots', 'model', 'response_timeout', 'response_max_duration', 'attachment_timeout', 'max_corrections', 'sync_timeout', 'max_delivery_retries', 'download_timeout', 'copilot_download_hosts'}
         for key in allowed_keys & personal.keys():
             setattr(config, key, personal[key])
         # Migrate the former two-attempt personal default to the production
@@ -580,7 +580,7 @@ async def run(args):
                       force=getattr(args, 'setup_only', False) and not bool(args.yes_setup))
     settings['python_executable'] = sys.executable
     settings['config'] = {key: value for key, value in config.as_dict().items() if key in {
-        'allowed_domains', 'allowed_roots', 'model', 'response_timeout', 'response_max_duration', 'max_corrections',
+        'allowed_domains', 'allowed_roots', 'model', 'response_timeout', 'response_max_duration', 'attachment_timeout', 'max_corrections',
         'sync_timeout', 'max_delivery_retries', 'download_timeout', 'copilot_download_hosts'}}
     settings['config']['allowed_roots'] = [str(Path(path).relative_to(config.storage_dir))
                                           if Path(path).is_relative_to(config.storage_dir) else path
