@@ -46,6 +46,22 @@ class StorageTests(unittest.TestCase):
         self.assertTrue(path.is_relative_to(selected / 'runtime' / 'edge-profiles'))
         self.assertRegex(path.name, r'^vdi-[0-9a-f]{16}$')
 
+    def test_storage_description_resolves_mapping_once_without_caching_future_calls(self):
+        share = self.root / 'share'
+        project = share / 'Projects' / 'Agent'
+        project.mkdir(parents=True)
+        with patch('copilot_agent.policy.mapped_s_drive_root', return_value=share) as resolve:
+            discoveries_storage_paths(project)
+            self.assertEqual(1, resolve.call_count)
+            discoveries_storage_paths(project)
+            self.assertEqual(2, resolve.call_count)
+
+    def test_explicit_test_storage_skips_optional_s_drive_probe(self):
+        with patch('copilot_agent.config.mapped_s_drive_root') as resolve:
+            config = Config.load(self.root / 'absent.json', storage_override=self.root / 'test-store')
+        resolve.assert_not_called()
+        self.assertEqual((self.root / 'test-store').resolve(), config.storage_dir.resolve())
+
     def test_personal_settings_preserve_older_versions_without_shared_source_writes(self):
         selected = self.root / 'explicit-user-storage'
         save_user_settings(selected, {'config': {'model': 'synthetic-model'}})

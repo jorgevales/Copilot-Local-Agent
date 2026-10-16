@@ -87,6 +87,31 @@ class LimitedBrowser(MockBrowser):
 
 
 class OutboundResultTests(unittest.IsolatedAsyncioTestCase):
+    async def test_private_resume_compacts_audit_metadata_without_losing_scope_or_pending_effects(self):
+        with patch('copilot_agent.policy.mapped_s_drive_root', side_effect=PolicyError('Offline fixture')), \
+             patch('copilot_agent.config.mapped_s_drive_root', side_effect=PolicyError('Offline fixture')):
+            _, config, state, _ = make_fixture('outbound-private-resume-')
+            agent = Orchestrator(config, LimitedBrowser([]), ToolRegistry(), state, display=lambda _: None)
+            history = [{'content_sha256': str(i).zfill(64), 'content_bytes': 328,
+                        'website_content_omitted': True} for i in range(28)]
+            pending = {'call': {'status': 'uncertain', 'action_hash': 'a' * 64}}
+            message = {'protocol_version': '1.0', 'session_id': state.session_id,
+                'request_id': 'resume', 'kind': 'user_task', 'content': 'Create a synthetic patient; start but never finish consultation.',
+                'context': {'constraints': ['exact-scope-' * 1000], 'pending_operations': pending, 'attachments': history},
+                'execution_strategy': {'planning': 'p' * 2000, 'answering': 'a' * 2000,
+                                       'target_navigation': 't' * 2000},
+                'session_plan_authorization': {'active': True, 'scope': 'user-approved session'}}
+            packed, files = await agent._pack_outbound_response(json.dumps(message), [])
+        result = json.loads(packed)
+        self.assertLess(composer_characters(packed), 15872)
+        self.assertEqual([], files)
+        self.assertEqual(message['content'], result['content'])
+        self.assertEqual(message['context']['constraints'], result['context']['constraints'])
+        self.assertEqual(pending, result['context']['pending_operations'])
+        self.assertEqual(message['session_plan_authorization'], result['session_plan_authorization'])
+        table = result['context']['attachments']
+        self.assertEqual(history, [dict(zip(table['columns'], row)) for row in table['rows']])
+
     async def test_actual_smaller_editor_limit_drives_result_attachment_transport(self):
         with patch('copilot_agent.policy.mapped_s_drive_root', side_effect=PolicyError('Offline fixture')), \
              patch('copilot_agent.config.mapped_s_drive_root', side_effect=PolicyError('Offline fixture')):
@@ -123,7 +148,7 @@ class OutboundResultTests(unittest.IsolatedAsyncioTestCase):
             agent = Orchestrator(config, browser, ToolRegistry(), state, display=lambda _: None)
             content = {'results': [{'call_id': f'read-{index}', 'tool': 'crawl4ai.read', 'ok': True,
                 'result': {'path': f'page-{index}.json', 'offset': index * 8000,
-                    'content': ('Navigation knowledge 😀 ' * 350), 'next_offset': None}}
+                    'content': ('Navigation knowledge ðŸ˜€ ' * 350), 'next_offset': None}}
                 for index in range(10)], 'instruction': 'Investigate these observed website results.'}
             await agent._send('tool_results', content)
         sent = browser.sent[0]

@@ -1,5 +1,8 @@
 # NNCY live discovery — paused 16 October 2026
 
+Historical pause record. The user subsequently authorized a different live goal;
+see [the completed known-task repeat](NNCY_KNOWN_TASK_LIVE_TEST_20261016.md).
+
 Paused at the user's request. Discovery is incomplete; do not resume until the
 user explicitly requests it. The local agent exited cleanly and retained Edge.
 

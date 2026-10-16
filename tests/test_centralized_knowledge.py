@@ -137,6 +137,15 @@ class CentralizedKnowledgeTests(unittest.TestCase):
         self.assertTrue(first['directory'].startswith(str(site_folder(self.context, 'https://example.com'))))
         read = execute_note('knowledge.lookup', {'note_id': first['note_id']}, self.context)
         self.assertEqual(read['knowledge']['content'], 'Open https://example.com/documents')
+        self.assertTrue(first['readback_complete'])
+        self.assertEqual(read['knowledge'], first['verified_knowledge'])
+        self.assertEqual(first['verified_knowledge'], second['verified_knowledge'])
+
+    def test_large_note_keeps_explicit_readback_tool_without_inflating_result(self):
+        result = execute_note('knowledge.note', {'title': 'Large procedure', 'content': 'generic step ' * 700}, self.context)
+        self.assertTrue(result['verified'])
+        self.assertNotIn('verified_knowledge', result)
+        self.assertEqual('knowledge.lookup', result['readback_tool'])
 
     def test_note_rejects_secrets_contacts_and_customer_record_fields(self):
         for content in ('password: example-value', 'Contact jane@example.com', 'SSN 123-45-6789'):

@@ -166,6 +166,7 @@ class Config:
             # The app's explicitly scoped isolated proof mode supplies its own
             # storage before normal settings can require a mapped S: drive.
             cfg.storage_dir = validate_user_storage_directory(storage_override)
+            cfg._explicit_test_storage = True
         elif cfg.storage_dir is None:
             cfg.storage_dir = default_local_storage()
         else:
@@ -258,6 +259,8 @@ class Config:
         self.allowed_roots = [str((base / p).resolve()) if not Path(p).is_absolute() else str(Path(p).resolve()) for p in configured_roots]
         self._auto_local_drive_root = None
         self._auto_s_drive_root = None
+        if getattr(self, '_explicit_test_storage', False):
+            return  # Explicit isolated test mode never needs the optional S: probe.
         try:
             s_root = str(mapped_s_drive_root())
         except PolicyError:

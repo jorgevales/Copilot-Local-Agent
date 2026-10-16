@@ -528,6 +528,23 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(item['incorporated'] for item in steering))
         self.assertIn(2, poll_count)
 
+    async def test_steering_supersedes_recovered_proposal_before_any_tool_dispatch(self):
+        _, config, state, registry = make_fixture('orchestrator-recovered-steering-')
+        def updated(message):
+            self.assertEqual('steering', message['kind'])
+            self.assertEqual('New goal; leave the earlier record unchanged.', message['content']['steering_messages'][0]['text'])
+            return final_response(message)
+        browser = MockBrowser([updated])
+        agent = Orchestrator(config, browser, registry, state, display=lambda _: None)
+        agent.initialized = True
+        agent._pending_steering_items.append({'message_id': 'new-goal', 'sequence': 0,
+            'text': 'New goal; leave the earlier record unchanged.', 'attachments': []})
+        old = tool_response({'session_id': state.session_id, 'request_id': 'old-proposal'})
+        result = await agent.turn('Resume captured request', recovered_response=(encoded(old), 'old-proposal'))
+        self.assertEqual('complete', result['completion_status'])
+        self.assertEqual([], registry.calls)
+        self.assertEqual(1, len(browser.sent))
+
     async def test_rapid_steering_keeps_each_full_attachment_allowance_separate(self):
         _, config, state, registry = make_fixture('orchestrator-steering-files-')
         first_files = [f'C:/staging/first-{index}.txt' for index in range(20)]

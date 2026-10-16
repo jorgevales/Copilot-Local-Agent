@@ -21,12 +21,17 @@ def machine_key(hostname=None) -> str:
 
 def discoveries_storage(project_root: Path) -> Path:
     """Return the verified S: project sibling used for all durable agent data."""
-    from .policy import PolicyError, mapped_s_drive_root, is_s_drive_path, reject_path_redirection
-    raw = Path(project_root).expanduser()
+    from .policy import PolicyError, mapped_s_drive_root
     try:
         share = mapped_s_drive_root().resolve()
     except (PolicyError, OSError) as error:
         raise ValueError('S: must be mapped to its UNC share before the agent can start; no local C: storage fallback is permitted') from error
+    return _discoveries_storage_at_share(project_root, share)
+
+
+def _discoveries_storage_at_share(project_root: Path, share: Path) -> Path:
+    from .policy import is_s_drive_path, reject_path_redirection
+    raw = Path(project_root).expanduser()
     # Use the verified provider identity when Python cannot resolve the S:
     # alias directly. Never interpret a different absolute/local root as S:.
     if is_s_drive_path(raw):
@@ -44,8 +49,8 @@ def discoveries_storage(project_root: Path) -> Path:
 def discoveries_storage_paths(project_root: Path) -> dict[str, str]:
     """Describe the same folder as an S: path and its live UNC filesystem path."""
     from .policy import mapped_s_drive_root
-    target = discoveries_storage(project_root).resolve()
     share = mapped_s_drive_root().resolve()
+    target = _discoveries_storage_at_share(project_root, share).resolve()
     relative = ntpath.relpath(str(target), str(share))
     if relative == '..' or relative.startswith('..\\'):
         raise ValueError('The Discoveries knowledge folder resolved outside the live S: share')

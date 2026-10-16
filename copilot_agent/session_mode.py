@@ -2,7 +2,7 @@
 from urllib.parse import urlsplit, urlunsplit
 from .policy import URLPolicy, PolicyError, config_value
 
-START_PROMPT = ('Start fast discovery session: Y authorizes all current-session tool plans, including file writes, '
+START_PROMPT = ('Start fast discovery session: Y authorizes broader task changes, necessary intermediate actions and all current-session tool plans, including file writes, '
                 'browser actions, code and inspected package execution, without repeated plan approval prompts; '
                 'scoped read-only tools and useful S: knowledge saves run immediately; one prefilled login-button click '
                 'is allowed; tool validation, browser ownership and operating-system approval still apply; '

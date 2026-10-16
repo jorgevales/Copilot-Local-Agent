@@ -548,6 +548,10 @@ class ToolRegistry:
             validate_knowledge_tool(name, args)
         elif name in OPERATION_SPECS:
             validate_operation(name, args)
+        elif name in NAVIGATION_SPECS:
+            validate_navigation(name, args)
+        elif name in GOAL_SPECS:
+            validate_goal(args)
         else:
             validate(args,self.definition(name)["input_schema"])
 
@@ -780,6 +784,8 @@ class ToolRegistry:
         return bounded
 
     async def execute(self, name, args, context):
+        if name == 'browser.plan':
+            context['browser_plan_effects_started'] = False
         if name in GOAL_SPECS:
             context['goal_effects_started'] = False
         if name in REA_SPECS:
@@ -880,18 +886,29 @@ class ToolRegistry:
             return {'ok': False, 'tool': name, 'result': {'status': 'not_started', 'side_effects_uncertain': False},
                     'error': filesystem_diagnostic(error)}
         except PolicyError as error:
+            if name == 'browser.plan':
+                started = bool(context.get('browser_plan_effects_started'))
+                return {'ok': False, 'tool': name,
+                        'result': {'status': 'uncertain' if started else 'not_started', 'side_effects_uncertain': started},
+                        'error': {'code': getattr(error, 'code', 'policy_denied'), 'message': str(error)}}
             if name in REA_SPECS:
                 return self._rea_failure(name, context, 'policy_denied', str(error))
             if name.startswith(('site_knowledge.', 'knowledge.')) and hasattr(error, 'code'):
                 return {'ok': False, 'tool': name, 'error': {'code': error.code, 'message': str(error)},
                         'result': {'status': 'not_started', 'side_effects_uncertain': False}}
             certain_preflight = (name in GOAL_SPECS and not context.get('goal_effects_started')
+                                or name == 'browser.plan' and not context.get('browser_plan_effects_started')
                                 or name == 'operation.quarantine'
                                 or name in {'files.create','files.mkdir','files.append','files.copy','files.replace'}
                                 and not context.get('filesystem_effect_started'))
             return redact({'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {'status':'not_started','side_effects_uncertain':False} if certain_preflight else {},'error':{'code':'policy_denied','message':str(error)}})
         except ReconciliationRequired as error: return {"ok":False,"tool":name,"result":{"status":"uncertain" if error.side_effects_uncertain else "not_started","side_effects_uncertain":error.side_effects_uncertain},"error":{"code":"reconciliation_conflict","message":str(error)}}
         except (ValueError,TypeError) as error:
+            if name == 'browser.plan':
+                started = bool(context.get('browser_plan_effects_started'))
+                return {'ok': False, 'tool': name,
+                        'result': {'status': 'uncertain' if started else 'not_started', 'side_effects_uncertain': started},
+                        'error': {'code': 'operation_failed' if started else 'invalid_arguments', 'message': str(error)}}
             if name in GOAL_SPECS:
                 return {'ok': False, 'tool': name, 'result': {'status': 'not_started', 'side_effects_uncertain': bool(context.get('goal_effects_started'))},
                         'error': {'code': 'invalid_arguments', 'message': str(error)}}
@@ -905,6 +922,11 @@ class ToolRegistry:
                                               "message": review.get("summary", str(error))}}, context)
             return redact({'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {},'error':{'code':'invalid_arguments','message':str(error)}})
         except asyncio.TimeoutError:
+            if name == 'browser.plan':
+                started = bool(context.get('browser_plan_effects_started'))
+                return {'ok': False, 'tool': name,
+                        'result': {'status': 'uncertain' if started else 'not_started', 'side_effects_uncertain': started},
+                        'error': {'code': 'timeout', 'message': 'Browser plan exceeded its budget; inspect any dispatched effects before retry.'}}
             if name in GOAL_SPECS:
                 return {'ok': False, 'tool': name, 'result': {'status': 'uncertain' if context.get('goal_effects_started') else 'not_started',
                         'side_effects_uncertain': bool(context.get('goal_effects_started'))},
@@ -918,6 +940,11 @@ class ToolRegistry:
                         'error':{'code':'timeout','message':'File validation timed out before any write was attempted'}}
             return {'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {},'error':{'code':'timeout','message':'Local operation timed out; inspect partial effects before retrying'}}
         except Exception as error:
+            if name == 'browser.plan':
+                started = bool(context.get('browser_plan_effects_started'))
+                return {'ok': False, 'tool': name,
+                        'result': {'status': 'uncertain' if started else 'not_started', 'side_effects_uncertain': started},
+                        'error': {'code': 'operation_failed', 'message': 'Browser plan failed; inspect dispatched effects before retry.'}}
             if name in GOAL_SPECS:
                 return {'ok': False, 'tool': name, 'result': {'status': 'uncertain' if context.get('goal_effects_started') else 'not_started',
                         'side_effects_uncertain': bool(context.get('goal_effects_started'))},

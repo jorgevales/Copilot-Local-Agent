@@ -20,6 +20,7 @@ PHASES = frozenset({
     'generation_ended', 'capture_complete', 'validation', 'tool', 'action',
     'screenshot', 'structure', 'visual_packaging', 'goal_observation', 'target_verification',
     'goal_slice', 'goal_total', 'task_total',
+    'startup_config', 'startup_browser', 'startup_models', 'startup_total',
 })
 METRICS = frozenset({'duration_ms', 'bytes', 'characters', 'pictures', 'actions',
                      'candidates', 'matched', 'ok', 'repeated', 'dropped'})

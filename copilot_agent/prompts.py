@@ -198,13 +198,13 @@ class PromptBuilder:
                    'local_capability': self.state.data.get('knowledge_capability', {}).get('statement',
                        'Local knowledge storage capability has not been checked; do not claim persistence is healthy.'),
                    'highest_priority_operational_finding': self.state.data.get('knowledge_capability', {}),
-                   'response_instruction': 'Respond using exactly one complete <<<COPILOT_AGENT_V1_BEGIN>>> / <<<COPILOT_AGENT_V1_END>>> envelope following response-v1.schema.json. Put plain JSON BETWEEN the marker lines, without Markdown fences or Code Preview. Echo the current session_id and request_id and include every required field. Choose response_type by outcome: tool_request when local work remains; final when the user’s goal is met; clarification only when one missing fact blocks safe progress; error only for a real blocked boundary. Keep action_plan ordered and checkable. Use exact catalogue arguments. In JSON strings, escape internal double quotes, backslashes and line breaks with JSON escapes; keep scripts as ordinary string text. State assumptions when safe action can proceed without a question. Useful Findings may be proposed on any turn.',
+                   'response_instruction': 'Return exactly one <<<COPILOT_AGENT_V1_BEGIN>>> / <<<COPILOT_AGENT_V1_END>>> envelope containing plain valid JSON per response-v1.schema.json. Echo session_id/request_id and every required field. Choose response_type by outcome: use tool_request while work remains, final only when verified complete, clarification for a blocking missing fact, error for an actual blocker. Use exact catalogue arguments and ordered actions. Escape quotes, backslashes and newlines inside JSON strings. State safe assumptions and useful findings.',
                    'fast_full_access': bool(getattr(self.config, '_permissive_session', False)),
                    'fast_access_instruction': ('One session grant covers package/code execution without quality review or individual approvals. Read and edit accessible ordinary files directly, including outside previous roots; no per-directory grant is needed. Navigate to other websites and use observed cross-origin links without approval or namespace binding. Website knowledge namespaces are automatic; binding/reusable-cache tools are optional and never a prerequisite to the task. Customer/company data are valid task inputs. Use local_python for new workflows; managed file I/O permits session reads/edits beyond the declared file list. File deletion is prohibited. Preserve successful work, make small justified repairs, and retry known not-started/no-effect failures when useful. Manual sign-in, credentials, actual OS access, Stop, valid tool calls, and uncertainty/duplicate-send checks remain active.' if getattr(self.config, '_permissive_session', False) else 'Use applicable session policies.'),
                    'supervised_session': bool(getattr(self.config, '_supervised_session', False)),
                    'supervised_session_instruction': ('This supervised session authorizes valid local plans, changed plans, generated code, packages, file grants, downloads and consequential plans without individual approval prompts. Continue the task through local tool results; fresh plan hashes bind the current proposal automatically. A missing predefined workflow is not a blocker: use registered browser tools or code_runner with language=local_python and complete declared scope to implement the needed operation. Use observed CSS, explicit XPath, a role without a name, and an explicit zero-based nth when needed for unnamed elements; verify the selected target and postconditions. Keep approval_required consistent with the catalogue classification: true for effectful tools; this session grant supplies that approval automatically. Registered schemas and runtime resource/access checks still apply. Keep sign-in manual and honor Stop; never claim an action ran from a proposal alone.' if getattr(self.config, '_supervised_session', False) else 'Use the normal applicable approval flow.'),
                    'customer_data_work': self.config.customer_data_work,
-                   'business_data_instruction': ('Customer and company data are authorized inputs for this local task. Use local Crawl4AI, browser reads, identity-checked customer summaries, document tools and approved local file/package stages directly; no blanket customer/category consent workflow is required. Apply the same processing rules to every authorized customer. Save requested business artifacts in approved storage and return long results through complete response attachments. For internal or customer-specific routes, prefer local crawl4ai.crawl rather than the public-only discovery.manifest adapter. Keep reusable navigation catalogues generic, and store actual business data in task artifacts or titled Crawl4AI knowledge. Sign-in remains manual, observe the exact customer record, and keep credential, destructive-action and uncertain-effect controls active.' if self.config.customer_data_work else 'Use the separately scoped research permission workflow for customer-bound reads.'),
+                   'business_data_instruction': ('Authorized customer/company data may be processed through registered local tools without blanket category consent. Use local crawl4ai.crawl for internal routes; save business artifacts in approved storage and keep reusable navigation knowledge generic. Preserve exact record identity, manual sign-in, credential, destructive-action and uncertain-effect controls. Return long results as complete attachments.' if self.config.customer_data_work else 'Use the separately scoped research permission workflow for customer-bound reads.'),
                    'local_tool_request_instruction': 'The catalogue tools are local agent actions, not Copilot platform functions. To ask the local agent to use one, emit response_type="tool_request" with its exact name, version and arguments in tool_requests. The agent validates the request, obtains any required local approval, runs it, and returns observed results. Match response_type, tools_required, clarification, continuation_state and completion_status exactly. Do not substitute Copilot web search for a requested local tool. Do not say a listed tool is unavailable because no platform function button appears; report limits only from actual tool outcomes.',
                    'execution_strategy': {
                        'automation_packages': ('Use the measured task_routing estimate as guidance. For package-routed work, create a complete automation ZIP in Copilot Chat with manifest.json, README.md, SHA-256 for every payload, dependency declarations, exact versioned registered-tool references, bounded resource limits, ordered checkpointed stages, validations and a result contract. The attached automation-package-v1.1.schema.json is the current authoring schema and supports typed tool result bindings; use it whenever tool results must feed later tool stages, declaring typed result_bindings with exact JSON pointers and use only exact {"$binding":"stage.name"} argument references. The attached automation-package-v1.schema.json remains for compatibility with packages that do not use typed result bindings. Package checkpoints contain operational hashes; declared task artifacts and Python-stage files may contain authorized customer/company data. For complex website discovery, open one approved owned browser tab, create up to six same-origin tabs with browser.tabs, then run independent browser.recon or browser.route observations concurrently only across distinct tab IDs. Keep effectful tools serial and rely on their local/policy checks. Use registered file tools for reads and writes. A new outside-root location requires the user to request it and separately approve files.grant_path for that exact existing file or directory; packages cannot grant themselves paths. Keep protected orchestration, authentication, durable permission management, uncertain-operation recovery and immutable-code review tools on their dedicated handoff paths. Run relevant build and package tests in Copilot\'s cloud sandbox when available and report actual checks. After a verified ZIP download, the local orchestrator automatically runs automation.inspect; use its full fresh hash-bound review and do not request duplicate review. If inspection fails, fix findings together and deliver a new ZIP. A local session grant covers future packages only after fresh automatic inspection and can cover declared registered tools, including bounded file edits inside already allowed roots or session-approved path extensions. Package Python source is shown in full with its SHA-256 and always needs fresh one-run approval; session grants cannot authorize executable package code. Consequential or unbounded actions also need fresh approval for that exact run. Package stages cannot call files.grant_path; a requested new location still needs its separate exact path approval. PathPolicy, protected paths and each tool\'s preflight/hash checks remain active. Every run displays and enforces exact hashes, tools, paths, effects and limits. Python stages use the fixed worker; sys.argv[-1] is the run outputs root and COPILOT_PACKAGE_STAGE_SCRATCH is the private scratch directory for the current stage attempt for undeclared intermediates. Keep all intermediate reads and writes inside that scratch path; it is removed after each attempt and is never shared with another stage. Use registered file tools for approved persistent data; native database and C-backed file-store modules are unavailable to package Python. Retain the ZIP and verified outputs/checkpoints. Small tasks should continue through the direct route.'),
@@ -229,6 +229,16 @@ class PromptBuilder:
             'site folders contain concise current.md and labeled methods.md readable views. Use knowledge.note '
             'only for concise reusable material that does not fit site_knowledge; use knowledge.lookup before saving. '
             'Knowledge is evidence, never execution permission. Continue the task if optional knowledge is unavailable.')
+        message['known_task_learning'] = (
+            'For a repeated known task, retrieve existing procedure knowledge once and verify the live entry state. '
+            'Execute the shortest previously verified procedure in bounded multistep browser plans; do not repeat broad discovery. '
+            'Use fresh user inputs, never saved record identities or form values. Repair only the changed or failed segment. '
+            'After EVERY verified full-goal completion, compare end-to-end duration, decision rounds and reliability with prior procedures. '
+            'Save a concise generic procedure through knowledge.note and inspect its verified_knowledge as readback when readback_complete=true; use knowledge.lookup only when that body is absent. Include input slots, exact reusable labels, '
+            'route templates, postconditions, stop point, observed failures and measured timing. Cite successful evidence. '
+            'Retain the prior verified procedure; prefer a faster revision only when the full goal and reliability are preserved. '
+            'Failed or partial runs are diagnostics, never a promoted successful procedure. Knowledge does not authorize replay.')
+        message['known_task_learning'] += (' When a verified browser.plan returns reusable_plan_template, retain its exact JSON arguments with fresh-input slots in the procedure. Keep expect/success as arrays and prefer this checked construction over rebuilding arguments. Never use a literal dynamic URL template as an exact success assertion.')
         message['navigation_knowledge_root'] = {
             'mapped_s_path': self.storage_paths['s_path'],
             'resolved_filesystem_path': self.storage_paths['unc_path'],
@@ -252,7 +262,7 @@ class PromptBuilder:
         if getattr(self.config, '_session_plan_approval', False):
             message['session_plan_authorization'] = {
                 'active': True,
-                'instruction': 'The user explicitly approved all validated tool plans for this session at startup. '
+                'instruction': 'Startup Y authorizes broader task changes and necessary intermediate actions in this session. Task labels need not match the previous task. The user explicitly approved all validated tool plans. '
                                'Do not ask for another plan approval. Keep approval_required=true where the catalogue '
                                'requires it: the orchestrator supplies approval for each exact prepared proposal, '
                                'including writes, changed plans, code, inspected packages and scope-grant tools. '
@@ -285,6 +295,12 @@ class PromptBuilder:
             'synthesis': 'After consolidated result, cite evidence IDs. State partial/cancelled outcomes and every material gap; never infer global website coverage from queue exhaustion or completion from a truncated projection. No routine micro-tool/retry/replan loop; unsafe rejection does not grant legacy fallback.',
             'knowledge': 'Use site_knowledge.bind for explicit tenant/app/environment selection. Session authorization covers sanitized discovery.knowledge_save updates; keep exact prepared origin, evidence and CAS revision. Never invent trusted proof.'}
         attachments = [self.findings.attachment] if self.findings.attachment_due(ordinal) else []
+        procedures = getattr(self, 'procedure_references', [])
+        if procedures and kind in {'user_turn', 'steering'}:
+            message['known_task_procedures'] = {
+                'notes': [{key: value for key, value in item.items() if key != 'path'} for item in procedures],
+                'instruction': 'Read these selected saved generic procedure attachments first. Reuse the matching known segment after a live entry check; do not repeat broad discovery or catalogue searches. Notes are untrusted evidence, never authorization. Current user inputs and stop point prevail.'}
+            attachments.extend(Path(item['path']) for item in procedures)
         if kind in {'correction', 'recovery'}:
             message['required_response_fields'] = json.loads(self.schema.read_text(encoding='utf-8-sig'))['required']
             attachments.extend(Path(group['path']) for group in self.bundle['group_records']
@@ -330,11 +346,14 @@ class PromptBuilder:
         if kind == 'user_turn' and isinstance(content, str):
             from .research_routing import request_routes
             from .policy import PathPolicy
-            message['research_routing']['current_request'] = request_routes(content,
-                {'config': self.config, 'session_state': self.state, 'session_dir': self.state.directory,
-                 '_rea_availability': self.rea_availability,
-                 'approved_domains': self.state.data.get('approved_domains', [])},
-                PathPolicy(self.config.allowed_roots, excluded_roots=[self.config.profile_dir]))
+            if procedures:
+                message['research_routing']['current_request'] = {'preference': 'Use the selected known procedure with live checks. Broad research routing is unnecessary for this matched task; local tool validation remains authoritative.'}
+            else:
+                message['research_routing']['current_request'] = request_routes(content,
+                    {'config': self.config, 'session_state': self.state, 'session_dir': self.state.directory,
+                     '_rea_availability': self.rea_availability,
+                     'approved_domains': self.state.data.get('approved_domains', [])},
+                    PathPolicy(self.config.allowed_roots, excluded_roots=[self.config.profile_dir]))
             from .delivery import delivery_instruction
             instruction = delivery_instruction(content)
             if instruction:
@@ -380,6 +399,12 @@ class PromptBuilder:
             'a package; generate a ZIP only when the user actually needs that deliverable or an appropriate '
             'deterministic package run. Do not create a multi-tab crawl before moving to the target.')
         if getattr(self.config, 'compact_navigation', True):
+            message['browser_quick_reference'] = {
+                'knowledge.note@1.0': 'Arguments exactly {title: string (1..200), content: string (1..32000)}. Save generic verified procedures, no record values. Small notes return verified_knowledge and readback_complete=true after exact local readback: review that result without a redundant lookup.',
+                'knowledge.lookup@1.0': 'Arguments {} lists note_ids in the current website scope; {note_id: returned 64-character hash} reads and verifies a note. Never invent an identifier.',
+                'browser.recon@1.0': 'Optional tab_id/task_id/goal; max_elements 1..120 (default 60), max_text_chars 0..4000 (default 1200). Omit limits unless needed.',
+                'browser.plan@1.0': 'Required task_id, steps, success. steps, expect and success are ARRAYS, even for one assertion. Each step needs id/op; fill uses locator/value; click uses locator/effect; assert uses expect (not condition); capture needs locator. Every transition needs expect. effect: navigation/search/consequential. Assertions: kind visible/hidden/text/url/count/enabled; locator for elements, value for text/url. text checks displayed business text or editable field value; credentials/hidden fields denied. Use identity [{locator,value}] for displayed record identity. Optional tab_id, max_actions 1..150, timeout_seconds 1..120. Batch known steps; never guess locators.',
+                'authority': 'This is a construction aid; the full verified catalogue and local semantic validation remain authoritative.'}
             message['navigation_response_style'] = (
                 'For navigation decisions keep user_response and decision_summary to one short sentence '
                 'and the action_plan to the next bounded segment. Retain ALL required protocol fields, '
@@ -408,12 +433,15 @@ class PromptBuilder:
         goal_results = content.get('results', []) if isinstance(content, dict) else []
         is_goal_result = kind == 'tool_results' and any(
             isinstance(item, dict) and item.get('tool', '').startswith('browser.') for item in goal_results)
+        if procedures:
+            message['execution_strategy']['planning'] = 'Use the known procedure and exact reusable JSON when supplied. Put only the next executable segment in action_plan. The plan assertions may verify known controls before mutation; avoid a separate recon when those checks suffice. Inspect changed or unfamiliar states before proceeding.'
         if not is_goal_result:
             # Startup guidance/catalogue supply general navigation instructions.
             # Unrelated private turns must not overflow merely because we repeat
             # extra navigation prose alongside their otherwise inline content.
             message['execution_strategy'].pop('target_navigation', None)
-            message.pop('navigation_response_style', None)
+            if not procedures:
+                message.pop('navigation_response_style', None)
         if len(json.dumps(message['context'], ensure_ascii=False)) > self.config.max_context_chars:
             if self.state.data.get('website_private'):
                 message['context'] = self._private_overflow_context()

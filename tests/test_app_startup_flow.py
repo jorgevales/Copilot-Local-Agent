@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import os
 import tempfile
+import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -113,6 +114,8 @@ class StartupOrchestrator:
         self.state = state
         self.feedback = SimpleNamespace(color=False)
         self.base_context = {}
+        self.cancel_event = threading.Event()
+        self._pending_steering_items = []
         self.findings = SimpleNamespace(data={'findings': []})
         self.events.append('orchestrator:create')
 
@@ -130,7 +133,7 @@ class StartupOrchestrator:
         self.state.data['status'] = 'ready'
         return {'response_type': 'final'}
 
-    async def turn(self, user_input, recovered_response=None):
+    async def turn(self, user_input, recovered_response=None, attachments=(), active_run_id=None):
         self.events.append('orchestrator:resume-draft')
         self.asserted_recovered_response = recovered_response
         return {'response_type': 'final'}
@@ -146,7 +149,7 @@ class StartupOrchestrator:
 class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
     async def run_flow(self, answers, explicit_model=None, configured_model='GPT-6 Sol',
                        resume=False, resume_capture=False, resume_unsent=False,
-                       exact_attach=False):
+                       exact_attach=False, resume_instruction=None):
         root, config, _, _ = make_fixture('app-startup-flow-')
         config.storage_dir = root
         config.model = configured_model
@@ -181,8 +184,15 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
                                port=63741 if exact_attach else None,
                                profile=explicit_profile, model=explicit_model, setup_only=False,
                                resume=resume_path, yes_setup=True)
+        args.resume_instruction = resume_instruction
         endpoint_choice = AsyncMock()
+        from copilot_agent.terminal_input import TerminalInputBroker
+        original_set_active = TerminalInputBroker.set_active
+        def recorded_active(broker, run_id=None, cancel_event=None):
+            events.append('terminal:active' if run_id else 'terminal:idle')
+            original_set_active(broker, run_id, cancel_event)
         with patch.dict(os.environ), \
+             patch.object(TerminalInputBroker, 'set_active', new=recorded_active), \
              patch('copilot_agent.app._UI_PERMISSION_CONTEXT'), \
              patch('copilot_agent.app.Config.load', return_value=config), \
              patch('copilot_agent.app.validate_user_storage_directory', side_effect=lambda path: Path(path)), \
@@ -271,6 +281,15 @@ class StartupFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('orchestrator:preload', events)
         self.assertNotIn('orchestrator:initialize', events)
         self.assertNotIn('browser:exchange', events)
+        self.assertLess(events.index('terminal:active'), events.index('orchestrator:recover_capture'))
+        self.assertLess(events.index('orchestrator:recover_capture'), events.index('terminal:idle'))
+
+    async def test_ready_resume_starts_supplied_new_goal_without_another_user_prompt(self):
+        events = await self.run_flow([':exit'], explicit_model='GPT-6 Sol', resume=True,
+                                     resume_instruction='Execute the next synthetic goal.')
+        self.assertIn('orchestrator:resume-draft', events)
+        self.assertNotIn('orchestrator:initialize', events)
+        self.assertLess(events.index('terminal:active'), events.index('orchestrator:resume-draft'))
 
     async def test_resume_resends_only_hash_matched_draft_confirmed_not_sent(self):
         events = await self.run_flow([':exit'], explicit_model='GPT-6 Sol', resume=True,

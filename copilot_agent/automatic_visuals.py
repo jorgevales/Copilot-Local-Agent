@@ -90,6 +90,8 @@ async def paired_browser_action(page, context, label, operation, *, after_page=N
         if context.get('cancel_event') is not None and context['cancel_event'].is_set():
             raise NavigationStop('cancelled', 'User cancellation received during before-action capture')
         with trace(context).span('action', call_id=context.get('source_call_id')):
+            if label.startswith('browser.plan '):
+                context['browser_plan_effects_started'] = True
             result = await operation()
         return result
     finally:

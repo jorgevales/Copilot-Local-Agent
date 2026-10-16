@@ -71,7 +71,9 @@ def make_fixture(prefix='contract-'):
         (PROJECT_ROOT / 'schemas' / 'response-v1.schema.json').read_bytes())
     config = Config(root=root, profile_dir=root / 'profile', allowed_roots=[str(root / 'workspace')],
                     max_corrections=1)
-    config.validate()
+    from copilot_agent.policy import PolicyError
+    with patch('copilot_agent.config.mapped_s_drive_root', side_effect=PolicyError('Synthetic fixture has no mapped S: drive')):
+        config.validate()
     state = SessionState(root / 'session')
     return root, config, state, FixtureRegistry()
 

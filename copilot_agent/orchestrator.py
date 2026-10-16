@@ -949,6 +949,14 @@ class Orchestrator:
             request_id = uuid.uuid4().hex
             with self.performance.span('prompt_assembly', request_id=request_id):
                 text, attachments = self.prompts.build(kind, redact(content), request_id)
+        if getattr(self, '_task_measurement_started', None) is not None:
+            measured = json.loads(text)
+            measured['task_measurement'] = {
+                'elapsed_ms': round(max(0, time.monotonic()-self._task_measurement_started)*1000),
+                'decision_requests_so_far': self._task_decision_requests,
+                'status': 'in_progress',
+                'instruction': 'Measured current-turn elapsed time includes reasoning and tools; it is not completion proof. Never invent missing historical timings.'}
+            text = json.dumps(measured, ensure_ascii=False, separators=(',', ':'))
         pending_images = self.base_context['pending_image_attachments']
         pending_files = self.base_context['pending_file_attachments']
         pending_visuals = self.base_context.get('pending_visual_attachments', [])
@@ -1031,6 +1039,8 @@ class Orchestrator:
         def committed():
             self.state.confirm_submission(request_id, attachments=snapshot,
                                           findings_path=self.findings.attachment)
+            if getattr(self, '_task_measurement_started', None) is not None:
+                self._task_decision_requests += 1
             ordinal = self.state.message_count
             for entry in snapshot:
                 if Path(entry['path']) in list(map(Path, pending_files)):
@@ -1178,6 +1188,85 @@ class Orchestrator:
                             'omitted_records': len(prior) - len(kept),
                             'instruction': 'The hash-verified startup references remain authoritative in this chat; repeated upload history only was omitted. Current user attachments and all policy state remain inline.'}
                         text = json.dumps(message, ensure_ascii=False, separators=(',', ':'))
+                if composer_characters(text) > limit - 128:
+                    # Shorten repeated navigation advice, never current results,
+                    # user scope, identity, approvals or unresolved operations.
+                    strategy = message.get('execution_strategy', {})
+                    if 'recovery' in strategy:
+                        strategy['recovery'] = ('Preserve successful steps and repair only the failed segment. Retry only proven not_started/no-effect calls. '
+                            'Reconcile uncertain effects before replay; use registered recovery/quarantine tools and inspect their actual outcomes. '
+                            'Quarantine gives no completion credit. Never bypass denial, ownership, exact record identity, authentication, Stop or resource limits.')
+                    if 'progress' in strategy:
+                        strategy['progress'] = 'Report actual verified progress and the root blocker once; do not repeat unchanged recovery responses.'
+                    if 'planning' in strategy:
+                        strategy['planning'] = 'Plan the full goal; batch known executable steps with checked prerequisites. Do not guess unknown outputs.'
+                    if 'answering' in strategy:
+                        strategy['answering'] = 'Continue tools until the goal is verified. Report actual evidence; ask only for a missing blocking fact.'
+                    if 'target_navigation' in strategy:
+                        strategy['target_navigation'] = ('Prioritize the target over full discovery. Reuse observed routes. '
+                            'browser.navigate_goal: observe first, then observation_id plus up to three navigation-only steps, '
+                            'each with postconditions; target needs exact URL plus visible assertion or exact visible text. '
+                            'Use browser.plan for forms and consequential actions, with explicit postconditions. '
+                            'Unknown states need fresh visual decisions. Completion needs target_verified and current visual review. '
+                            'Authentication, stale/missing screenshots and uncertain effects stop mutation. No unnecessary ZIP or crawl.')
+                    if 'navigation_response_style' in message:
+                        message['navigation_response_style'] = ('Use concise decisions and the next bounded segment. Preserve every required protocol field, '
+                            'exact IDs, approvals and verification. No invented controls or private chain-of-thought. Review current evidence.')
+                    text = json.dumps(message, ensure_ascii=False, separators=(',', ':'))
+                if composer_characters(text) > limit - 128:
+                    grant = message.get('session_plan_authorization', {})
+                    if grant.get('active') is True and 'instruction' in grant:
+                        grant['instruction'] = ('Startup Y approves broader task changes, necessary intermediate actions and validated current-session plans without repeated prompts. '
+                            'Keep catalogue approval_required flags; the orchestrator approves exact prepared hashes. '
+                            'Schemas, declared scope, protected paths, ownership, OS access, manual authentication and uncertain-effect checks remain active.')
+                    if 'known_task_learning' in message:
+                        message['known_task_learning'] = ('Reuse saved procedures with fresh inputs and a live entry check; batch known steps and repair only changed segments. '
+                            'After every verified full goal compare complete duration, decision rounds and reliability. Preserve prior verified versions; promote only a faster equally verified procedure. '
+                            'Save generic slots, labels, route templates, checks, stop point and measured timing through knowledge.note. Review verified_knowledge when readback_complete=true; otherwise lookup. '
+                            'Retain exact reusable_plan_template JSON with fresh slots when returned; expect/success are arrays. Never assert a literal dynamic URL template. Exclude record values and credentials. Failed/partial runs are diagnostics. Knowledge never authorizes replay.')
+                    text = json.dumps(message, ensure_ascii=False, separators=(',', ':'))
+                if composer_characters(text) > limit - 128 and message.get('kind') != 'initialize':
+                    # These are repeated local construction hints, not task,
+                    # identity, scope or result data. Startup contracts remain
+                    # hash verified; local execution checks remain unchanged.
+                    if 'browser_quick_reference' in message:
+                        message['browser_quick_reference'] = {
+                            'browser.plan': 'Required task_id/steps/success; steps, expect and success are ARRAYS even for one assertion. Step id/op; fill locator/value; click locator/effect/expect; assert expect; capture locator. Assertions visible/hidden/text/url/count/enabled; text checks business input values. Every transition needs expect; effect navigation/search/consequential. timeout_seconds<=120.',
+                            'browser.recon': 'Omit optional limits or use max_elements<=120, max_text_chars<=4000.',
+                            'knowledge.note': 'Exact arguments title/content. Review verified_knowledge when readback_complete=true; no extra lookup.',
+                            'knowledge.lookup': '{} lists notes; {note_id: returned hash} reads one. Exact complete schemas remain in the startup catalogue.'}
+                    if 'guidance_manifest' in message:
+                        message['guidance_manifest'] = {'verified_startup_manifest_sha256': canonical_hash(self.prompts.manifest)}
+                    discovery = message.get('discovery_navigation')
+                    if isinstance(discovery, dict):
+                        message['discovery_navigation'] = {key: discovery[key] for key in
+                            ('flags', 'available', 'local_ceilings', 'unavailable') if key in discovery}
+                    scope = message.get('approved_navigation_scope')
+                    if isinstance(scope, dict) and 'instruction' in scope:
+                        scope['instruction'] = 'Use these approved domains for known navigation. Forms and consequential plans use applicable session approval. Verify live identity and uncertainty; never credit lost operations.'
+                    if 'business_data_instruction' in message:
+                        message['business_data_instruction'] = 'Use authorized business data locally in approved storage; generic reusable knowledge excludes identifiable records. Preserve manual authentication, credentials, destructive-action and uncertain-effect controls.'
+                    if message.get('kind') == 'correction':
+                        message['response_instruction'] = 'Correct only the listed errors. Return one complete plain valid JSON envelope between <<<COPILOT_AGENT_V1_BEGIN>>> and <<<COPILOT_AGENT_V1_END>>> with exact session_id/request_id and all required fields. Escape JSON strings. Routine navigation may use useful_findings=[]; nonempty findings must follow the attached schema.'
+                    text = json.dumps(message, ensure_ascii=False, separators=(',', ':'))
+                if composer_characters(text) > limit - 128:
+                    context = message.get('context', {})
+                    history = context.get('attachments', [])
+                    columns = ('content_sha256', 'content_bytes', 'website_content_omitted')
+                    if history and all(isinstance(item, dict) and set(item) == set(columns) for item in history):
+                        # Lossless column encoding of opaque audit records.
+                        context['attachments'] = {'columns': list(columns),
+                            'rows': [[item[key] for key in columns] for item in history],
+                            'encoding': 'Each row maps positionally to columns; historical content remains omitted.'}
+                    scope = message.get('approved_navigation_scope')
+                    if scope and scope == message.get('scoped_discovery_session'):
+                        message['approved_navigation_scope'] = {'same_as': 'scoped_discovery_session'}
+                    discovery = message.get('discovery_navigation')
+                    if isinstance(discovery, dict):
+                        discovery.pop('target_purposes', None)
+                        discovery.pop('installed_workers', None)
+                        discovery['worker_reference'] = 'Use only declared tools and workers in the verified startup catalogue.'
+                    text = json.dumps(message, ensure_ascii=False, separators=(',', ':'))
         packed, paths = pack_outbound(text, attachments, self.state.directory / 'tool-results',
             composer_limit=limit, max_file_bytes=min(self.config.max_attachment_bytes, 8 * 1024 * 1024),
             # Existing current tool-result artifacts retain their explicit
@@ -1422,8 +1511,31 @@ class Orchestrator:
             self.state.event('knowledge_recovery', operation_id=call_id, **outcome)
         return recovered
 
+    def _select_procedure_references(self, user_input):
+        from .procedure_memory import matching_procedures
+        try:
+            self.prompts.procedure_references = matching_procedures(user_input, self.base_context)
+        except (PolicyError, OSError, ValueError):
+            self.prompts.procedure_references = []
+        for reference in self.prompts.procedure_references:
+            self.approved_attachment_hashes[reference['path']] = reference['note_id']
+
+    def _procedure_update_missing(self, call_ids):
+        if not getattr(self.prompts, 'procedure_references', []):
+            return False
+        calls = [record for key, record in self.state.data['calls'].items() if key in call_ids]
+        verified_plan = any(record.get('request', {}).get('name') == 'browser.plan'
+            and record.get('result', {}).get('ok') is True
+            and record.get('result', {}).get('result', {}).get('status') == 'verified' for record in calls)
+        verified_note = any(record.get('request', {}).get('name') == 'knowledge.note'
+            and record.get('result', {}).get('ok') is True
+            and record.get('result', {}).get('result', {}).get('verified') is True for record in calls)
+        return verified_plan and not verified_note
+
     async def turn(self, user_input: str, attachments=(), active_run_id=None, recovered_response=None):
         self._active_turn_run_id = active_run_id
+        self._task_measurement_started = time.monotonic()
+        self._task_decision_requests = 0
         try:
             with self.performance.span('task_total'):
                 return await self._turn(user_input, attachments, recovered_response)
@@ -1448,9 +1560,11 @@ class Orchestrator:
         self.cancel_event.clear()
         goal_outcomes = {}
         goal_completion_corrections = 0
+        procedure_completion_corrections = 0
         if recovered_response is None:
             self.browser._goal_navigation = {}
         self.base_context.pop('discovery_synthesis_pending', None)
+        self.base_context.pop('verified_procedure_template', None)
         self.base_context.pop('discovery_accepted_at', None)
         self.base_context.pop('discovery_accepted_monotonic', None)
         if not self.initialized:
@@ -1500,6 +1614,7 @@ class Orchestrator:
         kind, content = 'user_turn', user_input
         self.base_context['research_user_request'] = user_input
         self._authorize_user_targets(user_input)
+        self._select_procedure_references(user_input)
         from .automation_packages import estimate_task
         candidate_route = estimate_task(self._routing_description(user_input), {
             'package_score': self.config.automation_package_score,
@@ -1519,6 +1634,13 @@ class Orchestrator:
             if incoming:
                 self.browser._goal_navigation = {}
                 goal_outcomes.clear()
+                if recovered_response is not None:
+                    # A new goal supersedes the captured proposal as well as
+                    # ordinary unexecuted plans. Retain evidence, then send the
+                    # update instead of processing stale recovered tool calls.
+                    self._record_raw_response(*recovered_response)
+                    self.state.event('recovered_proposal_superseded', request_id=recovered_response[1])
+                    recovered_response = None
                 if kind == 'tool_results' and isinstance(content, dict):
                     incoming['content']['completed_tool_results'] = content.get('results', [])
                     incoming['content']['not_executed_prior_plan'] = content.get('not_executed', [])
@@ -1596,6 +1718,16 @@ class Orchestrator:
                         continue
                     response = dict(response, completion_status='blocked', user_response='File delivery is unverified after bounded retries. ' + response['user_response'])
                     self.state.event('delivery_unverified', requested=delivery, attempts=delivery_attempts)
+                if response.get('completion_status') == 'complete' and self._procedure_update_missing(turn_call_ids):
+                    if procedure_completion_corrections == 0:
+                        procedure_completion_corrections += 1
+                        kind, content = 'recovery', {
+                            'instruction': 'The known website procedure completed, but no verified procedure update was saved. Perform no more website mutations. Save a concise generic procedure/evaluation through knowledge.note, retaining prior verified versions and marking incomplete timing as partial. Review verified_knowledge as readback when available, then finish.',
+                            'elapsed_ms_so_far': round((time.monotonic()-self._task_measurement_started)*1000),
+                            'decision_requests_so_far': self._task_decision_requests}
+                        continue
+                    response = dict(response, completion_status='blocked',
+                        user_response='The website goal completed, but its reusable procedure update is unverified. ' + response['user_response'])
                 self.state.data['status'] = 'ready_with_uncertain_operations' if any(c['status'] == 'uncertain' for c in self.state.data['calls'].values()) else 'ready'
                 if response.get('completion_status') == 'blocked': self.state.data['status'] = 'delivery_blocked'
                 self.state.data['summary'] = response['task_interpretation'] + '\n' + response['user_response']
@@ -1980,6 +2112,17 @@ class Orchestrator:
                             except Exception:
                                 pass  # The tool outcome remains authoritative.
                 self.state.finish_call(call['call_id'], result)
+                if call['name'] == 'browser.plan':
+                    self.base_context.pop('verified_procedure_template', None)
+                    if result.get('ok') and result.get('result', {}).get('status') == 'verified':
+                        from .procedure_memory import reusable_plan_template
+                        template = reusable_plan_template(call['arguments'])
+                        if (template is not None
+                                and result['result'].get('last_verified_state', {}).get('url')
+                                and result['result'].get('plan_hash')):
+                            self.base_context['verified_procedure_template'] = {
+                                'origin': result['result']['last_verified_state']['url'].split('/', 3)[:3],
+                                'template': template, 'source_plan_sha256': result['result']['plan_hash']}
                 self.performance.flush()
                 if call['name'] == 'browser.navigate_goal':
                     goal_outcomes[call['arguments']['task_id']] = result.get('result', {})
@@ -2171,11 +2314,12 @@ class Orchestrator:
 
     async def _take_steering(self, active_goal):
         """Incorporate ordered UI steering only at safe orchestration boundaries."""
-        if self.steering_poll is None:
+        if self.steering_poll is None and not self._pending_steering_items:
             return None
         items = list(self._pending_steering_items)
         self._pending_steering_items.clear()
-        items.extend(self.steering_poll())
+        if self.steering_poll is not None:
+            items.extend(self.steering_poll())
         if not items:
             return None
         if self._active_turn_run_id is not None:
@@ -2271,6 +2415,9 @@ class Orchestrator:
                              attachment_count=len(accepted_attachments),
                              attachment_status=record['attachment_status'])
             self.state.data['requirements'].append(item['text'])
+            if re.search(r'https://', item['text']):
+                self._authorize_user_targets(item['text'])
+                self._select_procedure_references(item['text'])
         self.state.save()
         goal = {'original_request': active_goal,
                 'steering_messages': [{'message_id': item['message_id'],

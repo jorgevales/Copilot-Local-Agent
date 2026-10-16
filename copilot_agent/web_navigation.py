@@ -106,9 +106,9 @@ def _validate_schema(value, schema):
         raise ValueError("Navigation number outside bounds")
 
 
-def _validate_locator(locator):
+def _validate_locator(locator, location='locator'):
     if not locator or not any(locator.get(key) for key in ("id", "testid", "role", "label", "text", "css", "xpath")):
-        raise ValueError("A semantic locator is required")
+        raise ValueError(location + ': A semantic locator is required (id, testid, role, label, text, css or xpath).')
     if "name" in locator and not locator.get("role"):
         raise ValueError("Accessible name requires a role")
     if any(not value.strip() for key, value in locator.items() if key != 'nth'):
@@ -118,12 +118,12 @@ def _validate_locator(locator):
         raise ValueError("Use explicit scoped CSS and semantic locators")
 
 
-def _validate_assertion(assertion):
+def _validate_assertion(assertion, location='assertion'):
     if assertion["kind"] == "url":
         if not assertion.get("value"):
             raise ValueError("URL assertion requires a value")
     else:
-        _validate_locator(assertion.get("locator", {}))
+        _validate_locator(assertion.get("locator", {}), location + '.' + assertion['kind'] + '.locator')
     if assertion["kind"] == "text" and "value" not in assertion:
         raise ValueError("Text assertion requires exact expected text")
     if assertion["kind"] == "count" and "count" not in assertion:
@@ -145,10 +145,11 @@ def validate_navigation(name, args, context=None):
                     raise ValueError("Every nested step needs a unique ID")
                 ids.add(step["id"])
                 op = step["op"]
+                location = 'steps[' + step['id'] + '] (' + op + ')'
                 if op in {"click", "fill", "select", "press", "wait", "capture"}:
-                    _validate_locator(step.get("locator", {}))
+                    _validate_locator(step.get("locator", {}), location + '.locator')
                 if op in {"click", "select", "press", "navigate", "open_tab"} and not step.get("expect"):
-                    raise ValueError("Every transition requires explicit postconditions")
+                    raise ValueError(location + ': Every transition requires explicit postconditions in expect.')
                 if op in {"click", "press", "select"} and "effect" not in step:
                     raise ValueError("Transition must declare navigation, search or consequential effect")
                 if op == "press" and step.get("key") not in {"Enter", "Tab", "Escape", "ArrowDown", "ArrowUp", "Home", "End", "PageDown", "PageUp", "Space"}:
@@ -160,7 +161,7 @@ def validate_navigation(name, args, context=None):
                 if op == "close_tab" and not step.get("tab_id"):
                     raise ValueError("Closing requires an explicit tab ID")
                 if op == "assert" and not step.get("expect"):
-                    raise ValueError("Assert requires postconditions")
+                    raise ValueError(location + ': Assert requires postconditions in expect, not condition.')
                 if op in {"loop", "branch"}:
                     if "condition" not in step:
                         raise ValueError("Branch/loop requires a condition")
@@ -169,9 +170,9 @@ def validate_navigation(name, args, context=None):
                     if op == "branch" and not step.get("then") and not step.get("else"):
                         raise ValueError("Branch requires a bounded branch")
                 if "condition" in step:
-                    _validate_assertion(step["condition"])
+                    _validate_assertion(step["condition"], location + '.condition')
                 for assertion in step.get("expect", []):
-                    _validate_assertion(assertion)
+                    _validate_assertion(assertion, location + '.expect')
                 for key in ("then", "else", "steps"):
                     if key in step:
                         if key not in ({"then", "else"} if op == "branch" else {"steps"} if op == "loop" else set()):
@@ -181,7 +182,7 @@ def validate_navigation(name, args, context=None):
         if len(ids) > 100:
             raise ValueError("Plan has too many nested actions")
         for assertion in args["success"]:
-            _validate_assertion(assertion)
+            _validate_assertion(assertion, 'success')
     if name == "browser.tabs":
         if args["operation"] == "open" and any(not args.get(key, "").strip() for key in ("url", "purpose", "task_id")):
             raise ValueError("New tabs require URL, purpose and task")
@@ -228,11 +229,15 @@ def _same_origin(url, reference, context):
     return resolved
 
 
+class OwnedPageUnavailable(PolicyError):
+    code = 'browser_unavailable'
+
+
 def _state(context):
     browser = context.get("browser")
     page = getattr(browser, "tool_page", None)
     if browser is None or page is None:
-        raise PolicyError("Owned tool page is unavailable")
+        raise OwnedPageUnavailable('Owned tool page is unavailable; use browser.open on a known approved route, then observe before continuing.')
     if page is getattr(browser, "page", None) or page is getattr(browser, "chat_page", None):
         raise PolicyError("Copilot control page cannot be a tool page")
     if (getattr(page, "context", None) is not getattr(browser, "tool_context", None)
@@ -302,7 +307,8 @@ def get_navigation_page(context, tab_id=None, task_id=None, customer_key=None):
     """Public lookup for document tooling; never redirect the Copilot/primary page."""
     active_task = context.get("task_id")
     active_customer = context.get("customer_key")
-    if not fast_mode(context.get("config", {})) and task_id is not None and active_task is not None and task_id != active_task:
+    session_tasks = config_value(context.get('config', {}), '_session_plan_approval', False) is True
+    if not session_tasks and not fast_mode(context.get("config", {})) and task_id is not None and active_task is not None and task_id != active_task:
         raise PolicyError("Requested task disagrees with the active authorised task")
     if not fast_mode(context.get("config", {})) and customer_key is not None and active_customer is not None and customer_key != active_customer:
         raise PolicyError("Requested customer disagrees with the active authorised customer")
@@ -316,7 +322,7 @@ def get_navigation_page(context, tab_id=None, task_id=None, customer_key=None):
     if (getattr(tab["page"], "context", None) is not getattr(context.get("browser"), "tool_context", None)
             or tab["page"] not in getattr(context.get("browser"), "_tool_pages", [tab["page"]])):
         raise PolicyError("Tab ownership changed")
-    if not fast_mode(context.get("config", {})) and task_id is not None and tab["task_id"] not in {None, task_id}:
+    if not session_tasks and not fast_mode(context.get("config", {})) and task_id is not None and tab["task_id"] not in {None, task_id}:
         raise PolicyError("Tab belongs to another task")
     if not fast_mode(context.get("config", {})) and customer_key is not None and tab["customer_key"] not in {None, customer_key}:
         raise PolicyError("Tab belongs to another customer")
@@ -400,12 +406,13 @@ async def _snapshot(page, context, max_elements=60, max_text_chars=1200):
 
 
 async def _boundary(page, context):
-    deadline = time.monotonic()+3
+    deadline = time.monotonic()+5
     while True:
         snapshot = await _snapshot(page, context, 8, 100)
-        if snapshot["state"] not in {"loading", "blank_page"} or time.monotonic() >= deadline:
+        if snapshot["state"] not in {"loading", "blank_page", "server_error"} or time.monotonic() >= deadline:
             break
-        await asyncio.sleep(.1)
+        # Observe automatic recovery without reloading or replaying an action.
+        await asyncio.sleep(.2)
     state = snapshot["state"]
     if context.get('goal_origin') and snapshot.get('boundaries'):
         raise NavigationStop('unexpected_dialog', 'An unexpected dialog requires a fresh visual decision')
@@ -521,7 +528,9 @@ async def _assertion(page, assertion, context, wait_ms=0):
                     elif kind == "enabled":
                         observed = await locator.is_enabled()
                     elif kind == "text":
-                        observed = (await locator.inner_text(timeout=1000)).strip() == assertion["value"].strip()
+                        # Visible business inputs expose their text as value,
+                        # not innerText. Credential/hidden fields remain denied.
+                        observed = await read_business_field(locator) == assertion["value"].strip()
                     break
             if kind == "hidden" and not found:
                 observed = True
@@ -873,9 +882,10 @@ async def _execute_plan(args, context, stop_when=None):
                 result["retry_count"] = max(item["retry"] for item in attempted)
                 counters["locator_retries"] += result["retry_count"]
                 if op == "capture":
-                    if (await locator.evaluate("n=>n.tagName")) in {"INPUT", "TEXTAREA"} or await locator.get_attribute("contenteditable") == "true":
+                    editable = (await locator.evaluate("n=>n.tagName")) in {"INPUT", "TEXTAREA"} or await locator.get_attribute("contenteditable") == "true"
+                    if editable and not config_value(context.get('config', {}), '_session_plan_approval', False):
                         raise PolicyError("Capture cannot expose editable input contents")
-                    result["capture"] = (await locator.inner_text(timeout=1000))[:step.get("max_chars", 1000)]
+                    result["capture"] = (await read_business_field(locator))[:step.get("max_chars", 1000)]
                 elif op != "wait":
                     if (await locator.get_attribute("type") or "").lower() in {"password", "file"}:
                         raise PolicyError("Password and upload controls are unavailable to navigation plans")
@@ -972,6 +982,11 @@ async def _execute_plan(args, context, stop_when=None):
               "next_action": "complete" if status in {"verified", "target_reached"} else "inspect_and_prepare_new_plan" if record["uncertain_step"] else "repair_precondition_then_resume_exact_plan"}
     if error:
         output["error"] = error
+    if status == 'verified':
+        from .procedure_memory import reusable_plan_template
+        template = reusable_plan_template(args)
+        if template is not None:
+            output['reusable_plan_template'] = template
     return output
 
 
@@ -998,6 +1013,12 @@ async def execute_navigation(name, args, context, policy=None):
         for route in routes:
             route["relevance"] = len(tokens & set(re.findall(r"[a-z0-9]+", (route["label"]+" "+route["url"]).lower())))
         routes.sort(key=lambda route: (-route["relevance"], route["url"], route["label"]))
+        # Keep form controls and relevant actions ahead of repeated sidebar
+        # links when the bounded result projection has to remove tail entries.
+        snapshot['controls'].sort(key=lambda control: (
+            -len(tokens & set(re.findall(r'[a-z0-9]+', control.get('name', '').lower()))),
+            control.get('role') == 'link',
+            control.get('role') not in {'textbox', 'combobox', 'spinbutton', 'button'}))
         snapshot["documents"] = [link for link in snapshot["links"] if (fast_mode(context.get('config', {})) or link["same_origin"]) and (link["document"] or link["download"])]
         site_map = {"schema_version": "1", "origin": snapshot["origin"], "source_url": snapshot["url"],
                     "observed_at": snapshot["observed_at"], "expires_at": snapshot["observed_at"]+1800,

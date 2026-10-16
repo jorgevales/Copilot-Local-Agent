@@ -76,7 +76,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `copilot_agent/app.py`
 
 - Role: Interactive setup, visible browser and continuous policy-controlled conversation.
-- Direct imports: `.`, `.attachments`, `.browser`, `.config`, `.diagnostics`, `.feedback`, `.file_picker`, `.knowledge_health`, `.orchestrator`, `.policy`, `.protocol`, `.setup_resources`, `.state`, `.storage`, `.temp_storage`, `.tools`, `__future__`, `argparse`, `asyncio`, `dataclasses`, `json`, `os`, `pathlib`, `socket`, `sys`, `threading`, `uuid`
+- Direct imports: `.`, `.attachments`, `.browser`, `.config`, `.diagnostics`, `.feedback`, `.file_picker`, `.knowledge_health`, `.orchestrator`, `.policy`, `.protocol`, `.setup_resources`, `.state`, `.storage`, `.temp_storage`, `.tools`, `__future__`, `argparse`, `asyncio`, `dataclasses`, `json`, `os`, `pathlib`, `socket`, `sys`, `threading`, `time`, `uuid`
 - Public symbols: `_actionable(exc) [private helper]`; `_choose_existing_endpoint(endpoints, prompt) [private helper]`; `_interruptible_session(work) [private helper]`; `_recent_events(state) [private helper]`; `_record_bug_fix(state, config, exc, operation, stage, report_index=None) [private helper]`; `_record_turn_error(state, exc) [private helper]`; `_show_bug_handoff(reports) [private helper]`; `_terminal_approval_decider(_preview) [private helper]`; `ask(prompt: str) -> str`; `choose_browser_endpoint(config, args, settings, *, interactive=False, prompt=ask, force_new=False)`; `class SessionRestartRequested(Exception)`; `configure_isolated_test_workspace(config, requested_path, *, resume_session=None)`; `configure_local_knowledge_test(config, requested_path, *, resume_session=None)`; `error(message)`; `main()`; `persist_runtime_settings(config, settings)`; `read_runtime_settings(config)`; `run(args)`; `start_new_session(config, previous, model_label, registry=None, *, user_requested=False)`; `system(message)`
 
 ### `copilot_agent/approvals.py`
@@ -502,7 +502,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: S: project-sibling persistence and operator-selected storage helpers.
 - Direct imports: `.persistence`, `__future__`, `hashlib`, `json`, `ntpath`, `os`, `pathlib`, `socket`
-- Public symbols: `default_local_storage(environ=None) -> Path`; `discoveries_storage(project_root: Path) -> Path`; `discoveries_storage_paths(project_root: Path) -> dict[str, str]`; `machine_key(hostname=None) -> str`; `profile_directory(storage_dir: Path, hostname=None) -> Path`; `read_user_settings(storage_dir: Path, *, testing=False) -> dict`; `save_user_settings(storage_dir: Path, settings: dict, *, testing=False) -> Path`; `shared_python_candidates(values, require_shared=True) -> list[str]`; `validate_user_storage_directory(path: Path) -> Path`
+- Public symbols: `_discoveries_storage_at_share(project_root: Path, share: Path) -> Path [private helper]`; `default_local_storage(environ=None) -> Path`; `discoveries_storage(project_root: Path) -> Path`; `discoveries_storage_paths(project_root: Path) -> dict[str, str]`; `machine_key(hostname=None) -> str`; `profile_directory(storage_dir: Path, hostname=None) -> Path`; `read_user_settings(storage_dir: Path, *, testing=False) -> dict`; `save_user_settings(storage_dir: Path, settings: dict, *, testing=False) -> Path`; `shared_python_candidates(values, require_shared=True) -> list[str]`; `validate_user_storage_directory(path: Path) -> Path`
 
 ### `copilot_agent/sync.py`
 
@@ -538,7 +538,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Bounded semantic website discovery and verified plans in owned Edge tabs.
 - Direct imports: `.performance`, `.policy`, `.session_mode`, `asyncio`, `hashlib`, `json`, `re`, `time`, `urllib.parse`, `uuid`
-- Public symbols: `_assertion(page, assertion, context, wait_ms=0) [private helper]`; `_boundary(page, context) [private helper]`; `_candidates(page, strategy, context) [private helper]`; `_check_cancelled(context) [private helper]`; `_close_tab(tab_id, context, task_id=None, customer_key=None) [private helper]`; `_compact_recon(snapshot, context) [private helper]`; `_consequential_control(locator, op) [private helper]`; `_execute_plan(args, context, stop_when=None) [private helper]`; `_fingerprint(page) [private helper]`; `_identity(page, identities, context) [private helper]`; `_install_origin_guard(page, context, reference) [private helper]`; `_object(properties, required=()) [private helper]`; `_open_tab(args, context, reference) [private helper]`; `_origin(url) [private helper]`; `_reset_tabs(args, context) [private helper]`; `_resolve(page, strategy, context, retries=0, visible=True) [private helper]`; `_same_origin(url, reference, context) [private helper]`; `_scope(page, locator, context) [private helper]`; `_snapshot(page, context, max_elements=60, max_text_chars=1200) [private helper]`; `_state(context) [private helper]`; `_step_schema(depth=2) [private helper]`; `_stop_state(snapshot, url) [private helper]`; `_tab_list(context) [private helper]`; `_url_policy(context) [private helper]`; `_validate_assertion(assertion) [private helper]`; `_validate_locator(locator) [private helper]`; `_validate_schema(value, schema) [private helper]`; `_verify(page, assertions, context, timeout_ms=3000) [private helper]`; `class _TargetReached(Exception)`; `class NavigationStop(Exception); 1 public methods`; `clear_navigation_state(browser)`; `execute_navigation(name, args, context, policy=None)`; `get_navigation_page(context, tab_id=None, task_id=None, customer_key=None)`; `get_primary_navigation_tab_id(context)`; `plan_hash(args)`; `read_business_field(locator)`; `safe_url(url)`; `validate_navigation(name, args, context=None)`
+- Public symbols: `_assertion(page, assertion, context, wait_ms=0) [private helper]`; `_boundary(page, context) [private helper]`; `_candidates(page, strategy, context) [private helper]`; `_check_cancelled(context) [private helper]`; `_close_tab(tab_id, context, task_id=None, customer_key=None) [private helper]`; `_compact_recon(snapshot, context) [private helper]`; `_consequential_control(locator, op) [private helper]`; `_execute_plan(args, context, stop_when=None) [private helper]`; `_fingerprint(page) [private helper]`; `_identity(page, identities, context) [private helper]`; `_install_origin_guard(page, context, reference) [private helper]`; `_object(properties, required=()) [private helper]`; `_open_tab(args, context, reference) [private helper]`; `_origin(url) [private helper]`; `_reset_tabs(args, context) [private helper]`; `_resolve(page, strategy, context, retries=0, visible=True) [private helper]`; `_same_origin(url, reference, context) [private helper]`; `_scope(page, locator, context) [private helper]`; `_snapshot(page, context, max_elements=60, max_text_chars=1200) [private helper]`; `_state(context) [private helper]`; `_step_schema(depth=2) [private helper]`; `_stop_state(snapshot, url) [private helper]`; `_tab_list(context) [private helper]`; `_url_policy(context) [private helper]`; `_validate_assertion(assertion, location='assertion') [private helper]`; `_validate_locator(locator, location='locator') [private helper]`; `_validate_schema(value, schema) [private helper]`; `_verify(page, assertions, context, timeout_ms=3000) [private helper]`; `class _TargetReached(Exception)`; `class NavigationStop(Exception); 1 public methods`; `class OwnedPageUnavailable(PolicyError)`; `clear_navigation_state(browser)`; `execute_navigation(name, args, context, policy=None)`; `get_navigation_page(context, tab_id=None, task_id=None, customer_key=None)`; `get_primary_navigation_tab_id(context)`; `plan_hash(args)`; `read_business_field(locator)`; `safe_url(url)`; `validate_navigation(name, args, context=None)`
 
 ### `copilot_agent/web_operations.py`
 
@@ -639,8 +639,8 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `tests/test_app_startup_flow.py`
 
 - Role: Startup latency contracts without launching Edge or sending Copilot messages.
-- Direct imports: `copilot_agent.app`, `copilot_agent.config`, `copilot_agent.state`, `os`, `pathlib`, `tempfile`, `tests.test_protocol_state`, `types`, `unittest`, `unittest.mock`
-- Public symbols: `class LocalKnowledgeTestStoreTests(unittest.TestCase); 3 public methods`; `class StartupBrowser; 8 public methods`; `class StartupFlowTests(unittest.IsolatedAsyncioTestCase); 9 public methods`; `class StartupOrchestrator; 7 public methods`
+- Direct imports: `copilot_agent.app`, `copilot_agent.config`, `copilot_agent.state`, `os`, `pathlib`, `tempfile`, `tests.test_protocol_state`, `threading`, `types`, `unittest`, `unittest.mock`
+- Public symbols: `class LocalKnowledgeTestStoreTests(unittest.TestCase); 3 public methods`; `class StartupBrowser; 8 public methods`; `class StartupFlowTests(unittest.IsolatedAsyncioTestCase); 10 public methods`; `class StartupOrchestrator; 7 public methods`
 
 ### `tests/test_archives.py`
 
@@ -730,7 +730,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Offline contracts for session grants, concise intake and method evolution.
 - Direct imports: `copilot_agent.discovery_store`, `copilot_agent.knowledge_notes`, `copilot_agent.knowledge_views`, `copilot_agent.policy`, `copilot_agent.site_knowledge`, `copy`, `json`, `os`, `tests.test_site_knowledge`, `types`, `unittest`, `unittest.mock`
-- Public symbols: `class CentralizedKnowledgeTests(unittest.TestCase); 12 public methods`; `class DiscoveryKnowledgeNoopTests(unittest.IsolatedAsyncioTestCase); 1 public methods`
+- Public symbols: `class CentralizedKnowledgeTests(unittest.TestCase); 13 public methods`; `class DiscoveryKnowledgeNoopTests(unittest.IsolatedAsyncioTestCase); 1 public methods`
 
 ### `tests/test_code_runner.py`
 
@@ -892,13 +892,13 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Mock transport/registry tests; no browser, network or deletion.
 - Direct imports: `asyncio`, `copilot_agent.browser`, `copilot_agent.orchestrator`, `copilot_agent.policy`, `copilot_agent.protocol`, `copilot_agent.state`, `copilot_agent.tools`, `copilot_agent.web_privacy`, `copy`, `hashlib`, `io`, `json`, `os`, `pathlib`, `sys`, `tests.test_protocol_state`, `threading`, `time`, `unittest`, `unittest.mock`, `zipfile`
-- Public symbols: `class MockBrowser; 3 public methods`; `class OrchestratorTests(unittest.IsolatedAsyncioTestCase); 62 public methods`; `class PreloadingBrowser(MockBrowser); 3 public methods`; `final_response(message, **changes)`; `tool_response(message, call_id='read-one', name='synthetic.read', arguments=None)`
+- Public symbols: `class MockBrowser; 3 public methods`; `class OrchestratorTests(unittest.IsolatedAsyncioTestCase); 63 public methods`; `class PreloadingBrowser(MockBrowser); 3 public methods`; `final_response(message, **changes)`; `tool_response(message, call_id='read-one', name='synthetic.read', arguments=None)`
 
 ### `tests/test_outbound_results.py`
 
 - Role: Implementation module; responsibilities are identified by its public symbols and imports.
 - Direct imports: `copilot_agent.browser`, `copilot_agent.orchestrator`, `copilot_agent.outbound_results`, `copilot_agent.policy`, `copilot_agent.tools`, `json`, `pathlib`, `tempfile`, `tests.test_browser`, `tests.test_orchestrator`, `tests.test_protocol_state`, `unittest`, `unittest.mock`
-- Public symbols: `class LimitedBrowser(MockBrowser); 1 public methods`; `class OutboundResultTests(unittest.IsolatedAsyncioTestCase); 4 public methods`; `class PackingTests(unittest.TestCase); 7 public methods`
+- Public symbols: `class LimitedBrowser(MockBrowser); 1 public methods`; `class OutboundResultTests(unittest.IsolatedAsyncioTestCase); 5 public methods`; `class PackingTests(unittest.TestCase); 7 public methods`
 
 ### `tests/test_package_terminal_flow.py`
 
@@ -1138,7 +1138,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Isolated storage selection checks; never scan an actual S: drive/account.
 - Direct imports: `copilot_agent.config`, `copilot_agent.storage`, `json`, `os`, `pathlib`, `tempfile`, `unittest`, `unittest.mock`
-- Public symbols: `class StorageTests(unittest.TestCase); 13 public methods`
+- Public symbols: `class StorageTests(unittest.TestCase); 15 public methods`
 
 ### `tests/test_supervised_session.py`
 
@@ -1212,6 +1212,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `asyncio`, `copilot_agent.browser`, `copilot_agent.policy`, `copilot_agent.site_knowledge`, `copilot_agent.tools`, `hashlib`, `json`, `pathlib`, `playwright.async_api`, `tempfile`, `time`, `types`, `unittest`
 - Public symbols: `class WebsiteIntegrationTests(unittest.IsolatedAsyncioTestCase); 9 public methods`
 
+### `tests/test_y_browser_workflow.py`
+
+- Role: Y task changes, exactly-once effects, and preflight certainty.
+- Direct imports: `copilot_agent.policy`, `copilot_agent.state`, `copilot_agent.tools`, `copilot_agent.web_navigation`, `tests`, `unittest`, `unittest.mock`
+- Public symbols: `class YBrowserWorkflowTests(unittest.IsolatedAsyncioTestCase); 14 public methods`
+
 ### `tools/benchmark_goal_navigation.py`
 
 - Role: Reproducible offline browser benchmark; no Copilot/model or production traffic.
@@ -1242,31 +1248,31 @@ This is a static AST inventory of the current source, not a verbatim code packag
 Generated from the local Graphify code-only AST graph. The raw graph, cache, and Graphify report are not attachments; the statistics and selected relationships below preserve their useful navigation evidence.
 
 - Graphify version: `0.9.79`
-- Source revision analyzed: `b05854153f49b628f6d3e2df7d95715c387266c7`
-- Nodes / edges / hyperedges: 4371 / 13526 / 0
-- Relationship counts: calls=5319, contains=1350, imports=2259, imports_from=1040, indirect_call=528, inherits=46, method=1984, rationale_for=479, references=109, uses=412
+- Source revision analyzed: `unrecorded`
+- Nodes / edges / hyperedges: 4405 / 13625 / 0
+- Relationship counts: calls=5366, contains=1353, imports=2272, imports_from=1046, indirect_call=531, inherits=47, method=2004, rationale_for=480, references=110, uses=416
 - Graph origin: Graphify AST extraction; inferred edges are hypotheses, not verified behavior.
 
 ### Highest-connectivity source symbols
 
-- `PolicyError` — 270 graph links; `copilot_agent/policy.py` at `L9`.
-- `ToolRegistry` — 196 graph links; `copilot_agent/tools.py` at `L408`.
+- `PolicyError` — 277 graph links; `copilot_agent/policy.py` at `L9`.
+- `ToolRegistry` — 200 graph links; `copilot_agent/tools.py` at `L408`.
 - `PathPolicy` — 182 graph links; `copilot_agent/policy.py` at `L42`.
-- `tools.py` — 169 graph links; `copilot_agent/tools.py` at `L1`.
-- `Orchestrator` — 165 graph links; `copilot_agent/orchestrator.py` at `L30`.
-- `SessionState` — 126 graph links; `copilot_agent/state.py` at `L67`.
+- `tools.py` — 170 graph links; `copilot_agent/tools.py` at `L1`.
+- `Orchestrator` — 167 graph links; `copilot_agent/orchestrator.py` at `L30`.
+- `SessionState` — 129 graph links; `copilot_agent/state.py` at `L67`.
 - `DiscoveryError` — 114 graph links; `copilot_agent/discovery_contracts.py` at `L64`.
 - `BrowserAdapter` — 113 graph links; `copilot_agent/browser.py` at `L325`.
 - `orchestrator.py` — 111 graph links; `copilot_agent/orchestrator.py` at `L1`.
-- `final_response()` — 101 graph links; `tests/test_orchestrator.py` at `L86`.
+- `final_response()` — 102 graph links; `tests/test_orchestrator.py` at `L86`.
 - `rea.py` — 97 graph links; `copilot_agent/rea.py` at `L1`.
+- `copilot_agent/app.py` — 96 graph links; `copilot_agent/app.py` at `L1`.
 - `Config` — 94 graph links; `copilot_agent/config.py` at `L28`.
-- `copilot_agent/app.py` — 94 graph links; `copilot_agent/app.py` at `L1`.
 - `Store` — 94 graph links; `copilot_agent/discovery_store.py` at `L44`.
-- `policy.py` — 91 graph links; `copilot_agent/policy.py` at `L1`.
+- `policy.py` — 92 graph links; `copilot_agent/policy.py` at `L1`.
 - `site_knowledge.py` — 89 graph links; `copilot_agent/site_knowledge.py` at `L1`.
 - `automation_packages.py` — 76 graph links; `copilot_agent/automation_packages.py` at `L1`.
-- `config_value()` — 73 graph links; `copilot_agent/policy.py` at `L231`.
+- `config_value()` — 76 graph links; `copilot_agent/policy.py` at `L231`.
 
 ### Direct, source-derived relationships
 
@@ -1369,9 +1375,9 @@ Each row is an AST-extracted graph edge; source file and line come from the Grap
 - `agent_ui/workspace.py:L40` `Workspace` **uses** `UploadStore` in `agent_ui/uploads.py`.
 - `app.py:L1` `app.py` **imports** `main()` in `copilot_agent/app.py`.
 - `app.py:L1` `app.py` **imports_from** `copilot_agent/app.py` in `copilot_agent/app.py`.
-- `copilot_agent/app.py:L102` `_record_bug_fix()` **calls** `DiagnosticReports` in `copilot_agent/diagnostics.py`.
-- `copilot_agent/app.py:L104` `_record_bug_fix()` **calls** `_recent_events()` in `copilot_agent/app.py`.
-- `copilot_agent/app.py:L143` `_show_bug_handoff()` **calls** `system()` in `copilot_agent/app.py`.
+- `copilot_agent/app.py:L103` `_record_bug_fix()` **calls** `DiagnosticReports` in `copilot_agent/diagnostics.py`.
+- `copilot_agent/app.py:L105` `_record_bug_fix()` **calls** `_recent_events()` in `copilot_agent/app.py`.
+- `copilot_agent/app.py:L144` `_show_bug_handoff()` **calls** `system()` in `copilot_agent/app.py`.
 
 ### Inferred relationship examples
 

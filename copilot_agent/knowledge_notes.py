@@ -13,6 +13,13 @@ def _bytes(value):
     return json.dumps(value, sort_keys=True, ensure_ascii=True, allow_nan=False).encode('utf-8')
 
 
+def _signature(value):
+    signature = re.sub(r'\s+', ' ', value.get('content', '')).strip().casefold()
+    if 'procedure_template' in value:
+        signature += ':template:' + hashlib.sha256(_bytes(value['procedure_template'])).hexdigest()
+    return signature
+
+
 def execute_note(name, args, context):
     context['knowledge_note_started'] = False
     root = knowledge_directory(context)
@@ -55,6 +62,15 @@ def execute_note(name, args, context):
         from .site_knowledge import KnowledgeStorageError
         raise KnowledgeStorageError('write_unavailable')
     value = reusable_value({'schema_version': 1, 'title': args['title'], 'content': args['content']})
+    learned = context.get('verified_procedure_template')
+    if (isinstance(learned, dict) and 'procedure:' in value['content'].casefold()
+            and 'input slots:' in value['content'].casefold()):
+        from .site_knowledge import _current_origin
+        if '/'.join(learned.get('origin', [])) == _current_origin(context):
+            # The orchestrator supplies this only after an actually verified plan
+            # in the current turn. Model text cannot supply or replace it.
+            value['procedure_template'] = reusable_value(learned['template'])
+            value['source_plan_sha256'] = learned['source_plan_sha256']
     if not value['title'] or not value['content']:
         return {'status': 'skipped_empty', 'verified': False, 'knowledge_saved': False}
     data = _bytes(value)
@@ -65,7 +81,7 @@ def execute_note(name, args, context):
     # A changed title or whitespace alone must not create another note for the
     # same reusable instruction. Bound legacy scanning; immutable artifacts are
     # still checked by their exact byte hash before reuse.
-    signature = re.sub(r'\s+', ' ', value['content']).strip().casefold()
+    signature = _signature(value)
     signature_namespace = hashlib.sha256(('note-content:' + str(folder.relative_to(root)) + ':' + signature).encode()).hexdigest()
     indexed_candidate = None
     try:
@@ -89,7 +105,7 @@ def execute_note(name, args, context):
             if len(retained_data) > 65536 or hashlib.sha256(retained_data).hexdigest() != candidate.stem:
                 continue
             retained = json.loads(retained_data)
-            if re.sub(r'\s+', ' ', retained.get('content', '')).strip().casefold() == signature:
+            if _signature(retained) == signature:
                 value, data, identifier, duplicate = retained, retained_data, candidate.stem, True
                 break
         except (OSError, ValueError, TypeError):
@@ -151,6 +167,12 @@ def execute_note(name, args, context):
             store.close()
     except Exception as error:
         diagnostic = getattr(error, 'code', 'index_unavailable')
-    return {'status': 'unchanged' if duplicate else 'saved', 'verified': True, 'note_id': identifier,
+    result = {'status': 'unchanged' if duplicate else 'saved', 'verified': True, 'note_id': identifier,
             'storage': 'configured_discoveries', 'indexed': indexed,
             'index_diagnostic': diagnostic, 'readback_tool': 'knowledge.lookup', 'directory': str(folder)}
+    # This same content already passed the exact file readback above. Small
+    # procedures can be reviewed now without another reasoning/tool exchange.
+    if len(data) <= 6000:
+        result['verified_knowledge'] = json.loads(data)
+        result['readback_complete'] = True
+    return result

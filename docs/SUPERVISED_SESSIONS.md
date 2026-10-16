@@ -1,5 +1,23 @@
 # Fast scoped discovery sessions
 
+## Startup Y and known tasks
+
+Startup Y approves validated current-session plans, broader task-label changes
+and necessary intermediate actions without another plan prompt. The current
+prepared hash still binds each execution; origin, record identity, tool schemas,
+actual OS access, manual authentication and uncertain-effect checks still apply.
+The narrower default approval statements below apply when that session plan
+grant is absent. A fresh session resets the grant.
+
+Repeated tasks should reuse the shortest verified procedure with fresh inputs,
+check the live entry state, execute bounded known segments and learn only from
+the verified full goal. Compare complete timing and reliability, retain earlier
+verified versions, and save useful generic procedure revisions after completion.
+Small note saves return the exact verified readback body immediately; another
+lookup is unnecessary when `readback_complete=true`.
+
+Live evidence: [NNCY known-task repeat](NNCY_KNOWN_TASK_LIVE_TEST_20261016.md).
+
 Normal startup asks once for the current investigation/session. `--yes-setup`
 accepts this same grant. It is in memory and is never restored from persisted
 state; restart and resume obtain a new confirmation. Revocation removes target

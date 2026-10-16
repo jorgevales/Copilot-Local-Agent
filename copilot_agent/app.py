@@ -8,6 +8,7 @@ import os
 import socket
 import sys
 import threading
+import time
 from pathlib import Path
 import uuid
 from .browser import (BrowserAdapter, BrowserUIError, CaptureTimeoutError,
@@ -494,10 +495,12 @@ def configure_local_knowledge_test(config, requested_path, *, resume_session=Non
 async def run(args):
     global _TERMINAL_INPUT, _UI_STEERING_POLL, _UI_TAKE_ATTACHMENTS
     terminal_input = None
+    startup_started = time.monotonic()
     test_workspace = getattr(args, 'isolated_test_workspace', None)
     local_knowledge_test = getattr(args, 'local_knowledge_test_directory', None)
     storage_override = test_workspace or local_knowledge_test
     config = Config.load(args.config, storage_override=storage_override)
+    startup_config_ms = (time.monotonic() - startup_started) * 1000
     if test_workspace is not None:
         test_workspace = configure_isolated_test_workspace(config, test_workspace, resume_session=args.resume)
         system('Isolated local proof mode: all agent storage and file roots are confined to ' + str(test_workspace))
@@ -604,6 +607,8 @@ async def run(args):
     if args.resume and not Path(args.resume).resolve().is_relative_to(config.runtime_dir.resolve()):
         raise ValueError('Resume sessions must be inside your selected per-user runtime directory.')
     state = SessionState(directory, resume=bool(args.resume))
+    from .performance import PerformanceTrace
+    startup_trace = PerformanceTrace(state.directory, enabled=config.performance_enabled)
     browser = BrowserAdapter(config)
     orchestrator = None
     bug_reports = []
@@ -665,6 +670,7 @@ async def run(args):
             state.data['status'] = 'capture_failed'
             state.save()
         resume_request_id = latest_committed_request_id(state) if resume_existing else None
+        browser_started = time.monotonic()
         try:
             await browser.start(resume_request_id=resume_request_id)
         except ExistingEdgeUnavailable:
@@ -692,12 +698,16 @@ async def run(args):
                                     event_sink=_UI_EVENT_SINK, cancel_event=_UI_CANCEL_EVENT,
                                     steering_poll=_UI_STEERING_POLL,
                                     steering_complete=_UI_STEERING_COMPLETE)
+        startup_trace.record('startup_config', duration_ms=startup_config_ms)
+        startup_trace.record('startup_browser', duration_ms=(time.monotonic()-browser_started)*1000)
         orchestrator.initialized = resume_existing
         orchestrator.feedback.color=_TERMINAL.color
         globals()['_UI_PERMISSION_CONTEXT']=orchestrator.base_context
         # Use the single owned Copilot tab throughout startup. Opening and then
         # closing an auxiliary Copilot tab can terminate an attached Edge route.
+        models_started = time.monotonic()
         models = await browser.discover_models()
+        startup_trace.record('startup_models', duration_ms=(time.monotonic()-models_started)*1000)
         browser.models = models
         ranked = model_rank(models)
         enabled = [m for m in ranked if m.get('enabled', True)]
@@ -763,9 +773,22 @@ async def run(args):
             await orchestrator.initialize()
         else:
             system('Resuming the existing Copilot conversation; startup will not send another initialization message.')
+        startup_trace.record('startup_total', duration_ms=(time.monotonic()-startup_started)*1000)
+        startup_trace.flush()
+        update = getattr(args, 'resume_instruction', None)
+        update_has_recovery = bool(resume_capture or state.data.get('last_reconciled_unsent'))
+        if update and update_has_recovery:
+            orchestrator._pending_steering_items.append({'message_id': uuid.uuid4().hex,
+                'sequence': 0, 'text': update, 'attachments': []})
         if resume_capture:
             system('Recovering the last committed response from the visible chat without resending its request.')
-            await orchestrator.recover_capture_failed_turn()
+            if terminal_input is not None:
+                terminal_input.set_active(uuid.uuid4().hex, orchestrator.cancel_event)
+            try:
+                await _interruptible_session(orchestrator.recover_capture_failed_turn())
+            finally:
+                if terminal_input is not None:
+                    terminal_input.set_active()
         reconciled_unsent = state.data.get('last_reconciled_unsent') if resume_existing else None
         if isinstance(reconciled_unsent, dict):
             request_id = reconciled_unsent.get('request_id')
@@ -814,6 +837,8 @@ async def run(args):
             finally:
                 if terminal_input is not None:
                     terminal_input.set_active()
+        if update and not update_has_recovery:
+            await run_user_turn(update)
         def show_files():
             records = pending_files.records()
             system('Files for your next request: ' + str(len(records)) + '/' + str(MAX_USER_FILES) + '. Final automatic context files are included in the same 20-file send limit and checked before upload.')
@@ -926,6 +951,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path)
     parser.add_argument('--resume', type=Path)
+    parser.add_argument('--resume-instruction', help='Supersede an unexecuted recovered proposal with this new user goal before any recovered tool runs; requires --resume.')
     parser.add_argument('--attach-existing', action='store_true')
     parser.add_argument('--port', type=int)
     parser.add_argument('--profile', type=Path)
@@ -940,6 +966,8 @@ def main():
     parser.add_argument('--local-knowledge-test-directory', type=Path,
                         help='Explicitly use an empty C: LocalAppData directory for a live navigation-knowledge test; normal production storage remains S:-only.')
     args = parser.parse_args()
+    if args.resume_instruction and not args.resume:
+        parser.error('--resume-instruction requires --resume')
     try:
         asyncio.run(run(args))
     except KeyboardInterrupt:
