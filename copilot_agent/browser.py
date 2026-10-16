@@ -1285,9 +1285,12 @@ class BrowserAdapter:
     async def _consume_preloaded_exchange(self, text, request_id, attachments):
         prepared = self._preloaded_exchange
         paths = tuple(str(Path(path).expanduser().resolve()) for path in attachments)
-        if (prepared is None or prepared['text'] != text or prepared['request_id'] != request_id
-                or prepared['attachments'] != paths):
-            raise BrowserUIError('The prepared Copilot message does not match this exact submission.')
+        if prepared is None or prepared['text'] != text or prepared['request_id'] != request_id or prepared['attachments'] != paths:
+            reasons = []
+            if prepared is None or prepared.get('text') != text: reasons.append('payload_changed')
+            if prepared is None or prepared.get('request_id') != request_id: reasons.append('request_id_changed')
+            if prepared is None or prepared.get('attachments') != paths: reasons.append('attachment_set_changed')
+            raise BrowserUIError('The prepared Copilot message does not match this exact submission (' + ','.join(reasons) + ').')
         if not self.model_label:
             raise BrowserUIError('Select and verify a discovered model before sending.')
         if await self._stop_present():

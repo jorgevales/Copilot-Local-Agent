@@ -44,6 +44,25 @@ class WebTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(engine.approved_attachment_hashes[str(source)], digest)
         return source, content, digest
 
+    async def test_preloaded_initialization_keeps_manifest_payload_and_staged_paths_exact(self):
+        root, config, state, registry, browser, engine = self.fixture([final_response])
+        prepared = {}
+        async def preload(text, request_id, attachments=()):
+            prepared.update(text=text, request_id=request_id, attachments=tuple(attachments))
+        async def exchange(text, request_id, attachments=(), on_submitted=None):
+            self.assertEqual(prepared['text'], text)
+            self.assertEqual(prepared['request_id'], request_id)
+            self.assertEqual(prepared['attachments'], tuple(attachments))
+            on_submitted()
+            return encoded(final_response(json.loads(text)))
+        browser.preload_exchange = preload
+        browser.exchange = exchange
+        await engine.prepare_initialization()
+        self.assertIn('verified_upload_manifest', json.loads(prepared['text']))
+        self.assertTrue(all(path.parent != root / 'guidance' for path in prepared['attachments']))
+        await engine.initialize()
+        self.assertTrue(engine.initialized)
+
     async def test_registered_document_discovery_tickets_survive_cloned_call_contexts(self):
         root, config, state, registry, browser, engine = self.fixture()
         native = root / "workspace" / "native"
