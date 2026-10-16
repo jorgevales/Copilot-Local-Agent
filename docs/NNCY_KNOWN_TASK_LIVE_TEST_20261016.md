@@ -129,3 +129,9 @@ automatic template persistence changes. Those latest changes and their template
 metadata deduplication are not yet fully tested. This checkpoint is pushed at the
 user's explicit request before all tests finish. The generated full-discovery
 snapshot predates the latest procedure-memory additions; its refresh is pending.
+
+Follow-up verification: all eight procedure-memory tests passed in 0.961 seconds.
+The added cases exercise actual knowledge.note saving, same-prose template
+deduplication, exact knowledge.lookup readback, fresh procedure retrieval, and
+rejection of template metadata from a different origin. Live execution of the
+latest host-injected template remains to be verified.

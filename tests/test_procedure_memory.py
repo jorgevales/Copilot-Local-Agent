@@ -83,3 +83,28 @@ class ProcedureMemoryTests(unittest.TestCase):
         self.assertIsNone(reusable_plan_template(dict(source, customer_key='different-record')))
         dynamic = dict(source, success=[{'kind': 'url', 'value': 'https://example.com/consultations/{id}/ficha'}])
         self.assertIsNone(reusable_plan_template(dynamic))
+
+    def test_verified_template_survives_prose_dedup_and_readback(self):
+        template = {'input_slots': [{'slot': 'input_1', 'locator': {'id': 'name'}}],
+                    'arguments': {'task_id': 'reuse-known-procedure', 'steps': [
+                        {'id': 'step_1', 'op': 'fill', 'locator': {'id': 'name'}, 'value': '{{input_1}}'}]}}
+        self.context['verified_procedure_template'] = {
+            'origin': ['https:', '', 'example.com'], 'template': template,
+            'source_plan_sha256': 'b' * 64}
+        saved = execute_note('knowledge.note', self.args, self.context)
+        self.assertNotEqual(self.note['note_id'], saved['note_id'])
+        self.assertEqual(template, saved['verified_knowledge']['procedure_template'])
+        self.assertEqual('b' * 64, saved['verified_knowledge']['source_plan_sha256'])
+        repeated = execute_note('knowledge.note', self.args, self.context)
+        self.assertEqual(saved['note_id'], repeated['note_id'])
+        readback = execute_note('knowledge.lookup', {'note_id': saved['note_id']}, self.context)
+        self.assertEqual(saved['verified_knowledge'], readback['knowledge'])
+        references = matching_procedures(self.request, self.context)
+        self.assertIn(saved['note_id'], [item['note_id'] for item in references])
+
+    def test_template_from_another_origin_is_not_attached(self):
+        self.context['verified_procedure_template'] = {
+            'origin': ['https:', '', 'elsewhere.test'], 'template': {'input_slots': []},
+            'source_plan_sha256': 'b' * 64}
+        saved = execute_note('knowledge.note', self.args, self.context)
+        self.assertNotIn('procedure_template', saved['verified_knowledge'])
