@@ -24,6 +24,35 @@ from copilot_agent.reused_browser import EndpointError, cdp_endpoint, validate_e
 from copilot_agent.protocol import BEGIN, END
 
 
+class CopilotStartupNavigationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_existing_debugging_session_checks_ui_at_commit_without_waiting_domcontentloaded(self):
+        adapter = BrowserAdapter(SimpleNamespace(copilot_url='https://m365.cloud.microsoft/', startup_timeout=120))
+        adapter._attached_existing_debugging_session = True
+        calls = []
+        class Page:
+            async def goto(self, url, **kwargs):
+                calls.append((url, kwargs))
+            def is_closed(self):
+                return False
+        adapter.page = Page()
+        await adapter._navigate_copilot()
+        self.assertEqual('commit', calls[0][1]['wait_until'])
+        self.assertEqual(8000, calls[0][1]['timeout'])
+
+    async def test_new_edge_session_keeps_domcontentloaded_navigation(self):
+        adapter = BrowserAdapter(SimpleNamespace(copilot_url='https://m365.cloud.microsoft/', startup_timeout=120))
+        calls = []
+        class Page:
+            async def goto(self, url, **kwargs):
+                calls.append((url, kwargs))
+            def is_closed(self):
+                return False
+        adapter.page = Page()
+        await adapter._navigate_copilot()
+        self.assertEqual('domcontentloaded', calls[0][1]['wait_until'])
+        self.assertEqual(120000, calls[0][1]['timeout'])
+
+
 class CorrelationTests(unittest.TestCase):
     def test_daily_model_limit_is_classified_without_mistaking_quoted_protocol_data(self):
         notice="You've used today's GPT 6.1 Sol access. You are now using Auto. GPT 6.1 Sol will be available again tomorrow."

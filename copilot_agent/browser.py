@@ -347,6 +347,7 @@ class BrowserAdapter:
         self.feedback_callback = None
         self._preloaded_exchange = None
         self.startup_stage = 'not_started'
+        self._attached_existing_debugging_session = False
 
     def set_feedback(self, callback):
         self.feedback_callback = callback
@@ -388,8 +389,11 @@ class BrowserAdapter:
     async def _navigate_copilot(self):
         from playwright.async_api import TimeoutError as PlaywrightTimeoutError
         try:
-            await self.page.goto(self.config.copilot_url, wait_until='domcontentloaded',
-                                 timeout=int(self.config.startup_timeout * 1000))
+            attached = self._attached_existing_debugging_session
+            await self.page.goto(self.config.copilot_url,
+                                 wait_until='commit' if attached else 'domcontentloaded',
+                                 timeout=min(8000, int(self.config.startup_timeout * 1000)) if attached
+                                         else int(self.config.startup_timeout * 1000))
         except PlaywrightTimeoutError:
             if self.page.is_closed():
                 raise
@@ -530,6 +534,7 @@ class BrowserAdapter:
 
             verify_exact_endpoint()
             payload = await asyncio.to_thread(edge.get_cdp_version, self.endpoint)
+            self._attached_existing_debugging_session = payload is not None
             if payload is not None:
                 edge.validate_endpoint(self.endpoint, payload)
                 if not self.config.attach_existing:
