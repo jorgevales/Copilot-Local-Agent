@@ -485,7 +485,7 @@ class CodeRunner:
             key = "read_paths" if name == "read_file" else "create_paths"
             if str(path) not in self.plan[key]: raise PolicyError("File path was not declared in approved plan")
             if name == "read_file":
-                if path.stat().st_size > 40000: raise PolicyError("Read size limit exceeded")
+                if path.stat().st_size > 20 * 1024 * 1024: raise PolicyError("Read size limit exceeded")
                 return self._bound(path.read_text(encoding="utf-8"))
             text = values[1]
             if not isinstance(text,str) or len(text) > 10000: raise PolicyError("Write must be bounded text")

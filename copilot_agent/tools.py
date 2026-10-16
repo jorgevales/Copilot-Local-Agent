@@ -139,7 +139,8 @@ def schema_example(schema):
 SPECS = {
     "files.list": (obj(PATH), "read_only", "List up to 200 immediate children inside allowed roots."),
     "files.exists": (obj(PATH), "read_only", "Check a path inside allowed roots."),
-    "files.read": (obj({"path":S,"max_chars":N},["path"]), "read_only", "Read bounded UTF-8 text; binary or oversized reads fail."),
+    "files.attach": (obj({"paths":{"type":"array","minItems":1,"maxItems":1000,"items":S}},["paths"]), "user_approval", "Attach accessible supported local files, including outside project roots. Verify and stage exact bytes; duplicate names get send-only aliases. Automatically send all files in batches below the 20-file message limit."),
+    "files.read": (obj({"path":S,"max_chars":{"type":"integer","minimum":1,"maximum":20971520},"offset":{"type":"integer","minimum":0,"maximum":20971520}},["path"]), "read_only", "Read bounded UTF-8 text; binary or oversized reads fail."),
     "files.create": (obj({"path":S,"text":{"type":"string","maxLength":100000}}), "user_approval", "Create a new UTF-8 file exclusively. Never overwrite. An exact approved S: output can resolve to its current UNC share."),
     "files.append": (obj({"path":S,"text":{"type":"string","maxLength":100000}}), "user_approval", "Append text to an existing file after explicit approval; preserves prior content."),
     "files.replace": (obj({"path":S,"expected_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"text":{"type":"string","maxLength":100000}}), "user_approval", "Atomically replace one existing UTF-8 file after explicit approval and an exact current SHA-256 check. The file must be inside allowed write roots and may not be a link or hardlink."),
@@ -240,6 +241,8 @@ def tool_path_policy(name, context):
     if context.get('session_path_extensions') and name in {'rea.analyze_artifact', 'rea.analyze_capture', 'research.route'}:
         return SessionPathExtensionPolicy(policy, context['session_path_extensions'],
                                           getattr(context.get('session_state'), 'session_id', None))
+    if name == 'files.attach':
+        return SessionFileAccessPolicy(policy, lambda: True)
     if discovery_mode(config):
         extensions = context.get('session_path_extensions', [])
         return (SessionPathExtensionPolicy(policy, extensions,
@@ -590,6 +593,8 @@ class ToolRegistry:
             return prepare_package_run(args, context, self)
         if name == 'files.grant_path':
             return prepare_session_path_extension(args, context)
+        if name == 'files.attach':
+            return {'paths': [str(policy.resolve(path, True)) for path in args['paths']]}
         if name == 'files.transfer_to_copilot':
             return {'valid': True}
         if name.startswith("files.") or name in {"system.disk","ocr.image"}:
@@ -1146,6 +1151,32 @@ class ToolRegistry:
             return await context["download_service"].download(args,context["download_binding"])
         if name=="archives.inspect": return ArchiveService(policy,context["session_dir"]).inspect(args)
         if name=="archives.extract": return ArchiveService(policy,context["session_dir"]).extract(args,approved=context.get("approved",False))
+        if name == 'files.attach':
+            from .attachments import SUPPORTED_EXTENSIONS, TEXT_EXTENSIONS
+            from .logging_utils import SENSITIVE
+            records = []
+            cap = config_value(config, 'max_attachment_bytes', 20 * 1024 * 1024)
+            for source in dict.fromkeys(args['paths']):
+                path = policy.resolve(source, True)
+                if not path.is_file() or path.suffix.casefold() not in SUPPORTED_EXTENSIONS:
+                    raise PolicyError('Attachment must be a regular supported file')
+                if path.stat().st_size > cap:
+                    raise PolicyError('Attachment exceeds configured size limit')
+                with path.open('rb') as handle:
+                    data = handle.read(cap + 1)
+                if len(data) > cap:
+                    raise PolicyError('Attachment grew beyond configured size limit')
+                if path.suffix.casefold() in TEXT_EXTENSIONS and SENSITIVE.search(data.decode('utf-8-sig')):
+                    raise PolicyError('Credential-like text cannot be attached')
+                records.append({'path': str(path), 'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data)})
+            pending = context.setdefault('pending_file_attachments', [])
+            hashes = context.setdefault('approved_attachment_hashes', {})
+            for record in records:
+                hashes[record['path']] = record['sha256']
+                if record['path'] not in pending:
+                    pending.append(record['path'])
+            return {'status': 'queued', 'files': records, 'count': len(records),
+                    'delivery_verified': False, 'instruction': 'The orchestrator sends all queued files in successive messages of at most 20 attachments. Originals are not renamed or modified.'}
         if name.startswith("files."):
             if name=="files.copy":
                 source=policy.resolve(args["source"],True); target=_approved_write_target(name,args,policy,context)
@@ -1201,10 +1232,14 @@ class ToolRegistry:
             info=path.stat()
             if name=="files.metadata": return {"path":str(path),"size":info.st_size,"mtime_ns":info.st_mtime_ns,"directory":path.is_dir()}
             if name=="files.read":
-                if info.st_size>40000: raise PolicyError("Text read exceeds 40000-byte limit")
-                limit=min(10000,args.get("max_chars",10000))
-                text=path.read_text(encoding="utf-8")
-                return {"text":text[:limit],"truncated":len(text)>limit}
+                if info.st_size>20*1024*1024: raise PolicyError("Text read exceeds 20 MiB limit; attach the file instead")
+                limit=min(20*1024*1024,args.get("max_chars",1024*1024))
+                offset=args.get("offset",0)
+                with path.open('r',encoding='utf-8') as stream:
+                    text=stream.read(20*1024*1024+1)
+                if len(text)>20*1024*1024: raise PolicyError("Text read grew beyond limit")
+                chunk=text[offset:offset+limit]
+                return {"text":chunk,"offset":offset,"total_chars":len(text),"truncated":offset+len(chunk)<len(text),"next_offset":offset+len(chunk) if offset+len(chunk)<len(text) else None}
             if name=="files.hash":
                 if not path.is_file(): raise PolicyError("Hash requires a regular file")
                 if info.st_size>20971520: raise PolicyError("Hash size limit exceeded")

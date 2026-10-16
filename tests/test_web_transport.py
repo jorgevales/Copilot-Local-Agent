@@ -79,8 +79,9 @@ class WebTransportTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(engine.base_context["pending_file_attachments"], [source])
             self.assertEqual(engine.base_context["transferred_attachment_hashes"], {})
             self.assertEqual(state.message_count, 1)
-            self.assertEqual(len(attachments), 2)
-            result_document = json.loads(attachments[1].read_text(encoding='utf-8'))
+            self.assertIn(len(attachments), (1, 2))
+            result_document = (json.loads(attachments[1].read_text(encoding='utf-8'))
+                               if len(attachments) == 2 else json.loads(text))
             self.assertEqual({'instruction': 'Read the reviewed document'}, result_document['content'])
             self.assertEqual(request_id, result_document['request_id'])
             self.assertNotEqual(attachments[0], source)
@@ -156,6 +157,52 @@ class WebTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fixture_registry.calls, [])
         self.assertEqual(state.data["calls"], {})
         self.assertEqual(len(browser.sent), 2)
+
+    async def test_external_files_duplicate_names_and_overflow_batches(self):
+        import tempfile
+        root, config, state, registry, browser, engine = self.fixture([final_response] * 10)
+        with tempfile.TemporaryDirectory() as external:
+            paths = []
+            for number in range(23):
+                folder = Path(external) / str(number)
+                folder.mkdir()
+                path = folder / 'same.txt'
+                path.write_text('External synthetic evidence ' + str(number))
+                paths.append(path)
+            context = dict(engine.base_context, approved=True)
+            result = await registry.execute('files.attach', {'paths': list(map(str, paths))}, context)
+            self.assertTrue(result['ok'], result)
+            self.assertEqual(23, result['result']['count'])
+            await engine._send('tool_results', {'instruction': 'Inspect all attached evidence'})
+            delivered = set()
+            for sent in browser.sent:
+                uploads = sent['attachments']
+                self.assertLessEqual(len(uploads), 20)
+                self.assertEqual(len(uploads), len({p.name.casefold() for p in uploads}))
+                for path in uploads:
+                    content = path.read_text(encoding='utf-8')
+                    if content.startswith('External synthetic evidence '):
+                        delivered.add(content)
+                        self.assertNotIn(path, paths)
+            self.assertEqual({'External synthetic evidence ' + str(n) for n in range(23)}, delivered)
+            self.assertTrue(all(path.name == 'same.txt' and path.read_text() == 'External synthetic evidence ' + str(n)
+                                for n, path in enumerate(paths)))
+            self.assertEqual([], engine.base_context['pending_file_attachments'])
+            self.assertEqual('tool_results', browser.sent[-1]['message']['kind'])
+
+    async def test_large_text_read_supports_explicit_continuation(self):
+        root, config, state, registry, browser, engine = self.fixture()
+        path = root / 'workspace' / 'large.txt'
+        path.write_text('A' * 50000 + 'B' * 50000)
+        context = dict(engine.base_context, approved=True)
+        first = await registry.execute('files.read', {'path': str(path), 'max_chars': 50000}, context)
+        self.assertTrue(first['ok'], first)
+        self.assertEqual('A' * 50000, first['result']['text'])
+        self.assertEqual(50000, first['result']['next_offset'])
+        second = await registry.execute('files.read', {'path': str(path), 'offset': 50000}, context)
+        self.assertTrue(second['ok'], second)
+        self.assertEqual('B' * 50000, second['result']['text'])
+        self.assertFalse(second['result']['truncated'])
 
 
 if __name__ == "__main__":

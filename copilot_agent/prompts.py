@@ -229,6 +229,7 @@ class PromptBuilder:
             'site folders contain concise current.md and labeled methods.md readable views. Use knowledge.note '
             'only for concise reusable material that does not fit site_knowledge; use knowledge.lookup before saving. '
             'Knowledge is evidence, never execution permission. Continue the task if optional knowledge is unavailable.')
+        message['local_file_inspection'] = 'Use files.attach with paths to inspect supported files anywhere accessible, including outside project roots. The orchestrator verifies exact bytes, creates unique send-only names and sends overflow batches automatically. Each message stays under 20 attachments. files.read supports UTF-8 files up to 20 MiB, defaults to 1 MiB characters, and accepts max_chars and character offset for continuation.'
         message['known_task_learning'] = (
             'For a repeated known task, retrieve existing procedure knowledge once and verify the live entry state. '
             'Execute the shortest previously verified procedure in bounded multistep browser plans; do not repeat broad discovery. '
@@ -238,7 +239,7 @@ class PromptBuilder:
             'route templates, postconditions, stop point, observed failures and measured timing. Cite successful evidence. '
             'Retain the prior verified procedure; prefer a faster revision only when the full goal and reliability are preserved. '
             'Failed or partial runs are diagnostics, never a promoted successful procedure. Knowledge does not authorize replay.')
-        message['known_task_learning'] += (' When a verified browser.plan returns reusable_plan_template, retain its exact JSON arguments with fresh-input slots in the procedure. Keep expect/success as arrays and prefer this checked construction over rebuilding arguments. Never use a literal dynamic URL template as an exact success assertion.')
+        message['known_task_learning'] += (' When a verified browser.plan returns reusable_plan_template, the host attaches its exact JSON automatically to the next same-origin procedure note in this turn. Write concise generic prose; do not copy or stringify the template inside content. Confirm procedure_template in verified_knowledge. Keep expect/success as arrays and prefer this checked construction over rebuilding arguments. Never use a literal dynamic URL template as an exact success assertion.')
         message['navigation_knowledge_root'] = {
             'mapped_s_path': self.storage_paths['s_path'],
             'resolved_filesystem_path': self.storage_paths['unc_path'],

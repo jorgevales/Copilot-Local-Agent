@@ -52,3 +52,24 @@ REA process/cleanup uncertainty blocks further execution until resolved; a
 read-only target does not prove a process has stopped. Failed or partial research
 retains evidence and safe alternative recommendations. A denial cannot be
 bypassed through another tool.
+
+## Local inspection attachments
+
+Use `files.attach` with `paths` (up to 1000 explicit supported file paths) to
+attach files through the orchestrator, including files outside project roots.
+Existing OS access, credential/profile protection and tool approval still apply.
+Each file is bounded by the configured attachment size (20 MiB by default),
+checked for exact SHA-256 and staged for upload. Duplicate basenames receive
+unique send-only aliases recorded in the upload manifest. Originals are never
+renamed or edited. Unsupported files and ZIP uploads retain their existing checks.
+
+Overflow is sent automatically as context-only batches of 18 files before the
+final task message, reserving slots for transport/evidence within Copilot's
+20-attachment cap. Batch replies never dispatch tool calls. Pending file entries
+are removed only on confirmed send; an ambiguous send stops continuation for
+reconciliation. Queued status alone does not prove the UI accepted an upload.
+
+`files.read` now accepts UTF-8 files up to 20 MiB, returns up to 1 MiB characters
+by default, and supports `max_chars` (up to 20 MiB) plus character `offset` and
+`next_offset` for continuation. The constrained code runner's read-file ceiling
+is also 20 MiB; its existing output cap remains separate.
