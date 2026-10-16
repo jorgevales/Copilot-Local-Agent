@@ -8,7 +8,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Thread-safe bridge from the local workspace to the existing agent runtime.
 - Direct imports: `__future__`, `asyncio`, `collections`, `queue`, `re`, `threading`, `time`, `types`, `uuid`
-- Public symbols: `class AgentRuntime; method names: __init__, _start_agent, _run_agent, submit, take_submitted_attachments, active_run_id, steer, complete_steering, poll_steering, _cancel_pending_steering_locked, _cancel_pending_steering, permission_context, permission_snapshot, manage_permission, action, _dispatch_actions, _emit, close`; `class PromptBroker; method names: __init__, ask, submit, submit_if_waiting, close`; `create_runtime(emit, request_approval)`; `main()`
+- Public symbols: `class AgentRuntime; method names: __init__, _start_agent, _run_agent, submit, take_submitted_attachments, active_run_id, steer, complete_steering, poll_steering, _cancel_pending_steering_locked, _cancel_pending_steering, permission_context, permission_snapshot, manage_permission, action, _dispatch_actions, _emit, close`; `class PromptBroker; method names: __init__, ask, submit, submit_if_waiting, close, interrupt`; `create_runtime(emit, request_approval)`; `main()`
 
 ### `agent_ui/tests/test_launch_ui.py`
 
@@ -76,8 +76,8 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `copilot_agent/app.py`
 
 - Role: Interactive setup, visible browser and continuous policy-controlled conversation.
-- Direct imports: `.`, `.attachments`, `.browser`, `.config`, `.diagnostics`, `.feedback`, `.file_picker`, `.knowledge_health`, `.orchestrator`, `.policy`, `.protocol`, `.setup_resources`, `.state`, `.storage`, `.temp_storage`, `.tools`, `__future__`, `argparse`, `asyncio`, `dataclasses`, `json`, `os`, `pathlib`, `socket`, `sys`, `uuid`
-- Public symbols: `_actionable(exc) [private helper]`; `_choose_existing_endpoint(endpoints, prompt) [private helper]`; `_recent_events(state) [private helper]`; `_record_bug_fix(state, config, exc, operation, stage, report_index=None) [private helper]`; `_record_turn_error(state, exc) [private helper]`; `_show_bug_handoff(reports) [private helper]`; `_terminal_approval_decider(_preview) [private helper]`; `ask(prompt: str) -> str`; `choose_browser_endpoint(config, args, settings, *, interactive=False, prompt=ask, force_new=False)`; `configure_isolated_test_workspace(config, requested_path, *, resume_session=None)`; `configure_local_knowledge_test(config, requested_path)`; `error(message)`; `main()`; `persist_runtime_settings(config, settings)`; `read_runtime_settings(config)`; `run(args)`; `start_new_session(config, previous, model_label, registry=None)`; `system(message)`
+- Direct imports: `.`, `.attachments`, `.browser`, `.config`, `.diagnostics`, `.feedback`, `.file_picker`, `.knowledge_health`, `.orchestrator`, `.policy`, `.protocol`, `.setup_resources`, `.state`, `.storage`, `.temp_storage`, `.tools`, `__future__`, `argparse`, `asyncio`, `dataclasses`, `json`, `os`, `pathlib`, `socket`, `sys`, `threading`, `uuid`
+- Public symbols: `_actionable(exc) [private helper]`; `_choose_existing_endpoint(endpoints, prompt) [private helper]`; `_interruptible_session(work) [private helper]`; `_recent_events(state) [private helper]`; `_record_bug_fix(state, config, exc, operation, stage, report_index=None) [private helper]`; `_record_turn_error(state, exc) [private helper]`; `_show_bug_handoff(reports) [private helper]`; `_terminal_approval_decider(_preview) [private helper]`; `ask(prompt: str) -> str`; `choose_browser_endpoint(config, args, settings, *, interactive=False, prompt=ask, force_new=False)`; `class SessionRestartRequested(Exception)`; `configure_isolated_test_workspace(config, requested_path, *, resume_session=None)`; `configure_local_knowledge_test(config, requested_path, *, resume_session=None)`; `error(message)`; `main()`; `persist_runtime_settings(config, settings)`; `read_runtime_settings(config)`; `run(args)`; `start_new_session(config, previous, model_label, registry=None, *, user_requested=False)`; `system(message)`
 
 ### `copilot_agent/approvals.py`
 
@@ -97,6 +97,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `.logging_utils`, `.policy`, `__future__`, `hashlib`, `io`, `os`, `pathlib`, `re`, `stat`, `zipfile`
 - Public symbols: `class AttachmentError(PolicyError)`; `class AttachmentQueue; method names: __init__, _key, _resolve, _resolve_source, _record, add, records, paths, remove, clear, verify`; `upload_name(path)`
 
+### `copilot_agent/automatic_visuals.py`
+
+- Role: Automatic, bounded visual companions to website investigations.
+- Direct imports: `.performance`, `.persistence`, `.policy`, `.screenshot_evidence`, `.web_navigation`, `__future__`, `asyncio`, `datetime`, `hashlib`, `io`, `pathlib`, `PIL`, `time`, `urllib.parse`, `uuid`
+- Public symbols: `_collector(context) [private helper]`; `_execute_with_visuals(name, args, context, operation) [private helper]`; `_safe_capture(name, args, context) [private helper]`; `_source_page(name, args, context) [private helper]`; `_write_bundle(records, target) [private helper]`; `capture_action_phase(page, context, label, phase, action_id)`; `capture_visuals(page, context, *, label, revisit=True, scroll_owned_page=False)`; `execute_with_visuals(name, args, context, operation)`; `flush_visual_context(context)`; `merge_visual_pages(pages, context)`; `paired_browser_action(page, context, label, operation, *, after_page=None)`; `relevant(name, args)`
+
 ### `copilot_agent/automation_packages.py`
 
 - Role: Validated, resumable automation ZIP packages and measurable task routing.
@@ -106,7 +112,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `copilot_agent/browser.py`
 
 - Role: Visible Edge/Copilot UI adapter with bounded waits and owned-page isolation.
-- Direct imports: `.`, `.protocol`, `__future__`, `asyncio`, `collections`, `hashlib`, `inspect`, `json`, `os`, `pathlib`, `re`, `time`, `urllib.parse`, `uuid`
+- Direct imports: `.`, `.performance`, `.protocol`, `__future__`, `asyncio`, `collections`, `hashlib`, `inspect`, `json`, `os`, `pathlib`, `re`, `time`, `urllib.parse`, `uuid`
 - Public symbols: `class BrowserAdapter; method names: __init__, set_feedback, _feedback, endpoint, _acquire_controller, _navigate_copilot, _claim_chat_page, _claim_committed_request_page, _connect_running_edge_fallback, _connect_direct_edge_fallback, _authentication_required, start, _evaluate, _configure_tool_context, new_tool_page, focus_chat, authorize_tool_domain, _safe_url, _visible, _editor, _open_picker, _providers, _open_provider, discover_models, discover_models_on_auxiliary_page, select_model, _stop_present, _generation_state, attach_files, _attachment_signature, _attachment_signatures, _attachment_identities, _remove_preloaded_attachments, _reconcile_preloaded_attachments, preload_attachments, composer_character_limit, _composer_limit_from_editor, _editor_text, _expand_response_code, _response_code_groups, _copy_response_code, _safe_dom_code_response, _prepare_submission, preload_exchange, _consume_preloaded_exchange, verify_interaction_ready, read_reconciled_draft, _verified_unsent_retry_control, capture_committed_response, exchange, diagnostics, close`; `class BrowserUIError(RuntimeError)`; `class CaptureTimeoutError(BrowserUIError)`; `class ExistingEdgeUnavailable(BrowserUIError)`; `class ModelAccessError(BrowserUIError)`; `class ModelUnavailableError(BrowserUIError)`; `class SubmissionAmbiguousError(BrowserUIError)`; `class SubmissionNotSentError(BrowserUIError)`; `composer_comparison(expected: str, actual: str) -> dict`; `copied_code_response(text: str, request_id: str) -> str`; `fresh_assistant(messages: list[dict], baseline: dict, user_key, request_id: str) -> str`; `model_access_exhausted(text)`; `model_rank(models: list[dict]) -> list[dict]`; `public_progress(messages: list[dict], user_key, request_id: str) -> list[dict]`; `response_envelope_closed(text: str) -> bool`; `upload_alert_is_error(text: str) -> bool`; `uploads_verified(snapshot: dict, names: list[str], send_enabled: bool) -> bool`
 
 ### `copilot_agent/browser_auth.py`
@@ -241,6 +247,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `.logging_utils`, `.persistence`, `__future__`, `hashlib`, `json`, `pathlib`, `re`
 - Public symbols: `class Findings; 5 public methods`
 
+### `copilot_agent/goal_navigation.py`
+
+- Role: Goal-directed, visual continuations on existing owned browser tabs.
+- Direct imports: `.performance`, `.policy`, `.web_navigation`, `__future__`, `asyncio`, `copy`, `hashlib`, `json`, `re`, `time`
+- Public symbols: `_candidates(snapshot, goal) [private helper]`; `_checked_target(page, args, context, fingerprint) [private helper]`; `_digest(value) [private helper]`; `_execute_goal(args, context) [private helper]`; `_matches(page, args, context) [private helper]`; `_observe(page, context) [private helper]`; `_page_fingerprint(page) [private helper]`; `_structure(page, context) [private helper]`; `_visible_frames(page) [private helper]`; `execute_goal(args, context)`; `page_lock(context, args)`; `plan_arguments(args)`; `validate_goal(args)`
+
 ### `copilot_agent/image_viewer.py`
 
 - Role: Minimal persistent image viewer launched only by an approved Code Runner plan.
@@ -269,7 +281,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Local Crawl4AI, using owned tabs in the already connected Edge session.
 - Direct imports: `.knowledge_views`, `.persistence`, `.policy`, `__future__`, `asyncio`, `collections`, `contextlib`, `hashlib`, `json`, `os`, `pathlib`, `re`, `time`, `urllib.parse`, `uuid`
-- Public symbols: `crawl_websites(args, context, *, factory=None)`; `crawler_factory(browser, scratch, page_timeout)`; `knowledge_root(config)`; `open_login_page(browser, url)`; `read_knowledge(args, context)`; `saved_html(document)`; `website_url(value)`
+- Public symbols: `crawl_websites(args, context, *, factory=None)`; `crawler_factory(browser, scratch, page_timeout, *, visual_context=None)`; `knowledge_root(config)`; `open_login_page(browser, url)`; `read_knowledge(args, context)`; `saved_html(document)`; `website_url(value)`
 
 ### `copilot_agent/local_navigation.py`
 
@@ -304,14 +316,20 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `copilot_agent/orchestrator.py`
 
 - Role: Implementation module; responsibilities are identified by its public symbols and imports.
-- Direct imports: `.approvals`, `.attachments`, `.browser`, `.code_runner`, `.feedback`, `.findings`, `.local_python_runner`, `.logging_utils`, `.policy`, `.presentation`, `.prompts`, `.protocol`, `.reconciliation`, `.research_permissions`, `.state`, `.sync`, `__future__`, `asyncio`, `copy`, `hashlib`, `json`, `pathlib`, `re`, `threading`, `time`, `uuid`
+- Direct imports: `.approvals`, `.attachments`, `.browser`, `.code_runner`, `.feedback`, `.findings`, `.local_python_runner`, `.logging_utils`, `.performance`, `.policy`, `.presentation`, `.prompts`, `.protocol`, `.reconciliation`, `.research_permissions`, `.state`, `.sync`, `__future__`, `asyncio`, `copy`, `hashlib`, `json`, `pathlib`, `re`, `threading`, `time`, `uuid`
 - Public symbols: `class Orchestrator; method names: __init__, _knowledge_authority, _authorize_user_targets, _display_s_path, _code_runner, _parallel_readonly_group, _live_feedback, _action_text, _emit_validated_response, _emit_tool_result, _package_run_stage_details, _package_run_repair_instruction, _latest_failed_package_run, _recovered_package_run_failure, _package_review_repair_instruction, _package_local_build_rejection, _routing_description, _route_for_turn, _review_passed, _record_package_delivery, _prior_package_review, _ensure_package_review, _local_archive_sha256, _queue_reviewed_package_run, _inspect_downloaded_package, _download_recovery_instruction, _attachment_record, attachment_queue, _bounded_hash, _direction_independent_attachments, prepare_pending_attachments, _schedule_next_turn_preparation, _finish_next_turn_preparation, _stage_approved, _send, _record_raw_response, _pack_outbound_response, prepare_initialization, _validated_exchange, _preflight, initialize, recover_capture_failed_turn, _recover_uncertain_knowledge, turn, _turn, _prepare_user_attachments, _take_steering, _browser_preparation, _delivery_result, _delivery_verified, close`
 
 ### `copilot_agent/outbound_results.py`
 
 - Role: Lossless, sectioned attachments for oversized Copilot composer messages.
 - Direct imports: `.persistence`, `.policy`, `__future__`, `collections`, `hashlib`, `json`, `pathlib`
-- Public symbols: `composer_characters(text)`; `pack_outbound(text, attachments, directory, *, composer_limit=16000, max_file_bytes=MAX_RESULT_FILE_BYTES)`
+- Public symbols: `composer_characters(text)`; `pack_outbound(text, attachments, directory, *, composer_limit=16000, max_file_bytes=MAX_RESULT_FILE_BYTES, allow_content_attachments=True)`
+
+### `copilot_agent/performance.py`
+
+- Role: Content-free, bounded latency evidence. Never records prompts or website data.
+- Direct imports: `.persistence`, `__future__`, `collections`, `contextlib`, `hashlib`, `json`, `math`, `pathlib`, `threading`, `time`, `uuid`
+- Public symbols: `class PerformanceTrace; 4 public methods`; `trace(context)`
 
 ### `copilot_agent/persistence.py`
 
@@ -352,7 +370,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Bounded, passive REA CLI capabilities owned by the existing ToolRegistry.
 - Direct imports: `.logging_utils`, `.persistence`, `.policy`, `__future__`, `asyncio`, `copy`, `hashlib`, `ipaddress`, `json`, `os`, `pathlib`, `re`, `shutil`, `stat`, `subprocess`, `sys`, `tempfile`, `time`, `urllib.parse`, `uuid`
-- Public symbols: `_artifact_identity(path, kind, policy, limit) [private helper]`; `_bounded(config, name, default, minimum, maximum) [private helper]`; `_capture_metadata(value) [private helper]`; `_check_node(executable, timeout=180) [private helper]`; `_check_repository(root) [private helper]`; `_clean_scratch(path) [private helper]`; `_copy_bounded(source, target, limit) [private helper]`; `_endpoint(browser) [private helper]`; `_execute_node(name, args, context, policy) [private helper]`; `_execute_python(name, args, context, policy) [private helper]`; `_file_identity(path, policy, limit) [private helper]`; `_fixed_local(path) [private helper]`; `_incomplete(value) [private helper]`; `_json_object(data) [private helper]`; `_node_candidates(config) [private helper]`; `_node_cli_probe(root, executable, timeout=180) [private helper]`; `_node_health(config) [private helper]`; `_node_health_identity(config) [private helper]`; `_node_health_uncached(config) [private helper]`; `_normalize(data, returncode) [private helper]`; `_observation_flags(result) [private helper]`; `_page_scope(args, context) [private helper]`; `_public_diagnostic(value) [private helper]`; `_repository(config) [private helper]`; `_restore_source_paths(value, staging) [private helper]`; `_run(command, *, cwd, timeout, output_limit, context) [private helper]`; `_safe(value, depth=0) [private helper]`; `_save(result, context) [private helper]`; `_schema(properties, required=()) [private helper]`; `_stage_input(prepared, kind, context, policy, *, require_fixed=True) [private helper]`; `class _AvailabilityError(ValueError); 1 public methods`; `execute_rea(name, args, context, policy)`; `observation_usable(result)`; `rea_health(config)`; `rea_repository_candidates(config)`; `validate_rea(name, args, context, policy)`
+- Public symbols: `_artifact_identity(path, kind, policy, limit) [private helper]`; `_bounded(config, name, default, minimum, maximum) [private helper]`; `_capture_metadata(value) [private helper]`; `_check_node(executable, timeout=180) [private helper]`; `_check_repository(root) [private helper]`; `_clean_scratch(path) [private helper]`; `_copy_bounded(source, target, limit) [private helper]`; `_endpoint(browser) [private helper]`; `_execute_node(name, args, context, policy) [private helper]`; `_execute_python(name, args, context, policy) [private helper]`; `_file_identity(path, policy, limit) [private helper]`; `_fixed_local(path) [private helper]`; `_incomplete(value) [private helper]`; `_json_object(data) [private helper]`; `_node_candidates(config) [private helper]`; `_node_cli_probe(root, executable, timeout=180) [private helper]`; `_node_health(config) [private helper]`; `_node_health_identity(config) [private helper]`; `_node_health_uncached(config) [private helper]`; `_normalize(data, returncode) [private helper]`; `_observation_flags(result) [private helper]`; `_page_scope(args, context) [private helper]`; `_process_command_diagnostic(command) [private helper]`; `_public_diagnostic(value) [private helper]`; `_read_bounded(stream, limit, metrics) [private helper]`; `_repository(config) [private helper]`; `_restore_source_paths(value, staging) [private helper]`; `_run(command, *, cwd, timeout, output_limit, context) [private helper]`; `_safe(value, depth=0) [private helper]`; `_save(result, context) [private helper]`; `_schema(properties, required=()) [private helper]`; `_stage_input(prepared, kind, context, policy, *, require_fixed=True) [private helper]`; `_stderr_diagnostic(data) [private helper]`; `class _AvailabilityError(ValueError); 1 public methods`; `execute_rea(name, args, context, policy)`; `observation_usable(result)`; `rea_health(config)`; `rea_repository_candidates(config)`; `validate_rea(name, args, context, policy)`
 
 ### `copilot_agent/rea_backends.py`
 
@@ -360,11 +378,23 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `__future__`, `pathlib`
 - Public symbols: `class NodeCliREABackend; 3 public methods`; `class PythonNativeREABackend; 6 public methods`
 
+### `copilot_agent/rea_guidance.py`
+
+- Role: Source-backed usage instructions supplied before a model constructs REA calls.
+- Direct imports: `.config`, `.policy`, `__future__`, `copy`
+- Public symbols: `rea_usage_guidance(config=None)`
+
 ### `copilot_agent/rea_locations.py`
 
 - Role: Bounded discovery of existing REA repositories and portable Node tooling.
 - Direct imports: `.node_runtime`, `pathlib`
 - Public symbols: `_tools_roots(node_paths) [private helper]`; `existing_runtime_candidates(project, node_paths=())`; `npm_cache_candidates(node_paths=())`
+
+### `copilot_agent/rea_projection.py`
+
+- Role: Bounded chat projections of successfully retained, sanitized Node evidence.
+- Direct imports: `__future__`, `json`, `re`
+- Public symbols: `_size(value) [private helper]`; `class _Summary; 3 public methods`; `compact_node_result(result, *, full_evidence_path, full_evidence_sha256, full_evidence_bytes, limit=1048576)`
 
 ### `copilot_agent/rea_python_artifacts.py`
 
@@ -436,7 +466,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: One ephemeral, permissive session choice; never restored from saved state.
 - Direct imports: `.policy`, `urllib.parse`
-- Public symbols: `class ApprovedWebsitePolicy(URLPolicy); 2 public methods`; `class OpenWebsitePolicy(URLPolicy); 3 public methods`; `configure_session(config, allowed)`; `discovery_mode(config)`; `fast_mode(config)`; `website_origin(url)`; `website_policy(config, domains=())`
+- Public symbols: `class ApprovedWebsitePolicy(URLPolicy); 2 public methods`; `class OpenWebsitePolicy(URLPolicy); 3 public methods`; `configure_session(config, allowed, *, approve_plans=False)`; `discovery_mode(config)`; `fast_mode(config)`; `website_origin(url)`; `website_policy(config, domains=())`
 
 ### `copilot_agent/session_setup.py`
 
@@ -453,7 +483,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `copilot_agent/site_discovery.py`
 
 - Role: Resumable, evidence-first discovery on the existing owned website page.
-- Direct imports: `.browser_inspection`, `.knowledge_views`, `.local_crawler`, `.persistence`, `.policy`, `.screenshot_evidence`, `.web_navigation`, `__future__`, `asyncio`, `hashlib`, `io`, `json`, `pathlib`, `PIL`, `re`, `time`, `urllib.parse`
+- Direct imports: `.browser_inspection`, `.knowledge_views`, `.local_crawler`, `.persistence`, `.policy`, `.screenshot_evidence`, `.web_navigation`, `__future__`, `asyncio`, `hashlib`, `io`, `json`, `pathlib`, `PIL`, `re`, `time`, `urllib.parse`, `uuid`
 - Public symbols: `attachment_slots(pending)`; `discover(args, context)`; `settle(page, deadline, events)`
 
 ### `copilot_agent/site_knowledge.py`
@@ -495,7 +525,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `copilot_agent/tools.py`
 
 - Role: Versioned local capabilities. Browser tools use guarded owned Edge tabs.
-- Direct imports: `.archives`, `.browser_auth`, `.browser_inspection`, `.code_runner`, `.discovery_contracts`, `.discovery_engine`, `.discovery_knowledge`, `.downloads`, `.local_navigation`, `.logging_utils`, `.policy`, `.rea`, `.reconciliation`, `.research_permissions`, `.research_routing`, `.screenshot_evidence`, `.session_mode`, `.site_discovery`, `.site_knowledge`, `.state`, `.sync`, `.web_documents`, `.web_navigation`, `.web_operations`, `asyncio`, `copy`, `ctypes`, `hashlib`, `importlib.metadata`, `json`, `os`, `pathlib`, `platform`, `re`, `shutil`, `sys`, `urllib.parse`, `uuid`
+- Direct imports: `.archives`, `.browser_auth`, `.browser_inspection`, `.code_runner`, `.discovery_contracts`, `.discovery_engine`, `.discovery_knowledge`, `.downloads`, `.goal_navigation`, `.local_navigation`, `.logging_utils`, `.policy`, `.rea`, `.reconciliation`, `.research_permissions`, `.research_routing`, `.screenshot_evidence`, `.session_mode`, `.site_discovery`, `.site_knowledge`, `.state`, `.sync`, `.web_documents`, `.web_navigation`, `.web_operations`, `asyncio`, `copy`, `ctypes`, `hashlib`, `importlib.metadata`, `json`, `os`, `pathlib`, `platform`, `re`, `shutil`, `sys`, `urllib.parse`, `uuid`
 - Public symbols: `_approved_write_target(name, args, policy, context) [private helper]`; `_atomic_replace(path, payload, expected_sha256, context, policy, *, operation_name='files.replace') [private helper]`; `_require_extended_read(path, policy) [private helper]`; `_swap_replacement_file(path, temp) [private helper]`; `_write_target(name, args, policy, context) [private helper]`; `class ToolRegistry; method names: __init__, rea_availability, definitions, definition, validate_input, validate_call, _limit, execute, _rea_failure, _execute`; `configured_path_policy(config, session_dir)`; `definitions()`; `execute(name, args, context)`; `obj(properties, required=None)`; `schema_example(schema)`; `tool_path_policy(name, context)`; `validate(value, schema)`
 
 ### `copilot_agent/web_documents.py`
@@ -507,8 +537,8 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `copilot_agent/web_navigation.py`
 
 - Role: Bounded semantic website discovery and verified plans in owned Edge tabs.
-- Direct imports: `.policy`, `.session_mode`, `asyncio`, `hashlib`, `json`, `re`, `time`, `urllib.parse`, `uuid`
-- Public symbols: `_assertion(page, assertion, context, wait_ms=0) [private helper]`; `_boundary(page, context) [private helper]`; `_candidates(page, strategy, context) [private helper]`; `_check_cancelled(context) [private helper]`; `_close_tab(tab_id, context, task_id=None, customer_key=None) [private helper]`; `_compact_recon(snapshot, context) [private helper]`; `_consequential_control(locator, op) [private helper]`; `_execute_plan(args, context) [private helper]`; `_fingerprint(page) [private helper]`; `_identity(page, identities, context) [private helper]`; `_install_origin_guard(page, context, reference) [private helper]`; `_object(properties, required=()) [private helper]`; `_open_tab(args, context, reference) [private helper]`; `_origin(url) [private helper]`; `_reset_tabs(args, context) [private helper]`; `_resolve(page, strategy, context, retries=0, visible=True) [private helper]`; `_same_origin(url, reference, context) [private helper]`; `_scope(page, locator, context) [private helper]`; `_snapshot(page, context, max_elements=60, max_text_chars=1200) [private helper]`; `_state(context) [private helper]`; `_step_schema(depth=2) [private helper]`; `_stop_state(snapshot, url) [private helper]`; `_tab_list(context) [private helper]`; `_url_policy(context) [private helper]`; `_validate_assertion(assertion) [private helper]`; `_validate_locator(locator) [private helper]`; `_validate_schema(value, schema) [private helper]`; `_verify(page, assertions, context, timeout_ms=3000) [private helper]`; `class NavigationStop(Exception); 1 public methods`; `clear_navigation_state(browser)`; `execute_navigation(name, args, context, policy=None)`; `get_navigation_page(context, tab_id=None, task_id=None, customer_key=None)`; `get_primary_navigation_tab_id(context)`; `plan_hash(args)`; `read_business_field(locator)`; `safe_url(url)`; `validate_navigation(name, args, context=None)`
+- Direct imports: `.performance`, `.policy`, `.session_mode`, `asyncio`, `hashlib`, `json`, `re`, `time`, `urllib.parse`, `uuid`
+- Public symbols: `_assertion(page, assertion, context, wait_ms=0) [private helper]`; `_boundary(page, context) [private helper]`; `_candidates(page, strategy, context) [private helper]`; `_check_cancelled(context) [private helper]`; `_close_tab(tab_id, context, task_id=None, customer_key=None) [private helper]`; `_compact_recon(snapshot, context) [private helper]`; `_consequential_control(locator, op) [private helper]`; `_execute_plan(args, context, stop_when=None) [private helper]`; `_fingerprint(page) [private helper]`; `_identity(page, identities, context) [private helper]`; `_install_origin_guard(page, context, reference) [private helper]`; `_object(properties, required=()) [private helper]`; `_open_tab(args, context, reference) [private helper]`; `_origin(url) [private helper]`; `_reset_tabs(args, context) [private helper]`; `_resolve(page, strategy, context, retries=0, visible=True) [private helper]`; `_same_origin(url, reference, context) [private helper]`; `_scope(page, locator, context) [private helper]`; `_snapshot(page, context, max_elements=60, max_text_chars=1200) [private helper]`; `_state(context) [private helper]`; `_step_schema(depth=2) [private helper]`; `_stop_state(snapshot, url) [private helper]`; `_tab_list(context) [private helper]`; `_url_policy(context) [private helper]`; `_validate_assertion(assertion) [private helper]`; `_validate_locator(locator) [private helper]`; `_validate_schema(value, schema) [private helper]`; `_verify(page, assertions, context, timeout_ms=3000) [private helper]`; `class _TargetReached(Exception)`; `class NavigationStop(Exception); 1 public methods`; `clear_navigation_state(browser)`; `execute_navigation(name, args, context, policy=None)`; `get_navigation_page(context, tab_id=None, task_id=None, customer_key=None)`; `get_primary_navigation_tab_id(context)`; `plan_hash(args)`; `read_business_field(locator)`; `safe_url(url)`; `validate_navigation(name, args, context=None)`
 
 ### `copilot_agent/web_operations.py`
 
@@ -610,7 +640,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Startup latency contracts without launching Edge or sending Copilot messages.
 - Direct imports: `copilot_agent.app`, `copilot_agent.config`, `copilot_agent.state`, `os`, `pathlib`, `tempfile`, `tests.test_protocol_state`, `types`, `unittest`, `unittest.mock`
-- Public symbols: `class LocalKnowledgeTestStoreTests(unittest.TestCase); 2 public methods`; `class StartupBrowser; 8 public methods`; `class StartupFlowTests(unittest.IsolatedAsyncioTestCase); 9 public methods`; `class StartupOrchestrator; 7 public methods`
+- Public symbols: `class LocalKnowledgeTestStoreTests(unittest.TestCase); 3 public methods`; `class StartupBrowser; 8 public methods`; `class StartupFlowTests(unittest.IsolatedAsyncioTestCase); 9 public methods`; `class StartupOrchestrator; 7 public methods`
 
 ### `tests/test_archives.py`
 
@@ -622,13 +652,19 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Offline assembled attachment boundary, using actual prompt and send logic.
 - Direct imports: `copilot_agent.orchestrator`, `copilot_agent.policy`, `hashlib`, `json`, `pathlib`, `tests.test_orchestrator`, `tests.test_protocol_state`, `unittest`, `unittest.mock`
-- Public symbols: `class AssembledCapacityTests(unittest.IsolatedAsyncioTestCase); 3 public methods`
+- Public symbols: `class AssembledCapacityTests(unittest.IsolatedAsyncioTestCase); 5 public methods`
 
 ### `tests/test_attachments.py`
 
 - Role: Implementation module; responsibilities are identified by its public symbols and imports.
 - Direct imports: `copilot_agent.attachments`, `copilot_agent.policy`, `hashlib`, `io`, `os`, `pathlib`, `tempfile`, `types`, `unittest`, `unittest.mock`, `zipfile`
 - Public symbols: `class AttachmentTests(unittest.TestCase); 10 public methods`
+
+### `tests/test_automatic_visuals.py`
+
+- Role: Implementation module; responsibilities are identified by its public symbols and imports.
+- Direct imports: `asyncio`, `copilot_agent.automatic_visuals`, `io`, `pathlib`, `PIL`, `tempfile`, `threading`, `unittest`, `unittest.mock`
+- Public symbols: `class VisualsTests(unittest.IsolatedAsyncioTestCase); 10 public methods`
 
 ### `tests/test_automation_approval.py`
 
@@ -786,6 +822,18 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `copilot_agent.attachments`, `copilot_agent.file_picker`, `os`, `pathlib`, `unittest`, `unittest.mock`
 - Public symbols: `class FilePickerTests(unittest.TestCase); 10 public methods`
 
+### `tests/test_goal_navigation.py`
+
+- Role: Real-browser offline fixtures for the registered goal continuation interface.
+- Direct imports: `copilot_agent.goal_navigation`, `copilot_agent.policy`, `copilot_agent.reconciliation`, `copilot_agent.tools`, `json`, `tests`, `unittest`, `unittest.mock`
+- Public symbols: `class GoalBrowserTests(unittest.IsolatedAsyncioTestCase); 15 public methods`; `class GoalSchemaTests(unittest.TestCase); 2 public methods`; `document_step()`; `request()`
+
+### `tests/test_goal_orchestrator.py`
+
+- Role: Goal completion/correlation checks through the existing orchestrator seam.
+- Direct imports: `copilot_agent.goal_navigation`, `copilot_agent.orchestrator`, `json`, `tests`, `tests.test_goal_navigation`, `tests.test_protocol_state`, `unittest`
+- Public symbols: `class GoalOrchestratorTests(unittest.IsolatedAsyncioTestCase); 9 public methods`; `class GoalRegistry(FixtureRegistry); 3 public methods`
+
 ### `tests/test_isolated_proof_mode.py`
 
 - Role: Implementation module; responsibilities are identified by its public symbols and imports.
@@ -858,6 +906,12 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `asyncio`, `copilot_agent`, `copilot_agent.orchestrator`, `copilot_agent.terminal_input`, `copilot_agent.tools`, `hashlib`, `pathlib`, `queue`, `tests.test_automation_packages`, `tests.test_orchestrator`, `tests.test_protocol_state`, `threading`, `unittest`, `unittest.mock`
 - Public symbols: `class PackageTerminalFlowTests(unittest.IsolatedAsyncioTestCase); 1 public methods`
 
+### `tests/test_performance.py`
+
+- Role: Implementation module; responsibilities are identified by its public symbols and imports.
+- Direct imports: `copilot_agent.performance`, `json`, `pathlib`, `tempfile`, `unittest`
+- Public symbols: `class PerformanceTests(unittest.TestCase); 6 public methods`
+
 ### `tests/test_permissive_mode.py`
 
 - Role: Implementation module; responsibilities are identified by its public symbols and imports.
@@ -918,6 +972,24 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `__future__`, `copilot_agent.policy`, `copilot_agent.rea`, `hashlib`, `json`, `pathlib`, `tempfile`, `unittest`, `unittest.mock`
 - Public symbols: `class REAFullPathTests(unittest.IsolatedAsyncioTestCase); 5 public methods`
 
+### `tests/test_rea_guidance.py`
+
+- Role: The pre-request guide follows public schemas and does no runtime discovery.
+- Direct imports: `copilot_agent.rea`, `copilot_agent.rea_guidance`, `json`, `jsonschema`, `pathlib`, `unittest`, `unittest.mock`
+- Public symbols: `class REAGuidanceTests(unittest.TestCase); 8 public methods`
+
+### `tests/test_rea_large_page_integration.py`
+
+- Role: Explicit local upstream-REA/owned-Edge proof for a page over the chat budget.
+- Direct imports: `asyncio`, `copilot_agent.policy`, `copilot_agent.rea`, `hashlib`, `json`, `os`, `pathlib`, `socket`, `tempfile`, `types`, `unittest`
+- Public symbols: `class REALargePageIntegrationTests(unittest.TestCase); 1 public methods`
+
+### `tests/test_rea_large_results.py`
+
+- Role: Large upstream observations and fallback provenance must remain distinguishable.
+- Direct imports: `asyncio`, `copilot_agent.policy`, `copilot_agent.rea`, `hashlib`, `json`, `pathlib`, `tempfile`, `unittest`, `unittest.mock`
+- Public symbols: `class LargeResultTests(unittest.TestCase); 2 public methods`
+
 ### `tests/test_rea_locations.py`
 
 - Role: Known VDI sibling and portable npm layouts must be reusable offline.
@@ -927,8 +999,20 @@ This is a static AST inventory of the current source, not a verbatim code packag
 ### `tests/test_rea_partial_observations.py`
 
 - Role: Useful partial observations succeed without hiding failed verification.
-- Direct imports: `copilot_agent.logging_utils`, `copilot_agent.policy`, `copilot_agent.rea`, `copilot_agent.research_routing`, `copilot_agent.tools`, `hashlib`, `json`, `pathlib`, `tempfile`, `types`, `unittest`, `unittest.mock`
-- Public symbols: `class PartialObservationTests(unittest.IsolatedAsyncioTestCase); 7 public methods`
+- Direct imports: `copilot_agent.config`, `copilot_agent.logging_utils`, `copilot_agent.policy`, `copilot_agent.rea`, `copilot_agent.research_routing`, `copilot_agent.tools`, `hashlib`, `json`, `pathlib`, `tempfile`, `types`, `unittest`, `unittest.mock`
+- Public symbols: `class PartialObservationTests(unittest.IsolatedAsyncioTestCase); 8 public methods`
+
+### `tests/test_rea_process_output.py`
+
+- Role: Real native subprocess checks for REA transport, without external services.
+- Direct imports: `asyncio`, `copilot_agent.rea`, `json`, `pathlib`, `sys`, `tempfile`, `unittest`
+- Public symbols: `class REAProcessOutputTests(unittest.TestCase); 9 public methods`
+
+### `tests/test_rea_projection.py`
+
+- Role: Large Node observations retain honest coverage and bounded chat output.
+- Direct imports: `copilot_agent.rea_projection`, `copy`, `json`, `unittest`
+- Public symbols: `class REAProjectionTests(unittest.TestCase); 8 public methods`; `evidence()`; `project(result, limit=16384, **changes)`
 
 ### `tests/test_rea_python_artifacts.py`
 
@@ -1002,6 +1086,18 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `copilot_agent.approvals`, `copilot_agent.orchestrator`, `copilot_agent.policy`, `copilot_agent.session_mode`, `copilot_agent.site_knowledge`, `copilot_agent.state`, `copilot_agent.tools`, `json`, `pathlib`, `tests.test_orchestrator`, `tests.test_protocol_state`, `types`, `unittest`, `unittest.mock`
 - Public symbols: `class ScopedSessionTests(unittest.IsolatedAsyncioTestCase); 13 public methods`
 
+### `tests/test_session_plan_approval.py`
+
+- Role: Startup consent authorizes exact prepared plans only for this agent lifetime.
+- Direct imports: `copilot_agent.approvals`, `copilot_agent.session_mode`, `copilot_agent.state`, `json`, `pathlib`, `tempfile`, `types`, `unittest`, `unittest.mock`
+- Public symbols: `class SessionPlanApprovalTests(unittest.IsolatedAsyncioTestCase); 7 public methods`
+
+### `tests/test_session_restart.py`
+
+- Role: Fresh-chat cancellation preserves the archived operation ledger.
+- Direct imports: `asyncio`, `copilot_agent`, `tests`, `tests.test_orchestrator`, `threading`, `unittest`, `unittest.mock`
+- Public symbols: `class PromptRestartTests(unittest.TestCase); 3 public methods`; `class RestartCancellationTests(unittest.IsolatedAsyncioTestCase); 4 public methods`
+
 ### `tests/test_setup_dependencies.py`
 
 - Role: Installer path/reuse regressions; simulated VDI error, actual offline pip proof.
@@ -1030,7 +1126,7 @@ This is a static AST inventory of the current source, not a verbatim code packag
 
 - Role: Implementation module; responsibilities are identified by its public symbols and imports.
 - Direct imports: `copilot_agent.site_discovery`, `copilot_agent.tools`, `json`, `pathlib`, `tempfile`, `tests`, `unittest`, `unittest.mock`
-- Public symbols: `class DiscoveryTests(unittest.IsolatedAsyncioTestCase); 4 public methods`
+- Public symbols: `class DiscoveryTests(unittest.IsolatedAsyncioTestCase); 6 public methods`
 
 ### `tests/test_site_knowledge.py`
 
@@ -1116,11 +1212,23 @@ This is a static AST inventory of the current source, not a verbatim code packag
 - Direct imports: `asyncio`, `copilot_agent.browser`, `copilot_agent.policy`, `copilot_agent.site_knowledge`, `copilot_agent.tools`, `hashlib`, `json`, `pathlib`, `playwright.async_api`, `tempfile`, `time`, `types`, `unittest`
 - Public symbols: `class WebsiteIntegrationTests(unittest.IsolatedAsyncioTestCase); 9 public methods`
 
+### `tools/benchmark_goal_navigation.py`
+
+- Role: Reproducible offline browser benchmark; no Copilot/model or production traffic.
+- Direct imports: `__future__`, `argparse`, `asyncio`, `collections`, `copilot_agent.performance`, `copilot_agent.policy`, `copilot_agent.tools`, `hashlib`, `importlib.metadata`, `json`, `pathlib`, `statistics`, `sys`, `time`, `types`, `urllib.parse`
+- Public symbols: `benchmark(output, runs=3, delay_ms=0, scenario='known_segments')`; `run_case(browser, root, variant, run_number, delay_ms=0, steps=6, scenario='known_segments')`
+
 ### `tools/refresh_research_inventory.py`
 
 - Role: Regenerate the exact registered research catalogue without machine state.
 - Direct imports: `copilot_agent.tools`, `json`, `pathlib`, `sys`
 - Public symbols: `family(name)`; `main()`
+
+### `tools/report_navigation_performance.py`
+
+- Role: Summarize content-free runtime traces without inventing model/token timings.
+- Direct imports: `argparse`, `collections`, `copilot_agent.performance`, `json`, `pathlib`, `statistics`, `sys`
+- Public symbols: `summarize(records)`
 
 ### `version_launcher.py`
 
@@ -1134,86 +1242,87 @@ This is a static AST inventory of the current source, not a verbatim code packag
 Generated from the local Graphify code-only AST graph. The raw graph, cache, and Graphify report are not attachments; the statistics and selected relationships below preserve their useful navigation evidence.
 
 - Graphify version: `0.9.79`
-- Source revision analyzed: `af0afd151bde4cd635e94d046adc706aaaae7165`
-- Nodes / edges / hyperedges: 4140 / 12629 / 0
-- Relationship counts: calls=5019, contains=1278, imports=2080, imports_from=959, indirect_call=492, inherits=43, method=1883, rationale_for=449, references=108, uses=318
+- Source revision analyzed: `b05854153f49b628f6d3e2df7d95715c387266c7`
+- Nodes / edges / hyperedges: 4371 / 13526 / 0
+- Relationship counts: calls=5319, contains=1350, imports=2259, imports_from=1040, indirect_call=528, inherits=46, method=1984, rationale_for=479, references=109, uses=412
 - Graph origin: Graphify AST extraction; inferred edges are hypotheses, not verified behavior.
 
 ### Highest-connectivity source symbols
 
-- `PolicyError` — 253 graph links; `copilot_agent/policy.py` at `L9`.
-- `ToolRegistry` — 166 graph links; `copilot_agent/tools.py` at `L406`.
-- `tools.py` — 161 graph links; `copilot_agent/tools.py` at `L1`.
-- `PathPolicy` — 159 graph links; `copilot_agent/policy.py` at `L42`.
-- `Orchestrator` — 155 graph links; `copilot_agent/orchestrator.py` at `L29`.
-- `SessionState` — 116 graph links; `copilot_agent/state.py` at `L67`.
-- `DiscoveryError` — 113 graph links; `copilot_agent/discovery_contracts.py` at `L64`.
-- `BrowserAdapter` — 108 graph links; `copilot_agent/browser.py` at `L324`.
-- `orchestrator.py` — 107 graph links; `copilot_agent/orchestrator.py` at `L1`.
-- `final_response()` — 98 graph links; `tests/test_orchestrator.py` at `L86`.
+- `PolicyError` — 270 graph links; `copilot_agent/policy.py` at `L9`.
+- `ToolRegistry` — 196 graph links; `copilot_agent/tools.py` at `L408`.
+- `PathPolicy` — 182 graph links; `copilot_agent/policy.py` at `L42`.
+- `tools.py` — 169 graph links; `copilot_agent/tools.py` at `L1`.
+- `Orchestrator` — 165 graph links; `copilot_agent/orchestrator.py` at `L30`.
+- `SessionState` — 126 graph links; `copilot_agent/state.py` at `L67`.
+- `DiscoveryError` — 114 graph links; `copilot_agent/discovery_contracts.py` at `L64`.
+- `BrowserAdapter` — 113 graph links; `copilot_agent/browser.py` at `L325`.
+- `orchestrator.py` — 111 graph links; `copilot_agent/orchestrator.py` at `L1`.
+- `final_response()` — 101 graph links; `tests/test_orchestrator.py` at `L86`.
+- `rea.py` — 97 graph links; `copilot_agent/rea.py` at `L1`.
+- `Config` — 94 graph links; `copilot_agent/config.py` at `L28`.
+- `copilot_agent/app.py` — 94 graph links; `copilot_agent/app.py` at `L1`.
 - `Store` — 94 graph links; `copilot_agent/discovery_store.py` at `L44`.
-- `copilot_agent/app.py` — 89 graph links; `copilot_agent/app.py` at `L1`.
-- `rea.py` — 89 graph links; `copilot_agent/rea.py` at `L1`.
+- `policy.py` — 91 graph links; `copilot_agent/policy.py` at `L1`.
 - `site_knowledge.py` — 89 graph links; `copilot_agent/site_knowledge.py` at `L1`.
-- `Config` — 86 graph links; `copilot_agent/config.py` at `L28`.
-- `policy.py` — 84 graph links; `copilot_agent/policy.py` at `L1`.
 - `automation_packages.py` — 76 graph links; `copilot_agent/automation_packages.py` at `L1`.
-- `._turn()` — 63 graph links; `copilot_agent/orchestrator.py` at `L1338`.
+- `config_value()` — 73 graph links; `copilot_agent/policy.py` at `L231`.
 
 ### Direct, source-derived relationships
 
 Each row is an AST-extracted graph edge; source file and line come from the Graphify edge.
 
-- `agent_ui/runtime.py:L113` `.__init__()` **calls** `._start_agent()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L150` `._run_agent()` **calls** `Feedback` in `copilot_agent/feedback.py`.
-- `agent_ui/runtime.py:L206` `.submit()` **calls** `.steer()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L278` `.poll_steering()` **calls** `._cancel_pending_steering_locked()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L299` `._cancel_pending_steering()` **calls** `._cancel_pending_steering_locked()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L309` `.permission_snapshot()` **calls** `.permission_context()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L309` `.permission_snapshot()` **calls** `list_grants()` in `copilot_agent/research_permissions.py`.
-- `agent_ui/runtime.py:L314` `.manage_permission()` **calls** `.permission_context()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L315` `.manage_permission()` **calls** `manage()` in `copilot_agent/research_permissions.py`.
-- `agent_ui/runtime.py:L319` `.manage_permission()` **calls** `prepare_permissions()` in `copilot_agent/research_permissions.py`.
-- `agent_ui/runtime.py:L322` `.manage_permission()` **calls** `canonical_hash()` in `copilot_agent/state.py`.
-- `agent_ui/runtime.py:L328` `.manage_permission()` **calls** `execute_permissions()` in `copilot_agent/research_permissions.py`.
-- `agent_ui/runtime.py:L333` `.action()` **calls** `._cancel_pending_steering()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L368` `.close()` **calls** `._cancel_pending_steering()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L373` `.close()` **calls** `.complete_steering()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L377` `create_runtime()` **calls** `AgentRuntime` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L384` `main()` **calls** `main()` in `agent_ui/workspace.py`.
-- `agent_ui/runtime.py:L91` `.__init__()` **calls** `PromptBroker` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L121` `runtime.py` **imports** `Feedback` in `copilot_agent/feedback.py`.
-- `agent_ui/runtime.py:L308` `runtime.py` **imports** `list_grants()` in `copilot_agent/research_permissions.py`.
-- `agent_ui/runtime.py:L312` `runtime.py` **imports** `execute_permissions()` in `copilot_agent/research_permissions.py`.
-- `agent_ui/runtime.py:L312` `runtime.py` **imports** `manage()` in `copilot_agent/research_permissions.py`.
-- `agent_ui/runtime.py:L312` `runtime.py` **imports** `prepare_permissions()` in `copilot_agent/research_permissions.py`.
-- `agent_ui/runtime.py:L313` `runtime.py` **imports** `canonical_hash()` in `copilot_agent/state.py`.
-- `agent_ui/runtime.py:L381` `runtime.py` **imports** `main()` in `agent_ui/workspace.py`.
-- `agent_ui/runtime.py:L120` `runtime.py` **imports_from** `copilot_agent/app.py` in `copilot_agent/app.py`.
-- `agent_ui/runtime.py:L115` `AgentRuntime` **method** `._start_agent()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L119` `AgentRuntime` **method** `._run_agent()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L126` `.__init__()` **calls** `PromptBroker` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L148` `.__init__()` **calls** `._start_agent()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L185` `._run_agent()` **calls** `Feedback` in `copilot_agent/feedback.py`.
+- `agent_ui/runtime.py:L241` `.submit()` **calls** `.steer()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L313` `.poll_steering()` **calls** `._cancel_pending_steering_locked()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L334` `._cancel_pending_steering()` **calls** `._cancel_pending_steering_locked()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L344` `.permission_snapshot()` **calls** `.permission_context()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L344` `.permission_snapshot()` **calls** `list_grants()` in `copilot_agent/research_permissions.py`.
+- `agent_ui/runtime.py:L349` `.manage_permission()` **calls** `.permission_context()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L350` `.manage_permission()` **calls** `manage()` in `copilot_agent/research_permissions.py`.
+- `agent_ui/runtime.py:L354` `.manage_permission()` **calls** `prepare_permissions()` in `copilot_agent/research_permissions.py`.
+- `agent_ui/runtime.py:L357` `.manage_permission()` **calls** `canonical_hash()` in `copilot_agent/state.py`.
+- `agent_ui/runtime.py:L370` `.manage_permission()` **calls** `execute_permissions()` in `copilot_agent/research_permissions.py`.
+- `agent_ui/runtime.py:L376` `.action()` **calls** `._cancel_pending_steering()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L437` `.close()` **calls** `._cancel_pending_steering()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L442` `.close()` **calls** `.complete_steering()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L446` `create_runtime()` **calls** `AgentRuntime` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L453` `main()` **calls** `main()` in `agent_ui/workspace.py`.
+- `agent_ui/runtime.py:L156` `runtime.py` **imports** `Feedback` in `copilot_agent/feedback.py`.
+- `agent_ui/runtime.py:L343` `runtime.py` **imports** `list_grants()` in `copilot_agent/research_permissions.py`.
+- `agent_ui/runtime.py:L347` `runtime.py` **imports** `execute_permissions()` in `copilot_agent/research_permissions.py`.
+- `agent_ui/runtime.py:L347` `runtime.py` **imports** `manage()` in `copilot_agent/research_permissions.py`.
+- `agent_ui/runtime.py:L347` `runtime.py` **imports** `prepare_permissions()` in `copilot_agent/research_permissions.py`.
+- `agent_ui/runtime.py:L348` `runtime.py` **imports** `canonical_hash()` in `copilot_agent/state.py`.
+- `agent_ui/runtime.py:L450` `runtime.py` **imports** `main()` in `agent_ui/workspace.py`.
+- `agent_ui/runtime.py:L155` `runtime.py` **imports_from** `copilot_agent/app.py` in `copilot_agent/app.py`.
+- `agent_ui/runtime.py:L104` `PromptBroker` **method** `.interrupt()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L123` `AgentRuntime` **method** `.__init__()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L150` `AgentRuntime` **method** `._start_agent()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L154` `AgentRuntime` **method** `._run_agent()` in `agent_ui/runtime.py`.
 - `agent_ui/runtime.py:L17` `PromptBroker` **method** `.__init__()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L181` `AgentRuntime` **method** `.submit()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L208` `AgentRuntime` **method** `.take_submitted_attachments()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L213` `AgentRuntime` **method** `.active_run_id()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L217` `AgentRuntime` **method** `.steer()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L259` `AgentRuntime` **method** `.complete_steering()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L26` `PromptBroker` **method** `.ask()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L274` `AgentRuntime` **method** `.poll_steering()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L284` `AgentRuntime` **method** `._cancel_pending_steering_locked()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L297` `AgentRuntime` **method** `._cancel_pending_steering()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L301` `AgentRuntime` **method** `.permission_context()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L307` `AgentRuntime` **method** `.permission_snapshot()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L311` `AgentRuntime` **method** `.manage_permission()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L330` `AgentRuntime` **method** `.action()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L345` `AgentRuntime` **method** `._dispatch_actions()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L358` `AgentRuntime` **method** `._emit()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L363` `AgentRuntime` **method** `.close()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L45` `PromptBroker` **method** `.submit()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L60` `PromptBroker` **method** `.submit_if_waiting()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L73` `PromptBroker` **method** `.close()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L88` `AgentRuntime` **method** `.__init__()` in `agent_ui/runtime.py`.
-- `agent_ui/runtime.py:L150` `AgentRuntime` **uses** `Feedback` in `copilot_agent/feedback.py`.
+- `agent_ui/runtime.py:L216` `AgentRuntime` **method** `.submit()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L243` `AgentRuntime` **method** `.take_submitted_attachments()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L248` `AgentRuntime` **method** `.active_run_id()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L252` `AgentRuntime` **method** `.steer()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L28` `PromptBroker` **method** `.ask()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L294` `AgentRuntime` **method** `.complete_steering()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L309` `AgentRuntime` **method** `.poll_steering()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L319` `AgentRuntime` **method** `._cancel_pending_steering_locked()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L332` `AgentRuntime` **method** `._cancel_pending_steering()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L336` `AgentRuntime` **method** `.permission_context()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L342` `AgentRuntime` **method** `.permission_snapshot()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L346` `AgentRuntime` **method** `.manage_permission()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L372` `AgentRuntime` **method** `.action()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L413` `AgentRuntime` **method** `._dispatch_actions()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L427` `AgentRuntime` **method** `._emit()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L432` `AgentRuntime` **method** `.close()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L52` `PromptBroker` **method** `.submit()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L78` `PromptBroker` **method** `.submit_if_waiting()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L91` `PromptBroker` **method** `.close()` in `agent_ui/runtime.py`.
+- `agent_ui/runtime.py:L185` `AgentRuntime` **uses** `Feedback` in `copilot_agent/feedback.py`.
 - `agent_ui/workspace.py:L139` `.submit()` **calls** `._message_digest()` in `agent_ui/workspace.py`.
 - `agent_ui/workspace.py:L143` `.submit()` **calls** `._existing_message_locked()` in `agent_ui/workspace.py`.
 - `agent_ui/workspace.py:L157` `.submit()` **calls** `.steer()` in `agent_ui/workspace.py`.
@@ -1260,10 +1369,9 @@ Each row is an AST-extracted graph edge; source file and line come from the Grap
 - `agent_ui/workspace.py:L40` `Workspace` **uses** `UploadStore` in `agent_ui/uploads.py`.
 - `app.py:L1` `app.py` **imports** `main()` in `copilot_agent/app.py`.
 - `app.py:L1` `app.py` **imports_from** `copilot_agent/app.py` in `copilot_agent/app.py`.
-- `copilot_agent/app.py:L115` `_show_bug_handoff()` **calls** `system()` in `copilot_agent/app.py`.
-- `copilot_agent/app.py:L169` `_choose_existing_endpoint()` **calls** `system()` in `copilot_agent/app.py`.
-- `copilot_agent/app.py:L189` `choose_browser_endpoint()` **calls** `machine_key()` in `copilot_agent/storage.py`.
-- `copilot_agent/app.py:L214` `choose_browser_endpoint()` **calls** `cdp_endpoint()` in `copilot_agent/reused_browser.py`.
+- `copilot_agent/app.py:L102` `_record_bug_fix()` **calls** `DiagnosticReports` in `copilot_agent/diagnostics.py`.
+- `copilot_agent/app.py:L104` `_record_bug_fix()` **calls** `_recent_events()` in `copilot_agent/app.py`.
+- `copilot_agent/app.py:L143` `_show_bug_handoff()` **calls** `system()` in `copilot_agent/app.py`.
 
 ### Inferred relationship examples
 
@@ -1290,6 +1398,7 @@ Sources: `config.example.json`, `copilot_agent/config.py`, `schemas/response-v1.
 - `automation_minimum_steps`: example value `4`.
 - `automation_package_score`: example value `8`.
 - `bounded_parallelism`: example value `true`.
+- `compact_navigation`: example value `true`.
 - `copilot_download_hosts`: example value `["eu-prod.asyncgw.teams.microsoft.com", "m365.cloud.microsoft"]`.
 - `created_dir`: example value `null`.
 - `created_sync_enabled`: example value `false`.
@@ -1306,16 +1415,19 @@ Sources: `config.example.json`, `copilot_agent/config.py`, `schemas/response-v1.
 - `max_delivery_retries`: example value `3`.
 - `max_download_bytes`: example value `20971520`.
 - `operation_reuse`: example value `false`.
+- `performance_enabled`: example value `true`.
 - `persistent_graph`: example value `true`.
 - `rea_backend`: example value `"auto"`.
 - `rea_enabled`: example value `true`.
+- `rea_fallback_timeout_seconds`: example value `15`.
 - `rea_max_input_bytes`: example value `20971520`.
 - `rea_max_output_bytes`: example value `1048576`.
 - `rea_max_parallel`: example value `3`.
+- `rea_max_transport_bytes`: example value `33554432`.
 - `rea_node_executable`: example value `""`.
 - `rea_node_readiness_timeout_seconds`: example value `180`.
 - `rea_repository`: example value `""`.
-- `rea_timeout_seconds`: example value `45`.
+- `rea_timeout_seconds`: example value `600`.
 - `response_timeout`: example value `180`.
 - `sync_timeout`: example value `120`.
 - `targeted_repair`: example value `false`.
@@ -1407,6 +1519,8 @@ These compact files define how users launch the project and the top-level respon
   "attach_existing": false,
   "knowledge_directory": null,
   "visible": true,
+  "performance_enabled": true,
+  "compact_navigation": true,
   "allowed_roots": [
     "workspace",
     "deliveries"
@@ -1448,7 +1562,9 @@ These compact files define how users launch the project and the top-level respon
   "rea_repository": "",
   "rea_node_executable": "",
   "rea_node_readiness_timeout_seconds": 180,
-  "rea_timeout_seconds": 45,
+  "rea_timeout_seconds": 600,
+  "rea_fallback_timeout_seconds": 15,
+  "rea_max_transport_bytes": 33554432,
   "rea_max_output_bytes": 1048576,
   "rea_max_input_bytes": 20971520,
   "rea_max_parallel": 3

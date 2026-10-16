@@ -1,5 +1,10 @@
 # DOM, JavaScript and visual navigation
 
+For a precise target, use the [goal navigation baseline](GOAL_NAVIGATION.md):
+`browser.navigate_goal` alternates goal-ranked discovery and short verified
+navigation segments with a current visual decision packet. Comprehensive
+inspection below remains useful when the goal requires broader evidence.
+
 Use `browser.inspect` on a new or unfamiliar website page. It runs structural
 inspection and the first screenshot concurrently in the same owned tab, returns
 DOM/open shadow DOM controls with viewport coordinates, forms and app-script

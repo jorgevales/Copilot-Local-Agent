@@ -4,6 +4,8 @@
   "attach_existing": false,
   "knowledge_directory": null,
   "visible": true,
+  "performance_enabled": true,
+  "compact_navigation": true,
   "allowed_roots": [
     "workspace",
     "deliveries"

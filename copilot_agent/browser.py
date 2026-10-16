@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 from . import reused_browser as edge
 from .protocol import BEGIN, END
+from .performance import NULL_TRACE
 
 
 class BrowserUIError(RuntimeError):
@@ -1242,7 +1243,8 @@ class BrowserAdapter:
             await self.diagnostics('composer_mismatch')
             raise BrowserUIError('The composer did not preserve the complete outbound message.')
         self.preparation_stage = 'attachment_upload'
-        await self._reconcile_preloaded_attachments(attachments)
+        with getattr(self, 'performance_trace', NULL_TRACE).span('upload', request_id=request_id):
+            await self._reconcile_preloaded_attachments(attachments)
         self.preparation_stage = 'send_control_check'
         button = await self._visible(edge.SEND_SELECTOR)
         if button is None or not await button.is_enabled():
@@ -1495,6 +1497,8 @@ class BrowserAdapter:
         raise CaptureTimeoutError('The existing Copilot response could not be captured as a complete, stable envelope; the committed request was not resent.')
 
     async def exchange(self, text: str, request_id: str, attachments=(), on_submitted=None) -> str:
+        timing = getattr(self, 'performance_trace', NULL_TRACE)
+        timing.record('exchange_start', request_id=request_id)
         async with self._exchange_lock:
             if self._delivery_uncertain:
                 raise SubmissionAmbiguousError('A previous delivery remains uncertain. Reconcile manually before a new send.')
@@ -1517,6 +1521,7 @@ class BrowserAdapter:
                 try: await self.diagnostics('preparation_' + self.preparation_stage)
                 except Exception: pass
                 raise SubmissionNotSentError(message) from exc
+            timing.record('preparation_complete', request_id=request_id)
             user_key = None
             last_error = None
             for send_attempt in range(1, 3):
@@ -1525,6 +1530,7 @@ class BrowserAdapter:
                 try:
                     # A retry is allowed only after fresh, stable UI evidence proves
                     # the exact text remains unsent and no attachments were submitted.
+                    timing.record('send_attempted', request_id=request_id)
                     await button.click(timeout=5000)
                     self._preloaded_attachment_signatures = ()
                     deadline = time.monotonic() + min(20, self.config.response_timeout)
@@ -1538,6 +1544,7 @@ class BrowserAdapter:
                             user_key = fresh[0]['key']
                             self.last_submission = {'request_id': request_id, 'user_key': user_key,
                                                     'committed': True, 'send_attempts': send_attempt}
+                            timing.record('request_committed', request_id=request_id)
                             if on_submitted is not None:
                                 outcome = on_submitted()
                                 if inspect.isawaitable(outcome):
@@ -1582,6 +1589,7 @@ class BrowserAdapter:
             await self._feedback({'type':'generation', 'request_id':request_id, 'message':'Waiting for Copilot to render its reply.'})
             streamed_candidate = ''
             generation_observed = False
+            generation_end_recorded = False
             invalid_stable = 0
             scrolled_for_tail = False
             try:
@@ -1610,6 +1618,9 @@ class BrowserAdapter:
                         await self._feedback({'type':'candidate','request_id':request_id,'raw':candidate,
                                               'generation_ended':generation_observed and not stop_present})
                     generation_ended = generation_observed and not stop_present
+                    if generation_ended and not generation_end_recorded:
+                        timing.record('generation_ended', request_id=request_id)
+                        generation_end_recorded = True
                     activity = (candidate, tuple((item['key'], item['text']) for item in interim))
                     if stop_present:
                         # Copilot can spend several minutes reasoning without
@@ -1652,8 +1663,10 @@ class BrowserAdapter:
                             except Exception:
                                 pass
                     if complete and stable >= max(2, self.config.capture_stable_samples):
+                        timing.record('capture_complete', request_id=request_id, ok=True, characters=len(candidate))
                         return candidate
                     if invalid_stable >= max(4, self.config.capture_stable_samples + 2):
+                        timing.record('capture_complete', request_id=request_id, ok=False, characters=len(candidate))
                         return candidate
                     await asyncio.sleep(self.config.poll_interval)
                 reason = ('the overall response time limit was reached' if time.monotonic() >= overall_deadline

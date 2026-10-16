@@ -40,6 +40,8 @@ class Config:
     response_max_duration: float = 900
     poll_interval: float = .5
     capture_stable_samples: int = 3
+    performance_enabled: bool = True
+    compact_navigation: bool = True
     max_capture_chars: int = 100000
     max_corrections: int = 12
     max_context_chars: int = 16000
@@ -179,6 +181,7 @@ class Config:
         if type(self.debug_port) is not int or not 1024 <= self.debug_port <= 65535:
             raise ValueError('debug_port must be an integer from 1024 to 65535')
         for key in ('visible', 'attach_existing', 'created_sync_enabled', 'manifest_path', 'customer_data_work',
+                    'performance_enabled', 'compact_navigation',
                     'persistent_graph', 'bounded_parallelism', 'local_recovery',
                     'knowledge_write', 'knowledge_reuse', 'targeted_repair', 'operation_reuse', 'rea_enabled'):
             if type(getattr(self, key)) is not bool:

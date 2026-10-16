@@ -51,7 +51,7 @@ def _navigation_only(request: dict) -> bool:
     name = request.get('name')
     if name in {'browser.open', 'browser.back', 'browser.forward'}:
         return True
-    if name != 'browser.plan':
+    if name not in {'browser.plan', 'browser.navigate_goal'}:
         return False
     steps = request.get('arguments', {}).get('steps', [])
     if not isinstance(steps, list):
@@ -67,7 +67,7 @@ def _navigation_only(request: dict) -> bool:
 
 def _owned_page(browser, request):
     page = getattr(browser, 'tool_page', None)
-    if request.get('name') == 'browser.plan':
+    if request.get('name') in {'browser.plan', 'browser.navigate_goal'}:
         tab_id = request.get('arguments', {}).get('tab_id', 'tab-1')
         state = getattr(browser, '_navigation_state', None)
         if state is not None:
@@ -99,7 +99,7 @@ async def capture_baseline(browser, request):
     return {'kind': 'navigation_only', 'page_token': token,
             'allow_origin_change': request.get('name') == 'browser.open' or fast_mode(getattr(browser, 'config', {})),
             'browser_binding_sha256': _binding(browser),
-            'transition_count': sum(step.get('op') in {'navigate', 'click'} for step in request.get('arguments', {}).get('steps', [])) if request.get('name') == 'browser.plan' else 1,
+            'transition_count': sum(step.get('op') in {'navigate', 'click'} for step in request.get('arguments', {}).get('steps', [])) if request.get('name') in {'browser.plan', 'browser.navigate_goal'} else 1,
             'url_sha256': _hash(url), 'title_sha256': _hash(title),
             'origin_sha256': _hash(origin) if origin else None,
             'captured_at': now()}
@@ -144,7 +144,15 @@ def navigation_scope_allows(request, browser, domains, expected_binding=None):
                 urls.resolve(args['url'])
                 return _origin(args['url']) == _origin(page.url)
             return False
-        if name != 'browser.plan' or args.get('resume_token'):
+        if name == 'browser.navigate_goal':
+            from .goal_navigation import validate_goal
+            validate_goal(args)
+            for assertion in args['success']:
+                if assertion['kind'] == 'url' and _origin(assertion['value']) != _origin(page.url):
+                    return False
+            if not args.get('steps'):
+                return True  # Observation only, within the current site's navigation grant.
+        if name not in {'browser.plan', 'browser.navigate_goal'} or args.get('resume_token'):
             return False
         for step in args.get('steps', []):
             op = step.get('op')

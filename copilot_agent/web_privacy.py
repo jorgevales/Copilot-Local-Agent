@@ -10,7 +10,7 @@ PRIVATE_TOOLS = {
     'crawl4ai.crawl', 'crawl4ai.read',
     'browser.reconcile', 'browser.recover_uncertain', 'browser.diagnostics',
     'operation.quarantine', 'operation.reconcile',
-    'browser.recon', 'browser.plan', 'browser.tabs', 'browser.customer_summary',
+    'browser.recon', 'browser.plan', 'browser.navigate_goal', 'browser.tabs', 'browser.customer_summary',
     'browser.route', 'browser.documents', 'browser.download_batch',
     'files.transfer_to_copilot',
     'documents.catalogue', 'documents.find', 'documents.retrieve',

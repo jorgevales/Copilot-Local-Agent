@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import time
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -12,6 +13,8 @@ from urllib.parse import urlsplit
 from PIL import Image
 
 from .persistence import io_path
+from .persistence import write_json
+from .performance import trace
 from .policy import config_value
 from .screenshot_evidence import MASK, METRICS, _pdf
 from .web_navigation import get_navigation_page, _install_origin_guard, _url_policy, safe_url, _check_cancelled, NavigationStop
@@ -51,7 +54,8 @@ async def capture_action_phase(page, context, label, phase, action_id):
                 _url_policy(context).resolve(page.url)
             url = page.url
             captured_at = datetime.now(timezone.utc).isoformat()
-            pixels = await page.screenshot(type='png', scale='css', timeout=2500, mask=[page.locator(MASK)])
+            with trace(context).span('screenshot', call_id=context.get('source_call_id')):
+                pixels = await page.screenshot(type='png', scale='css', timeout=2500, mask=[page.locator(MASK)])
             if page.url != url:
                 raise ValueError('Page navigated during phase capture')
             scroll = {'x': None, 'y': None}
@@ -68,6 +72,7 @@ async def capture_action_phase(page, context, label, phase, action_id):
                 'phase': phase, 'action_id': action_id, 'source_call_id': context.get('source_call_id'),
                 'captured_at': captured_at, 'url': safe_url(url), 'scroll': scroll,
                 'kind': 'actual action viewport', 'image_path': str(path)})
+            return collector['records'][-1]
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -84,7 +89,8 @@ async def paired_browser_action(page, context, label, operation, *, after_page=N
         _check_cancelled(context)
         if context.get('cancel_event') is not None and context['cancel_event'].is_set():
             raise NavigationStop('cancelled', 'User cancellation received during before-action capture')
-        result = await operation()
+        with trace(context).span('action', call_id=context.get('source_call_id')):
+            result = await operation()
         return result
     finally:
         try:
@@ -140,13 +146,29 @@ async def merge_visual_pages(pages, context):
             records.append({**record, 'number': len(records) + 1, 'image_path': str(path)})
         if not records:
             return {'status': 'unavailable', 'pictures': 0, 'queued_for_copilot': False}
-        writer = asyncio.create_task(asyncio.to_thread(_write_bundle, list(records), collector['target']))
+        selected = list(records)
+        compact = context.get('navigation_visual_packet', False)
+        if compact:
+            # The decision capture is coherent with the DOM/fingerprint. The
+            # outer AFTER capture can be later and is audit evidence, not a
+            # substitute for that observation. Retain every original PNG.
+            decisions = [r for r in records if r.get('phase') == 'decision']
+            selected = list({r.get('source_call_id'): r for r in decisions}.values()) if decisions else [records[-1]]
+            selected = [dict(record, number=index) for index, record in enumerate(selected, 1)]
+            write_json(Path(collector['target']).with_suffix('.json'),
+                       {'records': records, 'gaps': collector['gaps'],
+                        'decision_image_paths': [r['image_path'] for r in selected]})
+        started = time.monotonic()
+        writer = asyncio.create_task(asyncio.to_thread(_write_bundle, selected, collector['target']))
         try:
             await asyncio.shield(writer)
         except asyncio.CancelledError:
             await writer
             raise
         payload = io_path(collector['target']).read_bytes()
+        trace(context).record('visual_packaging', call_id=context.get('source_call_id'),
+                              duration_ms=(time.monotonic() - started) * 1000,
+                              bytes=len(payload), pictures=len(selected))
         queued = len(payload) <= config_value(context.get('config', {}), 'max_attachment_bytes', 20 * 1024 * 1024)
         pending = context.setdefault('pending_visual_attachments', [])
         if not queued and collector['target'] in pending:
@@ -154,10 +176,10 @@ async def merge_visual_pages(pages, context):
         if queued and collector['target'] not in pending:
             pending.append(collector['target'])
         return {'status': 'attachment_too_large' if not queued else 'partial' if collector['gaps'] else 'captured',
-            'pictures': len(records), 'bytes': len(payload),
+            'pictures': len(selected), 'audit_pictures': len(records), 'compact_current_view': bool(compact), 'bytes': len(payload),
             'path': collector['target'], 'sha256': hashlib.sha256(payload).hexdigest(),
             'queued_for_copilot': queued, 'gaps': list(collector['gaps']),
-            'captions': [record['label'] for record in records]}
+            'captions': [record['label'] for record in selected]}
 
 
 async def capture_visuals(page, context, *, label, revisit=True, scroll_owned_page=False):
@@ -286,6 +308,16 @@ async def _safe_capture(name, args, context):
 
 
 async def execute_with_visuals(name, args, context, operation):
+    # Serialize observation/action transactions on the SAME owned page, including
+    # scroll captures. Existing independent reads on different tabs still overlap.
+    if name.startswith('browser.'):
+        from .goal_navigation import page_lock
+        async with page_lock(context, args):
+            return await _execute_with_visuals(name, args, context, operation)
+    return await _execute_with_visuals(name, args, context, operation)
+
+
+async def _execute_with_visuals(name, args, context, operation):
     if name.startswith('browser.') or name in {'operation.call', 'operation.learn'}:
         action_id = str(context.get('source_call_id') or 'call') + '/' + uuid.uuid4().hex[:12]
         def owned_page(arguments):

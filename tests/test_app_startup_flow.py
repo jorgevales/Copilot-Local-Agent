@@ -52,6 +52,22 @@ class StartupBrowser:
 
 
 class LocalKnowledgeTestStoreTests(unittest.TestCase):
+    def test_local_test_resume_requires_exact_existing_session_inside_selected_store(self):
+        if os.name != 'nt':
+            self.skipTest('C: path policy is Windows-specific')
+        with tempfile.TemporaryDirectory() as temp:
+            local = Path(temp)
+            target = local / 'CopilotLocalAgent/live-navigation-tests/resume-test'
+            session = target / 'runtime/sessions/owned-session'
+            session.mkdir(parents=True)
+            (session / 'session.json').write_text('{}', encoding='utf-8')
+            config = Config(root=Path(__file__).resolve().parents[1], storage_dir=local)
+            with patch.dict(os.environ, {'LOCALAPPDATA': str(local)}):
+                self.assertEqual(target.resolve(), configure_local_knowledge_test(config, target, resume_session=session))
+                with self.assertRaisesRegex(ValueError, 'existing session directly'):
+                    configure_local_knowledge_test(config, target, resume_session=local / 'foreign-session')
+            self.assertEqual('{}', (session / 'session.json').read_text(encoding='utf-8'))
+
     def test_local_c_store_requires_empty_direct_localappdata_child(self):
         if os.name != 'nt':
             self.skipTest('C: path policy is Windows-specific')

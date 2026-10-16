@@ -29,6 +29,7 @@ from .web_navigation import (NAVIGATION_SPECS, validate_navigation, execute_navi
                              clear_navigation_state, get_primary_navigation_tab_id)
 from .browser_inspection import INSPECTION_SPECS, execute_inspection
 from .site_discovery import SPEC as SITE_DISCOVERY_SPEC, discover as discover_site
+from .goal_navigation import GOAL_SPECS, validate_goal, execute_goal
 from .screenshot_evidence import CAPTURE_PROPERTIES, capture_evidence
 from .web_documents import DOCUMENT_SPECS, DOCUMENT_EXAMPLES, validate_documents, execute_documents
 from .site_knowledge import KNOWLEDGE_SPECS, KNOWLEDGE_EXAMPLES, validate_knowledge, execute_knowledge, safe_proposal, KnowledgeValidationError, KnowledgeWriteError, reconcile_knowledge_call
@@ -184,6 +185,7 @@ SPECS = {
 
 
 SPECS.update(NAVIGATION_SPECS)
+SPECS.update(GOAL_SPECS)
 SPECS.update(INSPECTION_SPECS)
 SPECS['browser.discover'] = SITE_DISCOVERY_SPEC
 SPECS.update(DOCUMENT_SPECS)
@@ -433,6 +435,10 @@ class ToolRegistry:
         if name == "code_runner":
             examples = [{"arguments":{"script":"print('reviewed computation')","purpose":"Compute a bounded result","language":"python_subset","working_directory":".","read_paths":[],"create_paths":[],"expected_outputs":[],"commands":[],"network_destinations":[],"permissions":[],"risk_summary":"No external side effects","recovery_notes":"Review failure output before retry"}}]
         if name == "browser.open": examples = [{"arguments":{"url":"https://example.com/"}}]
+        if name == 'browser.navigate_goal':
+            examples = [{'arguments': {'task_id': 'find-reports', 'goal': 'Reach quarterly reports',
+                'success': [{'kind': 'text', 'locator': {'role': 'heading', 'name': 'Quarterly reports'},
+                             'value': 'Quarterly reports'}]}}]
         if name == 'browser.inspect': examples = [{'arguments': {'tab_id': 'tab-1', 'max_nodes': 300}}]
         if name == 'browser.screenshot': examples = [{'arguments': {'shots': [{'label': 'Page overview', 'scroll_y': 0}, {'label': 'Requested details', 'selector': '#details'}, {'label': 'Precise viewport region', 'clip': {'x': 20, 'y': 100, 'width': 300, 'height': 200}}]}}]
         if name == 'browser.javascript': examples = [{'arguments': {'tab_id': 'tab-1', 'expression': '() => ({title: document.title, path: location.pathname})'}}]
@@ -484,6 +490,9 @@ class ToolRegistry:
                     variant['properties']['visual_context'] = {'type': 'object'}
         timeout = 300 if name in {"created.wait", "copilot.download"} else 30
         if name in {'browser.plan', 'browser.download_batch'}: timeout = 125
+        if name in GOAL_SPECS: timeout = 90
+        if name == 'browser.discover':
+            timeout = SITE_DISCOVERY_SPEC[0]['properties']['max_seconds']['maximum'] + 90
         if name == 'operation.learn': timeout = 95
         if name in {'discovery.manifest', 'navigation.intent'}: timeout = 3605
         if name in REA_SPECS:
@@ -555,6 +564,8 @@ class ToolRegistry:
             return validate_login(args, context)
         if name in NAVIGATION_SPECS:
             validate_navigation(name, args, context)
+        if name in GOAL_SPECS:
+            validate_goal(args)
         if name in DOCUMENT_SPECS:
             validate_documents(name, args, context, policy)
         if name in KNOWLEDGE_SPECS:
@@ -769,6 +780,8 @@ class ToolRegistry:
         return bounded
 
     async def execute(self, name, args, context):
+        if name in GOAL_SPECS:
+            context['goal_effects_started'] = False
         if name in REA_SPECS:
             context['rea_execution_started'] = False
             context['rea_cleanup_confirmed'] = True
@@ -803,6 +816,8 @@ class ToolRegistry:
                 timeout = None  # Page timeouts and session Stop control the crawl.
             if name == 'browser.discover':
                 timeout = args.get('max_seconds', 90) + 90
+            if name in GOAL_SPECS:
+                timeout = args.get('timeout_seconds', 15) + 35
             if name in {'discovery.manifest', 'navigation.intent'}:
                 payload = args['manifest'] if name == 'discovery.manifest' else args['intent']
                 timeout = min(3605, payload['budgets']['run_seconds'] + 5)
@@ -830,7 +845,10 @@ class ToolRegistry:
                 if result.get('outcome') in {'failed', 'incomplete', 'cancelled'}:
                     return self._limit({'ok': False, 'tool': name, 'result': result,
                                         'error': {'code': 'operation_failed', 'message': 'Discovery did not meet the objective; inspect retained evidence and material gaps.'}}, context)
-            if name in NAVIGATION_SPECS or name in DOCUMENT_SPECS or name in INSPECTION_SPECS or name == 'browser.screenshot':
+            if name == 'browser.discover' and result.get('side_effects_uncertain') is True:
+                return self._limit({'ok': False, 'tool': name, 'result': result,
+                    'error': {'code': 'uncertain', 'message': 'Discovery stopped with an unverified last action; inspect and recover without replay.'}}, context)
+            if name in NAVIGATION_SPECS or name in GOAL_SPECS or name in DOCUMENT_SPECS or name in INSPECTION_SPECS or name == 'browser.screenshot':
                 if result.get('status') in {'failed', 'partial', 'blocked', 'interrupted', 'cancelled', 'needs_user_input', 'uncertain'}:
                     return self._limit({'ok': False, 'tool': name, 'result': result,
                                         'error': {'code': result.get('error', {}).get('code', 'operation_failed')
@@ -867,12 +885,16 @@ class ToolRegistry:
             if name.startswith(('site_knowledge.', 'knowledge.')) and hasattr(error, 'code'):
                 return {'ok': False, 'tool': name, 'error': {'code': error.code, 'message': str(error)},
                         'result': {'status': 'not_started', 'side_effects_uncertain': False}}
-            certain_preflight = (name == 'operation.quarantine'
+            certain_preflight = (name in GOAL_SPECS and not context.get('goal_effects_started')
+                                or name == 'operation.quarantine'
                                 or name in {'files.create','files.mkdir','files.append','files.copy','files.replace'}
                                 and not context.get('filesystem_effect_started'))
             return redact({'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {'status':'not_started','side_effects_uncertain':False} if certain_preflight else {},'error':{'code':'policy_denied','message':str(error)}})
         except ReconciliationRequired as error: return {"ok":False,"tool":name,"result":{"status":"uncertain" if error.side_effects_uncertain else "not_started","side_effects_uncertain":error.side_effects_uncertain},"error":{"code":"reconciliation_conflict","message":str(error)}}
         except (ValueError,TypeError) as error:
+            if name in GOAL_SPECS:
+                return {'ok': False, 'tool': name, 'result': {'status': 'not_started', 'side_effects_uncertain': bool(context.get('goal_effects_started'))},
+                        'error': {'code': 'invalid_arguments', 'message': str(error)}}
             if name in REA_SPECS:
                 return self._rea_failure(name, context, 'invalid_arguments', str(error))
             review = getattr(error, "report", None)
@@ -883,6 +905,10 @@ class ToolRegistry:
                                               "message": review.get("summary", str(error))}}, context)
             return redact({'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {},'error':{'code':'invalid_arguments','message':str(error)}})
         except asyncio.TimeoutError:
+            if name in GOAL_SPECS:
+                return {'ok': False, 'tool': name, 'result': {'status': 'uncertain' if context.get('goal_effects_started') else 'not_started',
+                        'side_effects_uncertain': bool(context.get('goal_effects_started'))},
+                        'error': {'code': 'timeout', 'message': 'Goal slice timed out; inspect its original state before any retry.'}}
             if name in REA_SPECS:
                 return {'ok': False, 'tool': name,
                         'result': {'status': 'uncertain', 'side_effects_uncertain': True},
@@ -892,6 +918,10 @@ class ToolRegistry:
                         'error':{'code':'timeout','message':'File validation timed out before any write was attempted'}}
             return {'ok':False,'tool':name,'result':{'side_effects_uncertain':context.get('research_effects_started',False)} if name=='research.perform' else {},'error':{'code':'timeout','message':'Local operation timed out; inspect partial effects before retrying'}}
         except Exception as error:
+            if name in GOAL_SPECS:
+                return {'ok': False, 'tool': name, 'result': {'status': 'uncertain' if context.get('goal_effects_started') else 'not_started',
+                        'side_effects_uncertain': bool(context.get('goal_effects_started'))},
+                        'error': {'code': 'operation_failed', 'message': 'Goal evidence failed; inspect the current page without replaying actions.'}}
             if name in REA_SPECS:
                 return self._rea_failure(name, context, 'operation_failed', 'REA validation, execution or evidence storage failed; inspect its retained state.')
             if name.startswith('knowledge.'):
@@ -1068,6 +1098,7 @@ class ToolRegistry:
             return await abandon_uncertain_browser_call(context['session_state'], context['browser'], **args)
         if name == 'browser.diagnostics':
             return browser_diagnostics(context['session_state'], context['browser'])
+        if name in GOAL_SPECS: return await execute_goal(args, context)
         if name in NAVIGATION_SPECS: return await execute_navigation(name, args, context, policy)
         if name in INSPECTION_SPECS: return await execute_inspection(name, args, context)
         if name == 'browser.screenshot':

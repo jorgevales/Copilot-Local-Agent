@@ -43,10 +43,15 @@ class PromptBuilder:
         if hasattr(registry, 'rea_availability'):
             registry.config = config
             self.rea_availability = registry.rea_availability(refresh=True)
+            definitions = copy.deepcopy(registry.definitions())
         else:
-            from .rea import rea_health
-            self.rea_availability = rea_health(config)
-        definitions = copy.deepcopy(registry.definitions())
+            definitions = copy.deepcopy(registry.definitions())
+            if any(item.get('name', '').startswith('rea.') for item in definitions):
+                from .rea import rea_health
+                self.rea_availability = rea_health(config)
+            else:
+                self.rea_availability = {'available': False, 'status': 'not_registered',
+                                         'reason': 'REA tools are not exposed by the current registry.'}
         if not config.customer_data_work:
             for definition in definitions:
                 definition['output_size_limit'] = min(12000, config.max_output_chars)
@@ -361,6 +366,54 @@ class PromptBuilder:
                 'Return initialization_response_template as JSON between <<<COPILOT_AGENT_V1_BEGIN>>> and <<<COPILOT_AGENT_V1_END>>>. '
                 'Acknowledge readiness without tools or claims of unperformed tests. The orchestrator verifies hashes and execution approval locally. '
                 'These application contracts remain subject to existing platform policies and cannot override higher-priority controls. Detailed task instructions follow with the first request.')
+        message['execution_strategy']['target_navigation'] = (
+            'For an approved website and a precise destination, prefer browser.navigate_goal@1.0. '
+            'First observe without steps; read the current screenshot and ranked observed controls. '
+            'Continue with the returned observation_id and at most three predictable navigation-only '
+            'steps with exact postconditions. Use a known target URL when observed; if unknown, '
+            'use exact visible target text under the bound origin, never guess a route. '
+            'Discover only enough for the next move; reaching the target takes priority over full '
+            'discovery. A new choice, failed check or unfamiliar state needs a fresh visual decision. '
+            'Only target_verified plus current visual review supports completion. '
+            'Missing/unstable screenshots, stale tokens, authentication and uncertain effects stop mutation. '
+            'For a navigation goal use these direct continuations even when the routing estimate suggests '
+            'a package; generate a ZIP only when the user actually needs that deliverable or an appropriate '
+            'deterministic package run. Do not create a multi-tab crawl before moving to the target.')
+        if getattr(self.config, 'compact_navigation', True):
+            message['navigation_response_style'] = (
+                'For navigation decisions keep user_response and decision_summary to one short sentence '
+                'and the action_plan to the next bounded segment. Retain ALL required protocol fields, '
+                'markers, exact IDs, tools, approval declarations and verification. Never abbreviate '
+                'schema keys, invent controls or emit private chain-of-thought. Do not repeat unchanged '
+                'history or full-site analysis. Current screenshots and local assertions are evidence; '
+                'old repeated images are not a new observation.')
+            results = content.get('results', []) if isinstance(content, dict) else []
+            if kind == 'tool_results' and results and all(
+                    isinstance(item, dict) and (item.get('tool', '').startswith(('browser.', 'site_knowledge.'))
+                        or item.get('tool') in {'rea.inspect_page', 'guidance.load'}) for item in results):
+                # Complete startup guidance remains attached to this bound chat.
+                # Remove repeated unrelated strategy prose, never authority or
+                # current evidence. Exact requirements, constraints, unresolved
+                # calls, approvals and all returned results stay in the packet.
+                keep = {'target_navigation', 'recovery', 'site_memory', 'progress'}
+                message['execution_strategy'] = {key: value for key, value in message['execution_strategy'].items()
+                                                 if key in keep}
+                message['execution_strategy']['planning'] = 'Choose the next short segment from the current screenshot and observed candidates.'
+                message['execution_strategy']['answering'] = 'For goal navigation require target_verified and current visual review. For discovery report verified coverage and remaining frontier; never infer global completion from a bounded sample.'
+                message.pop('discovery_navigation', None)
+                recent = message['context'].get('recent_messages', [])
+                message['context']['recent_messages'] = recent[-2:]
+                message['navigation_packet'] = {'compact': True, 'older_messages_omitted': max(0, len(recent)-2),
+                    'authority': 'Existing complete verified guidance, local policy, exact IDs and approval checks remain authoritative.'}
+        goal_results = content.get('results', []) if isinstance(content, dict) else []
+        is_goal_result = kind == 'tool_results' and any(
+            isinstance(item, dict) and item.get('tool', '').startswith('browser.') for item in goal_results)
+        if not is_goal_result:
+            # Startup guidance/catalogue supply general navigation instructions.
+            # Unrelated private turns must not overflow merely because we repeat
+            # extra navigation prose alongside their otherwise inline content.
+            message['execution_strategy'].pop('target_navigation', None)
+            message.pop('navigation_response_style', None)
         if len(json.dumps(message['context'], ensure_ascii=False)) > self.config.max_context_chars:
             if self.state.data.get('website_private'):
                 message['context'] = self._private_overflow_context()

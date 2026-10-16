@@ -24,11 +24,14 @@ from .protocol import ProtocolError, parse_response, correction_message
 from .state import canonical_hash, operation_domains, recoverable_capture_request_id, browser_inventory
 from .sync import CreatedSync
 from .attachments import AttachmentQueue, SUPPORTED_EXTENSIONS, TEXT_EXTENSIONS, upload_name
+from .performance import PerformanceTrace
 
 
 class Orchestrator:
     def __init__(self, config, browser, registry, state, approval_decider=None, display=print, event_sink=None, cancel_event=None, steering_poll=None, steering_complete=None):
         self.config, self.browser, self.registry, self.state = config, browser, registry, state
+        self.performance = PerformanceTrace(state.directory, enabled=getattr(config, 'performance_enabled', True))
+        browser.performance_trace = self.performance
         if hasattr(registry, 'config'):
             registry.config = config
         # Persisted target observations never restore a session authorization.
@@ -70,6 +73,7 @@ class Orchestrator:
         self.approved_attachment_hashes = {}
         self.approved_attachment_upload_names = {}
         self.base_context = {'config': config, 'session_dir': state.directory, 'browser': browser, 'session_state': state, 'approved': False,
+                             'performance_trace': self.performance,
                              'path_policy': self.policy,
                              'pending_image_attachments': [], 'created_snapshots': {},
                              'pending_file_attachments': [],
@@ -246,6 +250,9 @@ class Orchestrator:
                                request_id=request_id, validated=False, visible_progress=True)
             return
         preview = public_preview(event.get('raw', ''), self.state.session_id, request_id)
+        if any(preview.get(key) for key in ('user_response', 'action_plan')) and not self.live_seen.get(('timing', request_id)):
+            self.performance.record('first_useful_output', request_id=request_id)
+            self.live_seen[('timing', request_id)] = True
         self.feedback.record('Copilot', 'Streaming preview retained for diagnostics.',
                              request_id=request_id, validated=False,
                              generation_ended=event.get('generation_ended'), fields=preview)
@@ -928,6 +935,7 @@ class Orchestrator:
         return target
 
     async def _send(self, kind: str, content, extra_attachments=()):
+        started_preparation = time.monotonic()
         self.state.repair_browser_observations()
         await self._finish_next_turn_preparation()
         from .reconciliation import close_quarantined_tabs
@@ -939,7 +947,8 @@ class Orchestrator:
             self._prepared_initialization = None
         else:
             request_id = uuid.uuid4().hex
-            text, attachments = self.prompts.build(kind, redact(content), request_id)
+            with self.performance.span('prompt_assembly', request_id=request_id):
+                text, attachments = self.prompts.build(kind, redact(content), request_id)
         pending_images = self.base_context['pending_image_attachments']
         pending_files = self.base_context['pending_file_attachments']
         pending_visuals = self.base_context.get('pending_visual_attachments', [])
@@ -972,7 +981,7 @@ class Orchestrator:
             message['automatic_visual_evidence'] = {
                 'files': [path.name for path in selected_visuals],
                 'repeated_previous_evidence': not bool(pending_visuals),
-                'instruction': 'Read the labeled BEFORE and AFTER action screenshots in the attached PDF. '
+                'instruction': 'Read the labeled current DECISION view when supplied and the BEFORE/AFTER action evidence. '
                                'Use recorded action identities and capture times. Repeated evidence describes '
                                'the last observed browser state; it is not a new observation.'}
             text = json.dumps(message, ensure_ascii=False, indent=2)
@@ -1014,6 +1023,9 @@ class Orchestrator:
         if upload_paths:
             self.feedback.emit('System', 'Upload files: ' + ', '.join(path.name for path in upload_paths), request_id=request_id)
         self.state.begin_submission(request_id, text)
+        self.performance.record('attachment_preparation', request_id=request_id,
+                                duration_ms=(time.monotonic() - started_preparation) * 1000,
+                                characters=len(text), bytes=sum(entry.get('size', 0) for entry in snapshot))
         self.state.data['status'] = 'submitting'
         self.state.save()
         def committed():
@@ -1032,8 +1044,9 @@ class Orchestrator:
                 self.base_context['last_visual_attachments'] = list(map(str, selected_visuals))
             self.state.save()
         try:
-            raw = await self.browser.exchange(text, request_id, attachments=upload_paths,
-                                              on_submitted=committed)
+            with self.performance.span('browser_exchange', request_id=request_id):
+                raw = await self.browser.exchange(text, request_id, attachments=upload_paths,
+                                                  on_submitted=committed)
         except SubmissionNotSentError:
             self.state.reconcile_submission(False)
             self.state.data['status'] = 'blocked'
@@ -1055,6 +1068,8 @@ class Orchestrator:
             self.state.data['status'] = 'blocked'
             self.state.save()
             raise
+        finally:
+            self.performance.flush()
         self._record_raw_response(raw, request_id)
         return raw, request_id
 
@@ -1095,8 +1110,79 @@ class Orchestrator:
                 pass
         limit = min(getattr(self.config, 'max_composer_chars', 20000),
                     exposed if type(exposed) is int and exposed > 0 else HISTORICAL_COMPOSER_LIMIT)
+        private = self.state.data.get('website_private', False)
+        if private:
+            message = json.loads(text)
+            dense = json.dumps(message, ensure_ascii=False, separators=(',', ':'))
+            if composer_characters(dense) > limit - 128:
+                # Remove repeated strategy prose before considering transport.
+                # Live data, current routing, exact approvals and constraints
+                # remain intact. The verified startup contracts still apply.
+                strategy = message.get('execution_strategy', {})
+                keep = {'planning', 'answering', 'recovery', 'progress', 'target_navigation'}
+                message['execution_strategy'] = {key: value for key, value in strategy.items() if key in keep}
+                discovery = message.get('discovery_navigation')
+                if isinstance(discovery, dict):
+                    message['discovery_navigation'] = {key: value for key, value in discovery.items()
+                        if key not in {'planning', 'navigation', 'synthesis', 'knowledge'}}
+                for key in ('local_crawl4ai_instruction', 'local_tool_request_instruction'):
+                    message.pop(key, None)
+                message['strategy_reference'] = 'Use the verified startup guidance and tool catalogue for other strategies. All local policy and approval checks still apply.'
+                text = json.dumps(message, ensure_ascii=False, separators=(',', ':'))
+                recent = message.get('context', {}).get('recent_messages', [])
+                omitted = 0
+                while recent and composer_characters(text) > limit - 128:
+                    recent.pop(0)
+                    omitted += 1
+                    message['older_messages_omitted_for_transport'] = omitted
+                    text = json.dumps(message, ensure_ascii=False, separators=(',', ':'))
+                if composer_characters(text) > limit - 128:
+                    routing = message.get('research_routing')
+                    if isinstance(routing, dict):
+                        message['research_routing'] = {key: value for key, value in routing.items()
+                            if key in {'selector', 'rea', 'current_request'}}
+                    # The exact same storage roots remain in context.constraints.
+                    message.pop('navigation_knowledge_root', None)
+                    text = json.dumps(message, ensure_ascii=False, separators=(',', ':'))
+                if composer_characters(text) > limit - 128:
+                    routing = message.get('research_routing', {})
+                    health = routing.get('rea')
+                    expected = self.prompts.rea_availability
+                    # Only reference the exact snapshot already in the verified
+                    # startup catalogue. Never rewrite current task/tool data or
+                    # independently supplied availability claims.
+                    self.prompts.verify_guidance()
+                    catalogue = json.loads(self.prompts.catalogue.read_text(encoding='utf-8'))
+                    bound = any(item.get('name') == 'rea.inspect_page' and item.get('availability') == expected
+                                for item in catalogue.get('tools', []))
+                    if bound and health == expected:
+                        reference = {key: health[key] for key in
+                                     ('available', 'status', 'selected_backend', 'requested_backend') if key in health}
+                        reference['details_reference'] = {'startup_component': 'tool-catalogue.json',
+                            'tool': 'rea.inspect_page', 'field': 'availability', 'sha256': canonical_hash(expected)}
+                        routing['rea'] = reference
+                        for route in routing.get('current_request', []):
+                            if isinstance(route, dict) and route.get('rea') == expected:
+                                route['rea'] = dict(reference)
+                        text = json.dumps(message, ensure_ascii=False, separators=(',', ':'))
+                if composer_characters(text) > limit - 128:
+                    context = message.get('context', {})
+                    startup_hashes = self.prompts.bundle.get('sha256_by_path', {})
+                    prior = context.get('attachments', [])
+                    kept = [item for item in prior if not (isinstance(item, dict)
+                        and item.get('path') in startup_hashes
+                        and item.get('sha256') == startup_hashes[item['path']])]
+                    if len(kept) != len(prior):
+                        context['attachments'] = kept
+                        message['startup_upload_history_reference'] = {
+                            'omitted_records': len(prior) - len(kept),
+                            'instruction': 'The hash-verified startup references remain authoritative in this chat; repeated upload history only was omitted. Current user attachments and all policy state remain inline.'}
+                        text = json.dumps(message, ensure_ascii=False, separators=(',', ':'))
         packed, paths = pack_outbound(text, attachments, self.state.directory / 'tool-results',
-            composer_limit=limit, max_file_bytes=min(self.config.max_attachment_bytes, 8 * 1024 * 1024))
+            composer_limit=limit, max_file_bytes=min(self.config.max_attachment_bytes, 8 * 1024 * 1024),
+            # Existing current tool-result artifacts retain their explicit
+            # transport contract; raw private conversation cannot spill.
+            allow_content_attachments=not private or json.loads(text).get('kind') in {'tool_results', 'initialize'})
         if len(paths) > len(attachments):
             self.feedback.emit('System', 'Long response compiled into ' + str(len(paths) - len(attachments)) +
                 ' structured result attachment(s); composer text is ' + str(composer_characters(packed)) + ' characters.')
@@ -1137,8 +1223,9 @@ class Orchestrator:
             else:
                 raw, request_id = await self._send(kind, content, extra_attachments if attempt == 0 else ())
             try:
-                response = parse_response(raw, self.state.session_id, request_id, self.registry, self.state.data['response_ids'])
-                self._preflight(response)
+                with self.performance.span('validation', request_id=request_id):
+                    response = parse_response(raw, self.state.session_id, request_id, self.registry, self.state.data['response_ids'])
+                    self._preflight(response)
                 if any(call['name'].startswith(('browser.', 'documents.', 'site_knowledge.', 'discovery.', 'navigation.'))
                        or call['name'] == 'files.transfer_to_copilot' for call in response['tool_requests']):
                     self.state.data['website_task_active'] = True
@@ -1338,8 +1425,10 @@ class Orchestrator:
     async def turn(self, user_input: str, attachments=(), active_run_id=None, recovered_response=None):
         self._active_turn_run_id = active_run_id
         try:
-            return await self._turn(user_input, attachments, recovered_response)
+            with self.performance.span('task_total'):
+                return await self._turn(user_input, attachments, recovered_response)
         finally:
+            self.performance.flush()
             pending, self._pending_steering_items = self._pending_steering_items, []
             if pending:
                 status = 'cancelled' if self.cancel_event.is_set() else 'failed'
@@ -1357,6 +1446,10 @@ class Orchestrator:
 
     async def _turn(self, user_input: str, attachments=(), recovered_response=None):
         self.cancel_event.clear()
+        goal_outcomes = {}
+        goal_completion_corrections = 0
+        if recovered_response is None:
+            self.browser._goal_navigation = {}
         self.base_context.pop('discovery_synthesis_pending', None)
         self.base_context.pop('discovery_accepted_at', None)
         self.base_context.pop('discovery_accepted_monotonic', None)
@@ -1424,6 +1517,8 @@ class Orchestrator:
         while True:
             incoming = await self._take_steering(user_input)
             if incoming:
+                self.browser._goal_navigation = {}
+                goal_outcomes.clear()
                 if kind == 'tool_results' and isinstance(content, dict):
                     incoming['content']['completed_tool_results'] = content.get('results', [])
                     incoming['content']['not_executed_prior_plan'] = content.get('not_executed', [])
@@ -1449,6 +1544,8 @@ class Orchestrator:
             if incoming:
                 # A newly arrived correction supersedes an unexecuted response plan.
                 # Re-prompt Copilot before any local tool from that plan can run.
+                self.browser._goal_navigation = {}
+                goal_outcomes.clear()
                 kind, content = 'steering', incoming['content']
                 round_attachments = incoming['attachments']
                 round_steering_ids.extend(incoming['message_ids'])
@@ -1476,6 +1573,17 @@ class Orchestrator:
                     'failed_package_review': redact(package_review_failure)}
                 continue
             if response['response_type'] == 'final':
+                unfinished = [r for r in goal_outcomes.values() if r.get('status') != 'target_verified'
+                              or not r.get('visual_context', {}).get('queued_for_copilot')]
+                if unfinished and response.get('completion_status') == 'complete':
+                    if goal_completion_corrections < 2 and all(r.get('status') == 'needs_visual_decision' for r in unfinished):
+                        goal_completion_corrections += 1
+                        kind, content = 'tool_results', {'navigation_results': unfinished,
+                            'instruction': 'The target has not been verified. Read the current screenshot and continue '
+                            'with browser.navigate_goal and its observation_id. Do not claim completion from an intermediate page.'}
+                        continue
+                    response = dict(response, completion_status='blocked',
+                                    user_response='Navigation target is unverified; inspect the current visual evidence and returned boundary.')
                 if delivery.get('mode', 'none') != 'none' and delivery_denied:
                     response = dict(response, completion_status='blocked', user_response='File delivery was denied; no complete delivery is claimed. ' + response['user_response'])
                 if delivery.get('mode', 'none') != 'none' and not delivery_denied and not self._delivery_verified(delivery, delivery_reports):
@@ -1857,7 +1965,8 @@ class Orchestrator:
                 try:
                     from .automatic_visuals import relevant as visual_companion
                     visual_allowance = 28 if visual_companion(call['name'], call['arguments']) else 0
-                    result = await asyncio.wait_for(self.registry.execute(call['name'], call['arguments'], context), timeout=float(definition.get('timeout', definition.get('limits', {}).get('timeout_seconds', 30))) + visual_allowance + 1)
+                    with self.performance.span('tool', request_id=response.get('request_id'), call_id=call['call_id']):
+                        result = await asyncio.wait_for(self.registry.execute(call['name'], call['arguments'], context), timeout=float(definition.get('timeout', definition.get('limits', {}).get('timeout_seconds', 30))) + visual_allowance + 1)
                 except asyncio.TimeoutError:
                     result = {'ok': False, 'error': {'code': 'timeout', 'message': 'Tool timed out; inspect partial effects before any retry.'}}
                 except Exception as exc:
@@ -1871,6 +1980,9 @@ class Orchestrator:
                             except Exception:
                                 pass  # The tool outcome remains authoritative.
                 self.state.finish_call(call['call_id'], result)
+                self.performance.flush()
+                if call['name'] == 'browser.navigate_goal':
+                    goal_outcomes[call['arguments']['task_id']] = result.get('result', {})
                 recovery = self._recover_uncertain_knowledge().get(call['call_id'])
                 if recovery:
                     result.setdefault('result', {})['recovery'] = recovery
@@ -1897,7 +2009,7 @@ class Orchestrator:
                     self.base_context['site_namespace_id'] = result.get('result', {}).get('namespace_id')
                     self.base_context['web_document_tickets'].clear()
                     self.base_context['document_catalogues'].clear()
-                if (result.get('ok') or call['name'] == 'browser.customer_summary' and result.get('result', {}).get('identity_verified')) and call['name'] in {'browser.plan', 'browser.customer_summary', 'browser.tabs'}:
+                if (result.get('ok') or call['name'] == 'browser.customer_summary' and result.get('result', {}).get('identity_verified')) and call['name'] in {'browser.plan', 'browser.navigate_goal', 'browser.customer_summary', 'browser.tabs'}:
                     if call['name'] == 'browser.tabs' and call['arguments'].get('operation') == 'reset':
                         self.base_context.pop('customer_key', None)
                         self.base_context['web_document_tickets'].clear()
@@ -1977,6 +2089,8 @@ class Orchestrator:
                              'reason': 'Earlier prerequisite failed or was denied; not executed.'}
                             for call in execution_calls if call['call_id'] not in completed_ids]
             if interrupted_by_steering:
+                self.browser._goal_navigation = {}
+                goal_outcomes.clear()
                 kind, content = 'steering', interrupted_by_steering['content']
                 content['completed_tool_results'] = redact(results)
                 content['not_executed_prior_plan'] = not_executed

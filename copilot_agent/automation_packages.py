@@ -854,7 +854,7 @@ def validate_manifest(manifest: dict, archive_files: dict[str, bytes], registry=
                            "code_runner", "copilot.download", "files.transfer_to_copilot",
                            "archives.extract", "permissions.grant", "permissions.edit",
                            "permissions.renew", "operation.quarantine",
-                           "operation.reconcile", "browser.reconcile", "browser.recover_uncertain"}
+                           "operation.reconcile", "browser.reconcile", "browser.recover_uncertain", "browser.navigate_goal"}
         protected_tools.add("files.grant_path")
         if ref["id"] in protected_tools or ref["id"].startswith("permissions."):
             raise PackageError("This tool requires its dedicated local approval or recovery handoff and cannot run as a package stage: " + ref["id"])

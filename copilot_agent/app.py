@@ -468,7 +468,7 @@ def configure_isolated_test_workspace(config, requested_path, *, resume_session=
     return target
 
 
-def configure_local_knowledge_test(config, requested_path):
+def configure_local_knowledge_test(config, requested_path, *, resume_session=None):
     """Enable an explicitly selected local C: store without changing S: defaults."""
     local_app_data = os.environ.get('LOCALAPPDATA')
     if not local_app_data:
@@ -477,7 +477,11 @@ def configure_local_knowledge_test(config, requested_path):
     target = Path(requested_path).expanduser().resolve()
     if target.drive.upper() != 'C:' or target.parent != allowed_parent:
         raise ValueError('The local knowledge test store must be a direct child of LocalAppData\\CopilotLocalAgent\\live-navigation-tests.')
-    if target.exists() and any(target.iterdir()):
+    if resume_session is not None:
+        session = Path(resume_session).expanduser().resolve()
+        if session.parent != target / 'runtime' / 'sessions' or not (session / 'session.json').is_file():
+            raise ValueError('Local test resume must name an existing session directly under this test store runtime/sessions.')
+    elif target.exists() and any(target.iterdir()):
         raise ValueError('The local knowledge test store must be empty; existing files are preserved.')
     config.select_storage(target)
     config.knowledge_directory = target / 'Discoveries knowledge'
@@ -498,7 +502,7 @@ async def run(args):
         test_workspace = configure_isolated_test_workspace(config, test_workspace, resume_session=args.resume)
         system('Isolated local proof mode: all agent storage and file roots are confined to ' + str(test_workspace))
     elif local_knowledge_test is not None:
-        local_knowledge_test = configure_local_knowledge_test(config, local_knowledge_test)
+        local_knowledge_test = configure_local_knowledge_test(config, local_knowledge_test, resume_session=args.resume)
         system('Explicit local knowledge test mode: this run uses only ' + str(local_knowledge_test))
     else:
         from .storage import discoveries_storage

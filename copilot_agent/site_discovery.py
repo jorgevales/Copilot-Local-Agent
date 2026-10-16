@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import time
+import uuid
 from pathlib import Path
 from io import BytesIO
 from PIL import Image
@@ -14,9 +15,14 @@ from .browser_inspection import SNAPSHOT
 from .local_crawler import knowledge_root, saved_html
 from .persistence import io_path, write_json
 from .screenshot_evidence import _pdf, MASK, METRICS
-from .policy import PolicyError
-from .web_navigation import get_navigation_page, _install_origin_guard
+from .policy import PolicyError, config_value
+from .web_navigation import get_navigation_page, _install_origin_guard, safe_url
 from .knowledge_views import evidence_folder, website_storage_root
+
+UNSAFE_CONTROL = re.compile(
+    r'delete|remove|destroy|sign.?out|log.?out|submit|save|purchase|confirm|'
+    r'eliminar|borrar|guardar|enviar|confirmar|cerrar[\s_/-]*sesi[oó]n|'
+    r'(?:cambiar|change).{0,20}(?:correo|email|contrase[nñ]a|password)', re.I)
 
 SPEC = ({'type': 'object', 'properties': {
     'title': {'type': 'string', 'minLength': 1, 'maxLength': 120},
@@ -76,6 +82,7 @@ async def discover(args, context):
     if not context.get('approved'):
         raise PolicyError('Current session authorization is required for discovery.')
     page = get_navigation_page(context, args.get('tab_id'))
+    compact = config_value(context.get('config', {}), 'compact_navigation', False) is True
     await _install_origin_guard(page, context, page.url)
     start_url = page.url
     folder = evidence_folder(context, start_url, 'browser',
@@ -131,7 +138,9 @@ async def discover(args, context):
             for frame in list(page.frames):
                 async def collect(frame=frame):
                     values = await asyncio.gather(frame.content(), frame.evaluate(SNAPSHOT, {'maxNodes': 2000}),
-                        frame.evaluate(INVENTORY), frame.locator('body').aria_snapshot(), frame.evaluate(SOURCES), return_exceptions=True)
+                        frame.evaluate(INVENTORY), frame.locator('body').aria_snapshot(),
+                        frame.evaluate('() => ({mode:"compact", limitation:"Additional script/CSS fetches deferred; observed network bodies retained separately."})')
+                        if compact else frame.evaluate(SOURCES), return_exceptions=True)
                     result = {'url': frame.url}
                     for name, value in zip(('html', 'dom', 'resources', 'accessibility', 'delivered_sources'), values):
                         if isinstance(value, BaseException):
@@ -148,6 +157,11 @@ async def discover(args, context):
                 raw = await pixels
                 metrics = await page.evaluate(METRICS)
                 if page.url == state['url']:
+                    viewport = folder / ('state-' + str(state['id']) + '-' + uuid.uuid4().hex + '-viewport.png')
+                    with io_path(viewport).open('xb') as handle:
+                        handle.write(raw)
+                    state['viewport'] = {'path': str(viewport), 'bytes': len(raw),
+                                         'sha256': hashlib.sha256(raw).hexdigest()}
                     with Image.open(BytesIO(raw)) as source:
                         image = source.convert('RGB')
                     if len(pictures) < 12:
@@ -156,7 +170,9 @@ async def discover(args, context):
                             'scroll': {'x': metrics['x'], 'y': metrics['y']}, 'kind': 'viewport'}, image))
                     else:
                         image.close()
-                        data['gaps'].append({'state': state['id'], 'collector': 'screenshots', 'error': 'Twelve-picture visual sample limit'})
+                        data['gaps'].append({'state': state['id'], 'collector': 'visual_packet',
+                            'error': 'Twelve-picture PDF sample limit; full viewport retained locally',
+                            'viewport': str(viewport)})
                     if state['id'] == 0 and len(pictures) <= 10:
                         for caption, box in [('upper navigation and controls closeup', (0, 0, image.width, max(1, image.height//2))),
                                              ('lower content and controls closeup', (0, image.height//2, image.width, image.height))]:
@@ -197,13 +213,13 @@ async def discover(args, context):
                 for node in frame_state.get('resources', {}).get('controls', []):
                     href = node.get('href')
                     if (str(node.get('tag', '')).lower() == 'a' and href and href not in data['frontier']
-                            and not re.search(r'delete|destroy|sign.?out|log.?out|remove', href, re.I)):
+                            and not UNSAFE_CONTROL.search(str(node.get('label', '')) + ' ' + href)):
                         data['frontier'].append(href)
             if data['actions'] and data['actions'][-1]['status'] in {'clicked_not_yet_verified', 'click_failed_observe'}:
                 data['actions'][-1].update(to_state=state['id'], observed_outcome=outcome)
             write_json(checkpoint, data)
-            if (not args.get('explore', True) or outcome['outcome'] != 'stable'
-                    or iteration + 1 >= args.get('max_states', 12) or time.monotonic() >= deadline):
+            if (not args.get('explore', True) or outcome['outcome'] != 'stable' or not state.get('viewport')
+                    or iteration + 1 >= args.get('max_states', 12) or deadline-time.monotonic() < 5):
                 break
             acted = False
             for frame in list(page.frames):
@@ -212,13 +228,14 @@ async def discover(args, context):
                     control = controls.nth(index)
                     try:
                         label = (await control.inner_text(timeout=700))[:200]
+                        label = label or (await control.get_attribute('aria-label', timeout=700) or '')[:200]
                         href = await control.get_attribute('href', timeout=700)
                         kind = await control.get_attribute('type', timeout=700)
                         signature = json.dumps([page.url, frame.url, index, label, href])
                         if signature in data['attempted']:
                             continue
                         data['attempted'].append(signature)
-                        if kind == 'submit' or re.search(r'delete|remove|destroy|sign.?out|log.?out|submit|save|purchase|confirm', label+' '+(href or ''), re.I):
+                        if kind == 'submit' or UNSAFE_CONTROL.search(label+' '+(href or '')):
                             continue
                         if not await control.is_visible() or not await control.is_enabled():
                             continue
@@ -284,7 +301,7 @@ async def discover(args, context):
         io_path(guide).write_text('# '+args['title']+'\n\nRead coverage first, then scoped task evidence (HTML, DOM, accessibility, scripts/images), then network sources. These captures are not sanitized reusable knowledge.\n\nTask evidence checkpoint: '+str(checkpoint)+'\nNavigation actions are observations, not replay-verified automation tools.\n', encoding='utf-8')
         files.insert(0, guide)
         attachments = context.setdefault('pending_file_attachments', [])
-        reserved_images = len(context.get('pending_image_attachments', []))
+        reserved_images = len(context.get('pending_image_attachments', [])) + max(1, len(context.get('pending_visual_attachments', [])))
         visual = None
         if pictures:
             for record, _ in pictures:
@@ -311,15 +328,34 @@ async def discover(args, context):
             payload = io_path(path).read_bytes()
             manifest.append({'path': str(path), 'bytes': len(payload), 'sha256': hashlib.sha256(payload).hexdigest(), 'attached': False})
             byte_limit = (20 if path.suffix == '.pdf' else 8) * 1024 * 1024
-            if len(payload) <= byte_limit and attachment_slots(attachments + [None]*reserved_images):
+            if not compact and len(payload) <= byte_limit and attachment_slots(attachments + [None]*reserved_images):
                 attachments.append(str(path))
                 manifest[-1]['attached'] = True
+        for state in data['states']:
+            if state.get('viewport'):
+                manifest.append({**state['viewport'], 'state': state['id'], 'attached': False,
+                                 'purpose': 'Full per-state viewport; PDF is a bounded sample'})
         write_json(folder / 'manifest.json', manifest)
         write_json(checkpoint, data)
         uncertain = bool(data['actions'] and 'to_state' not in data['actions'][-1])
+        coverage = {'routes': sorted({safe_url(item['url']) for item in data['states']}),
+                    'frontier': sorted({safe_url(url) for url in data['frontier']
+                                       if url not in {item['url'] for item in data['states']}}),
+                    'states': [{'id': item['id'], 'url': safe_url(item['url']),
+                                'settling': item['settling'], 'viewport': item.get('viewport'),
+                                'forms': [form for frame in item['frames']
+                                          for form in frame.get('dom', {}).get('application', {}).get('forms', [])]}
+                               for item in data['states']],
+                    'limitations': ['Observed safe frontier only; dynamic/deep states and server implementation are not proven complete.',
+                                    'PDF is sampled; per-state viewports are in the local manifest.',
+                                    'Additional source fetching is deferred in compact mode.' if compact else 'Source capture is bounded.']}
+        if compact:
+            write_json(folder / '00-COVERAGE-SUMMARY.json', coverage)
         return {'status': 'uncertain' if uncertain else 'partial', 'knowledge_directory': str(folder), 'checkpoint': str(checkpoint),
                 'evidence_kind': 'raw_task_evidence_not_reusable_knowledge',
-                'states_captured': len(data['states']), 'actions': len(data['actions']), 'files': manifest,
+                'states_captured': len(data['states']), 'actions': len(data['actions']),
+                'files': [] if compact else manifest, 'manifest_path': str(folder / 'manifest.json'),
+                'compact': compact, 'coverage': coverage if compact else None,
                 'visual': visual, 'gaps': data['gaps'], 'side_effects_uncertain': uncertain,
                 'next_action': 'Read attached evidence and coverage. Resume browser.discover for untried controls; independently replay routes before generating tools.'}
     finally:

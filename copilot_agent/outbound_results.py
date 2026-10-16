@@ -19,7 +19,8 @@ def composer_characters(text):
     return len(text.encode('utf-16-le')) // 2
 
 
-def pack_outbound(text, attachments, directory, *, composer_limit=16000, max_file_bytes=MAX_RESULT_FILE_BYTES):
+def pack_outbound(text, attachments, directory, *, composer_limit=16000, max_file_bytes=MAX_RESULT_FILE_BYTES,
+                  allow_content_attachments=True):
     """Keep current results complete; never export historical private context.
 
     One ordinary batch becomes one JSON document with named sections and a
@@ -33,6 +34,8 @@ def pack_outbound(text, attachments, directory, *, composer_limit=16000, max_fil
         return text, list(attachments)
     if composer_characters(dense) <= budget:
         return dense, list(attachments)
+    if not allow_content_attachments:
+        raise PolicyError('Private live content exceeds the composer budget. No content was persisted, sent or truncated; narrow the current result before continuing.')
     slots = MAX_TOTAL_FILES - len(attachments)
     if slots < 1:
         raise PolicyError('The long response needs an attachment slot. Keep at most 18 other files in this message; nothing was sent or truncated.')

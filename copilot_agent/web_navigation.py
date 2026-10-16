@@ -15,6 +15,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from .policy import PolicyError, URLPolicy, config_value
 from .session_mode import fast_mode, website_policy
+from .performance import trace
 
 
 def _object(properties, required=()):
@@ -220,6 +221,8 @@ def _url_policy(context):
 
 def _same_origin(url, reference, context):
     resolved = _url_policy(context).resolve(urljoin(reference, url))
+    if context.get('goal_origin') and _origin(resolved) != _origin(context['goal_origin']):
+        raise PolicyError('Goal navigation cannot cross its original origin')
     if not fast_mode(context.get("config", {})) and _origin(resolved) != _origin(reference):
         raise PolicyError("Navigation crosses the exact website origin")
     return resolved
@@ -389,7 +392,8 @@ def _stop_state(snapshot, url):
 async def _snapshot(page, context, max_elements=60, max_text_chars=1200):
     _check_cancelled(context)
     _url_policy(context).resolve(page.url)
-    data = await page.evaluate(RECON_SCRIPT, {"limit": max_elements, "textLimit": max_text_chars})
+    with trace(context).span('structure', call_id=context.get('source_call_id')):
+        data = await page.evaluate(RECON_SCRIPT, {"limit": max_elements, "textLimit": max_text_chars})
     data.update({"url": safe_url(page.url), "origin": urlunsplit((*urlsplit(page.url)[:2], "", "", "")),
                  "observed_at": time.time(), "source": "authorised_live_dom", "state": _stop_state(data, page.url)})
     return data
@@ -403,6 +407,8 @@ async def _boundary(page, context):
             break
         await asyncio.sleep(.1)
     state = snapshot["state"]
+    if context.get('goal_origin') and snapshot.get('boundaries'):
+        raise NavigationStop('unexpected_dialog', 'An unexpected dialog requires a fresh visual decision')
     if state in {"authentication_required", "human_verification", "access_denied", "rate_limited", "server_error", "loading", "blank_page"}:
         raise NavigationStop(state, "Website boundary requires authorised user intervention")
     return {"url": snapshot["url"], "state": state, "observed_at": snapshot["observed_at"]}
@@ -733,7 +739,11 @@ def _compact_recon(snapshot, context):
     return result
 
 
-async def _execute_plan(args, context):
+class _TargetReached(Exception):
+    pass
+
+
+async def _execute_plan(args, context, stop_when=None):
     from .automatic_visuals import paired_browser_action
     state = _state(context)
     digest = plan_hash(args)
@@ -920,6 +930,8 @@ async def _execute_plan(args, context):
                            "url": safe_url(page.url)})
             record["results"].append(result)
             record["completed"].add(path)
+            if stop_when is not None and await stop_when(page):
+                raise _TargetReached()
 
     status = "verified"
     error = None
@@ -936,6 +948,8 @@ async def _execute_plan(args, context):
             record["last_verified"] = await _boundary(page, context)
             record["verified_raw_url"] = page.url
             record["verified_fingerprint"] = await _fingerprint(page)
+    except _TargetReached:
+        status = 'target_reached'
     except asyncio.CancelledError:
         status = "cancelled"
         if effect_in_progress:
@@ -955,7 +969,7 @@ async def _execute_plan(args, context):
               "uncertain_step": record["uncertain_step"], "metrics": counters,
               "side_effects_uncertain": bool(record["uncertain_step"]),
               "total_actions": record["total_actions"],
-              "next_action": "complete" if status == "verified" else "inspect_and_prepare_new_plan" if record["uncertain_step"] else "repair_precondition_then_resume_exact_plan"}
+              "next_action": "complete" if status in {"verified", "target_reached"} else "inspect_and_prepare_new_plan" if record["uncertain_step"] else "repair_precondition_then_resume_exact_plan"}
     if error:
         output["error"] = error
     return output
